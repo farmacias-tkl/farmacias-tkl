@@ -5,13 +5,13 @@ import type { UserRole } from "@prisma/client";
 // /perfil aparece en todos los roles (al final, antes de logout)
 // ---------------------------------------------------------------------------
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
-  SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/perfil"],
-  CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/perfil"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/mantenimiento","/tareas","/alertas","/perfil"],
-  BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/mantenimiento","/tareas","/perfil"],
-  HR:             ["/dashboard","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/perfil"],
+  SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
+  CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/perfil"],
+  BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/perfil"],
+  HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/perfil"],
   MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
-  ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
+  ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
 };
 
 // ---------------------------------------------------------------------------
