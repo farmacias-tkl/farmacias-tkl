@@ -135,14 +135,18 @@ export async function POST(req: NextRequest) {
   const plainPassword = generatePassword();
   const passwordHash  = await bcrypt.hash(plainPassword, 12);
 
+  // Normalizar strings vacíos a null para FK
+  const branchId   = data.branchId   && data.branchId   !== "" ? data.branchId   : null;
+  const employeeId = data.employeeId && data.employeeId !== "" ? data.employeeId : null;
+
   const user = await prisma.user.create({
     data: {
       name:              data.name,
       email:             data.email,
       role:              data.role,
       passwordHash,
-      branchId:          data.branchId ?? null,
-      employeeId:        data.employeeId ?? null,
+      branchId,
+      employeeId,
       active:            true,
       mustChangePassword:true,
     },

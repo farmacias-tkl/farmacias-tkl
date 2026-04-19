@@ -116,8 +116,9 @@ async function applyPatch(userId: string, data: any, actorId: string) {
   if (data.name       !== undefined) updates.name       = data.name;
   if (data.email      !== undefined) updates.email      = data.email;
   if (data.role       !== undefined) updates.role       = data.role;
-  if (data.branchId   !== undefined) updates.branchId   = data.branchId;
-  if (data.employeeId !== undefined) updates.employeeId = data.employeeId;
+  // Normalizar strings vacíos a null para FK
+  if (data.branchId   !== undefined) updates.branchId   = data.branchId   && data.branchId   !== "" ? data.branchId   : null;
+  if (data.employeeId !== undefined) updates.employeeId = data.employeeId && data.employeeId !== "" ? data.employeeId : null;
   if (data.active     !== undefined) updates.active     = data.active;
 
   const updated = await prisma.user.update({
