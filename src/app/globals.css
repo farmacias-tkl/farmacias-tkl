@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #f4f5f7;
+    color: #111827;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  ::-webkit-scrollbar       { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c8cdd5; border-radius: 99px; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+           transition-colors focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary  { @apply btn bg-blue-700 text-white hover:bg-blue-800 focus-visible:ring-blue-600; }
+  .btn-secondary { @apply btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50; }
+  .btn-danger   { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .btn-ghost    { @apply btn text-gray-600 hover:bg-gray-100 hover:text-gray-900; }
+
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm
+           placeholder-gray-400 transition-colors
+           focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500
+           disabled:bg-gray-50 disabled:text-gray-500;
+  }
+  .input-error { @apply border-red-400 focus:border-red-500 focus:ring-red-400; }
+  .label       { @apply block text-xs font-medium text-gray-600 mb-1; }
+  .error-msg   { @apply mt-1 text-xs text-red-600; }
+
+  .card       { @apply rounded-xl border border-gray-200 bg-white shadow-sm; }
+  .card-header { @apply flex items-center justify-between border-b border-gray-100 px-5 py-3; }
+  .card-body  { @apply px-5 py-4; }
+
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
+}

@@ -1,0 +1,366 @@
+// =============================================================================
+// Farmacias TKL — Schema Prisma Etapa 5 fix
+// Cambio: OvertimeRecord agrega approvedAt
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPERVISOR
+  CO_SUPERVISOR
+  BRANCH_MANAGER
+  HR
+  MAINTENANCE
+  OWNER
+  ADMIN
+}
+
+enum PositionScope {
+  ALL
+  SPECIFIC
+}
+
+enum AssignmentType {
+  PERMANENT
+  TEMPORARY_COVERAGE
+  ROTATION
+}
+
+enum AbsenceType {
+  SICKNESS
+  PERSONAL_REASON
+  NO_SHOW
+  LATE_NOTICE
+  MEDICAL_LEAVE
+  SPECIAL_LEAVE
+  SUSPENSION
+  OTHER
+}
+
+enum AbsenceStatus {
+  REPORTED
+  JUSTIFIED
+  UNJUSTIFIED
+  UNDER_REVIEW
+  CLOSED
+}
+
+enum ActionPlanStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CLOSED
+  CANCELLED
+}
+
+enum OvertimeStatus {
+  REPORTED
+  APPROVED
+  REJECTED
+}
+
+enum OvertimeReason {
+  ABSENCE_COVERAGE
+  VACATION_COVERAGE
+  UNDERSTAFFING
+  HIGH_DEMAND
+  OTHER
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  address   String?
+  phone     String?
+  active    Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users             User[]
+  employees         Employee[]
+  branchAssignments EmployeeBranchAssignment[]
+  positionScopes    PositionBranchScope[]
+  absenceRecords    AbsenceRecord[]
+  actionPlans       ActionPlan[]
+  overtimeRecords   OvertimeRecord[]
+
+  @@index([active])
+}
+
+model Position {
+  id               String        @id @default(cuid())
+  name             String        @unique
+  requiresCoverage Boolean       @default(false)
+  isRotatingRole   Boolean       @default(false)
+  scope            PositionScope @default(ALL)
+  active           Boolean       @default(true)
+  notes            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  branchScopes PositionBranchScope[]
+  employees    Employee[]
+
+  @@index([active])
+  @@index([requiresCoverage])
+}
+
+model PositionBranchScope {
+  id         String   @id @default(cuid())
+  positionId String
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([positionId, branchId])
+  @@index([branchId])
+}
+
+model Employee {
+  id              String    @id @default(cuid())
+  firstName       String
+  lastName        String
+  positionId      String
+  position        Position  @relation(fields: [positionId], references: [id])
+  currentBranchId String?
+  currentBranch   Branch?   @relation(fields: [currentBranchId], references: [id])
+  active          Boolean   @default(true)
+  hireDate        DateTime?
+  isRotating               Boolean @default(false)
+  zone                     String?
+  maxConcurrentAssignments Int     @default(1)
+  workScheduleNotes String?
+  notes             String?
+  userId            String? @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branchAssignments EmployeeBranchAssignment[]
+  absenceRecords    AbsenceRecord[]
+  actionPlans       ActionPlan[]
+  overtimeRecords   OvertimeRecord[]
+
+  @@index([currentBranchId])
+  @@index([positionId])
+  @@index([active])
+  @@index([isRotating])
+  @@index([lastName, firstName])
+}
+
+model EmployeeBranchAssignment {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  startDate  DateTime
+  endDate    DateTime?
+  type       AssignmentType @default(PERMANENT)
+  reason     String?
+  assignedByUserId String?
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId, endDate])
+  @@index([branchId])
+  @@index([type, endDate])
+}
+
+model AbsenceRecord {
+  id               String   @id @default(cuid())
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id])
+  branchId         String
+  branch           Branch   @relation(fields: [branchId], references: [id])
+  reportedByUserId String
+  startDate        DateTime
+  endDate          DateTime
+  absenceType      AbsenceType
+  status           AbsenceStatus @default(REPORTED)
+  hasCertificate   Boolean   @default(false)
+  certificateUntil DateTime?
+  notifiedAt       DateTime?
+  reasonDetail     String?
+  notes            String?
+  branchDetectedFromAssignment Boolean @default(false)
+  whatsappMessageId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([branchId])
+  @@index([startDate, endDate])
+  @@index([status])
+  @@index([absenceType])
+}
+
+// ---------------------------------------------------------------------------
+// ACTION PLAN
+// closedAt se completa automáticamente al pasar a COMPLETED, CLOSED o CANCELLED.
+// ---------------------------------------------------------------------------
+model ActionPlan {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  branchId        String
+  branch          Branch   @relation(fields: [branchId], references: [id])
+  createdByUserId String
+  date            DateTime
+  reason          String
+  requiredActions String
+  deadline        DateTime
+  status          ActionPlanStatus @default(OPEN)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  // Se completa cuando status pasa a COMPLETED, CLOSED o CANCELLED.
+  // Se limpia si se revierte a un estado activo.
+  closedAt        DateTime?
+
+  @@index([employeeId])
+  @@index([branchId])
+  @@index([status])
+  @@index([deadline])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// OVERTIME RECORD
+// approvedByUserId + approvedAt: se completan juntos al aprobar o rechazar.
+// ---------------------------------------------------------------------------
+model OvertimeRecord {
+  id               String   @id @default(cuid())
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id])
+  branchId         String
+  branch           Branch   @relation(fields: [branchId], references: [id])
+  reportedByUserId String
+  // Quién aprobó o rechazó y cuándo
+  approvedByUserId String?
+  approvedAt       DateTime?
+  date             DateTime
+  hours            Decimal  @db.Decimal(4, 2)
+  reason           OvertimeReason
+  status           OvertimeStatus @default(REPORTED)
+  notes            String?
+  rejectionReason  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([branchId])
+  @@index([date])
+  @@index([status])
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  passwordHash       String
+  role               UserRole
+  active             Boolean   @default(true)
+  branchId           String?
+  branch             Branch?   @relation(fields: [branchId], references: [id])
+  employeeId         String?
+  mustChangePassword Boolean   @default(true)
+  resetToken         String?   @unique
+  resetTokenExpiry   DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  auditLogs AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([branchId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  detail    Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  VACATION_NEEDS_COVERAGE
+  VACATION_PENDING_APPROVAL
+  ROTATING_CONFLICT
+  MAINTENANCE_HIGH_PRIORITY
+  TASK_OVERDUE
+  WHATSAPP_NEEDS_REVIEW
+  ABSENCE_REPORTED
+  ABSENCE_CRITICAL_POSITION
+  ABSENCE_NO_CERTIFICATE
+  GENERAL
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  read      Boolean          @default(false)
+  link      String?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
