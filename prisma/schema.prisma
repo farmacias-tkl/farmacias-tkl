@@ -1,6 +1,9 @@
 // =============================================================================
-// Farmacias TKL — Schema Prisma Etapa 5 fix
-// Cambio: OvertimeRecord agrega approvedAt
+// Farmacias TKL — Schema Prisma
+//
+// Cambios en esta versión:
+//   - EmployeeBranchAssignment: agrega status (ACTIVE/CANCELLED/COMPLETED)
+//   - EmployeeBranchAssignment: agrega positionId? (puesto cubierto)
 // =============================================================================
 
 generator client {
@@ -27,10 +30,25 @@ enum PositionScope {
   SPECIFIC
 }
 
+// ---------------------------------------------------------------------------
+// AssignmentType — tipo de asignación de sucursal
+// ---------------------------------------------------------------------------
 enum AssignmentType {
-  PERMANENT
-  TEMPORARY_COVERAGE
-  ROTATION
+  PERMANENT           // empleado fijo de la sucursal
+  TEMPORARY_COVERAGE  // cobertura puntual (vacaciones, ausencia)
+  ROTATION            // rotación programada
+}
+
+// ---------------------------------------------------------------------------
+// AssignmentStatus — estado de la asignación
+// ACTIVE    → vigente, se suma al plantel real
+// CANCELLED → cancelada antes de iniciarse o durante, no impacta dotación
+// COMPLETED → terminada normalmente al vencimiento
+// ---------------------------------------------------------------------------
+enum AssignmentStatus {
+  ACTIVE
+  CANCELLED
+  COMPLETED
 }
 
 enum AbsenceType {
@@ -74,6 +92,9 @@ enum OvertimeReason {
   OTHER
 }
 
+// ---------------------------------------------------------------------------
+// BRANCH
+// ---------------------------------------------------------------------------
 model Branch {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -95,6 +116,9 @@ model Branch {
   @@index([active])
 }
 
+// ---------------------------------------------------------------------------
+// POSITION
+// ---------------------------------------------------------------------------
 model Position {
   id               String        @id @default(cuid())
   name             String        @unique
@@ -106,8 +130,9 @@ model Position {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  branchScopes PositionBranchScope[]
-  employees    Employee[]
+  branchScopes        PositionBranchScope[]
+  employees           Employee[]
+  branchAssignments   EmployeeBranchAssignment[]  // posición cubierta en asignaciones de rotativos
 
   @@index([active])
   @@index([requiresCoverage])
@@ -125,6 +150,9 @@ model PositionBranchScope {
   @@index([branchId])
 }
 
+// ---------------------------------------------------------------------------
+// EMPLOYEE
+// ---------------------------------------------------------------------------
 model Employee {
   id              String    @id @default(cuid())
   firstName       String
@@ -156,24 +184,50 @@ model Employee {
   @@index([lastName, firstName])
 }
 
+// ---------------------------------------------------------------------------
+// EMPLOYEE BRANCH ASSIGNMENT
+//
+// Cambios:
+//   status:     ACTIVE (impacta plantel) | CANCELLED | COMPLETED
+//   positionId: puesto que cubre la rotativa en esa sucursal (opcional)
+//
+// getPlantillaReal() filtra: status=ACTIVE AND fechas activas
+// Las PERMANENT no usan status operativamente (siempre ACTIVE mientras no
+// tengan endDate), pero el campo se agrega para consistencia.
+// ---------------------------------------------------------------------------
 model EmployeeBranchAssignment {
   id         String   @id @default(cuid())
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   branchId   String
   branch     Branch   @relation(fields: [branchId], references: [id])
-  startDate  DateTime
-  endDate    DateTime?
-  type       AssignmentType @default(PERMANENT)
-  reason     String?
-  assignedByUserId String?
-  createdAt  DateTime @default(now())
 
-  @@index([employeeId, endDate])
-  @@index([branchId])
-  @@index([type, endDate])
+  startDate DateTime
+  endDate   DateTime? // null solo para PERMANENT
+
+  type   AssignmentType  @default(PERMANENT)
+  status AssignmentStatus @default(ACTIVE)
+
+  // Puesto que cubre la rotativa en esta asignación (opcional para PERMANENT)
+  positionId String?
+  position   Position? @relation(fields: [positionId], references: [id])
+
+  reason           String?
+  assignedByUserId String?
+  notes            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId, status])
+  @@index([branchId, status])
+  @@index([type, status, endDate])
+  @@index([startDate, endDate])
 }
 
+// ---------------------------------------------------------------------------
+// ABSENCE RECORD
+// ---------------------------------------------------------------------------
 model AbsenceRecord {
   id               String   @id @default(cuid())
   employeeId       String
@@ -204,7 +258,6 @@ model AbsenceRecord {
 
 // ---------------------------------------------------------------------------
 // ACTION PLAN
-// closedAt se completa automáticamente al pasar a COMPLETED, CLOSED o CANCELLED.
 // ---------------------------------------------------------------------------
 model ActionPlan {
   id              String   @id @default(cuid())
@@ -221,20 +274,16 @@ model ActionPlan {
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  // Se completa cuando status pasa a COMPLETED, CLOSED o CANCELLED.
-  // Se limpia si se revierte a un estado activo.
   closedAt        DateTime?
 
   @@index([employeeId])
   @@index([branchId])
   @@index([status])
   @@index([deadline])
-  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------
 // OVERTIME RECORD
-// approvedByUserId + approvedAt: se completan juntos al aprobar o rechazar.
 // ---------------------------------------------------------------------------
 model OvertimeRecord {
   id               String   @id @default(cuid())
@@ -243,7 +292,6 @@ model OvertimeRecord {
   branchId         String
   branch           Branch   @relation(fields: [branchId], references: [id])
   reportedByUserId String
-  // Quién aprobó o rechazó y cuándo
   approvedByUserId String?
   approvedAt       DateTime?
   date             DateTime
@@ -262,6 +310,9 @@ model OvertimeRecord {
   @@index([status])
 }
 
+// ---------------------------------------------------------------------------
+// USER
+// ---------------------------------------------------------------------------
 model User {
   id                 String    @id @default(cuid())
   name               String
