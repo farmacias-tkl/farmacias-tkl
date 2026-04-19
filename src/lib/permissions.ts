@@ -2,15 +2,16 @@ import type { UserRole } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // MENU por rol — orden de aparición en el sidebar
+// /perfil aparece en todos los roles (al final, antes de logout)
 // ---------------------------------------------------------------------------
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
-  SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas"],
-  CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/mantenimiento","/tareas","/alertas"],
-  BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/mantenimiento","/tareas"],
-  HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas"],
-  MAINTENANCE:    ["/dashboard","/mantenimiento"],
-  ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/admin","/puestos"],
+  SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/perfil"],
+  CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/mantenimiento","/tareas","/alertas","/perfil"],
+  BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/mantenimiento","/tareas","/perfil"],
+  HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/perfil"],
+  MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
+  ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
 };
 
 // ---------------------------------------------------------------------------
@@ -31,14 +32,19 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/alertas":       ["SUPERVISOR","CO_SUPERVISOR","OWNER","ADMIN"],
   "/puestos":       ["ADMIN"],
   "/admin":         ["ADMIN"],
+  "/admin/usuarios":["ADMIN"],
+  "/perfil":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   // API routes
   "/api/me":            ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/api/profile":       ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/api/branches":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/api/positions":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/api/employees":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/absences":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/action-plans":  ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/overtime":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  "/api/assignments":   ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
+  "/api/admin":         ["ADMIN"],
 };
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
@@ -53,9 +59,6 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
   return role === "ADMIN";
 }
 
-// ---------------------------------------------------------------------------
-// Permisos por acción
-// ---------------------------------------------------------------------------
 export const can = {
   // Sucursales
   viewAllBranches:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
@@ -100,7 +103,7 @@ export const can = {
   // Comentarios internos
   viewInternalComments: (role: UserRole) => role !== "OWNER",
 
-  // Admin
+  // Admin — gestión de usuarios
   manageUsers:     (role: UserRole) => role === "ADMIN",
   managePositions: (role: UserRole) => role === "ADMIN",
   viewAuditLog:    (role: UserRole) => role === "ADMIN",
@@ -112,9 +115,6 @@ export const can = {
   isReadOnlyInBranches:   (role: UserRole) => role === "OWNER",
 };
 
-// ---------------------------------------------------------------------------
-// Helpers para endpoints
-// ---------------------------------------------------------------------------
 export function requireCan(
   check: (role: UserRole) => boolean,
   session: { user: { role: UserRole } } | null
@@ -131,9 +131,6 @@ export function requireAuth(
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Labels y colores de UI
-// ---------------------------------------------------------------------------
 export const ROLE_LABELS: Record<UserRole, string> = {
   SUPERVISOR:     "Supervisor",
   CO_SUPERVISOR:  "Co-supervisora",
@@ -153,3 +150,4 @@ export const ROLE_COLORS: Record<UserRole, string> = {
   OWNER:          "bg-slate-100 text-slate-700",
   ADMIN:          "bg-red-100 text-red-800",
 };
+
