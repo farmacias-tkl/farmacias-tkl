@@ -1,16 +1,51 @@
-import { Settings } from "lucide-react";
-export default function Page() {
+import Link from "next/link";
+import { Users, BookOpen, Settings } from "lucide-react";
+
+const CARDS = [
+  {
+    href:        "/admin/usuarios",
+    icon:        Users,
+    title:       "Usuarios",
+    description: "Crear, editar, activar y resetear contraseñas.",
+    color:       "bg-blue-50 text-blue-600",
+  },
+  {
+    href:        "/puestos",
+    icon:        BookOpen,
+    title:       "Puestos",
+    description: "Catalogo de puestos y configuracion de cobertura.",
+    color:       "bg-violet-50 text-violet-600",
+  },
+];
+
+export default function AdminPage() {
   return (
-    <div className="card p-10 text-center">
-      <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gray-100 mb-4">
-        <Settings className="w-6 h-6 text-gray-400" />
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Administracion</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Gestion de usuarios, catalogos y configuracion del sistema.</p>
       </div>
-      <h2 className="text-base font-semibold text-gray-700 mb-2">Administración</h2>
-      <p className="text-sm text-gray-400 max-w-sm mx-auto">Usuarios, catálogos y configuración.</p>
-      <div className="inline-flex items-center gap-1.5 mt-4 text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full font-medium">
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-        Disponible en la siguiente etapa
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {CARDS.map(card => {
+          const Icon = card.icon;
+          return (
+            <Link key={card.href} href={card.href}
+              className="card p-5 flex items-start gap-4 hover:shadow-md transition-shadow group">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${card.color}`}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                  {card.title}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">{card.description}</p>
+              </div>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
 }
+
