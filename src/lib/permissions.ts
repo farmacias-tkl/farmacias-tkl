@@ -7,9 +7,9 @@ import type { UserRole } from "@prisma/client";
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
   SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/perfil"],
   CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/perfil"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/mantenimiento","/tareas","/alertas","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/mantenimiento","/tareas","/alertas","/perfil"],
   BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/mantenimiento","/tareas","/perfil"],
-  HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/perfil"],
+  HR:             ["/dashboard","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/perfil"],
   MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
   ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/planes-accion","/horas-extras","/vacaciones","/rotativas","/mantenimiento","/tareas","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
 };
@@ -23,7 +23,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/empleados":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/ausencias":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/planes-accion": ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
-  "/horas-extras":  ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  "/horas-extras":  ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/vacaciones":    ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/rotativas":     ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
   "/mantenimiento": ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
