@@ -18,7 +18,7 @@ function LoginForm() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl  = searchParams.get("callbackUrl") || "/dashboard";
-  const [showPwd, setShowPwd]   = useState(false);
+  const [showPwd,   setShowPwd]   = useState(false);
   const [serverErr, setServerErr] = useState<string | null>(null);
 
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<F>({
@@ -27,6 +27,10 @@ function LoginForm() {
 
   async function onSubmit(data: F) {
     setServerErr(null);
+
+    // Guardar email para el re-login automático después del cambio de contraseña
+    sessionStorage.setItem("tkl_last_email", data.email);
+
     const result = await signIn("credentials", { ...data, redirect: false });
     if (result?.error) {
       setServerErr("Email o contrasena incorrectos");
