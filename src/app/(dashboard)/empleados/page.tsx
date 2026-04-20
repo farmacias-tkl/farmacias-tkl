@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import Link from "next/link";
 import {
   Plus, Search, Users, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, AlertTriangle, RotateCcw, UserMinus,
@@ -447,6 +448,13 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
             <div className="flex flex-wrap gap-2 items-center">
               {emp.notes && <p className="text-xs text-gray-500 italic w-full">{emp.notes}</p>}
               {emp.workScheduleNotes && <p className="text-xs text-gray-400 w-full">Horario: {emp.workScheduleNotes}</p>}
+              <Link
+                href={`/empleados/${emp.id}`}
+                onClick={e => e.stopPropagation()}
+                className="btn-secondary text-xs py-1.5 px-3"
+              >
+                Ver ficha →
+              </Link>
               {canManage && !isOwner && (
                 <button onClick={e => { e.stopPropagation(); toggleActive(); }}
                   className={cn("btn-secondary text-xs py-1.5 px-3",
