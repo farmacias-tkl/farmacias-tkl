@@ -6,7 +6,10 @@
       "Bash(mkdir -p \"C:/Users/Daniel/Desktop/tkl-etapa3-v2/src/app/api/action-plan-forms/[id]\")",
       "Bash(mkdir -p \"C:/Users/Daniel/Desktop/tkl-etapa3-v2/src/app/api/action-plan-forms/[id]/pdf\")",
       "Bash(npm run *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_VRauQ1FEnr8U@ep-mute-hill-amr63bly.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require\" npx prisma db push)"
     ]
   }
 }

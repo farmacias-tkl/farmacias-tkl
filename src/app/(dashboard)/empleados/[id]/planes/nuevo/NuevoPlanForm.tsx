@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { MOSTRADOR_TEMPLATE } from "@/lib/action-plan-templates/mostrador";
 import type { TemplateSection } from "@/lib/action-plan-templates/mostrador";
@@ -24,7 +25,13 @@ interface Props {
   createdByUserId: string;
 }
 
-export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props) {
+function buildInitialFormData(): FormData {
+  const data: FormData = {};
+  SECTIONS.forEach(s => s.items.forEach(i => { data[i.id] = null; }));
+  return data;
+}
+
+export default function NuevoPlanForm({ employeeId, branchId }: Props) {
   const router = useRouter();
 
   const today = new Date().toISOString().slice(0, 10);
@@ -34,16 +41,23 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
   const [reason,          setReason]          = useState("");
   const [requiredActions, setRequiredActions] = useState("");
   const [notes,           setNotes]           = useState("");
+  const [selectedBranch,  setSelectedBranch]  = useState(branchId ?? "");
 
-  const initialFormData: FormData = {};
-  SECTIONS.forEach(s => s.items.forEach(i => { initialFormData[i.id] = null; }));
-  const [formData,        setFormData]        = useState<FormData>(initialFormData);
+  const [formData,        setFormData]        = useState<FormData>(buildInitialFormData);
   const [generalScore,    setGeneralScore]    = useState<Score | null>(null);
   const [improvementPlan, setImprovementPlan] = useState("");
   const [nextReview,      setNextReview]      = useState("");
 
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  // Only fetch branches when employee is rotating (no fixed branchId)
+  const { data: branchRes } = useQuery({
+    queryKey: ["branches"],
+    queryFn:  () => fetch("/api/branches").then(r => r.json()),
+    enabled:  branchId === null,
+  });
+  const branches = branchRes?.data ?? [];
 
   const setItem = (itemId: string, value: ItemValue) =>
     setFormData(prev => ({ ...prev, [itemId]: value }));
@@ -52,10 +66,12 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!generalScore) { setError("Seleccioná una calificación general"); return; }
-    if (!reason.trim()) { setError("El motivo es obligatorio"); return; }
+    if (!reason.trim())          { setError("El motivo es obligatorio"); return; }
     if (!requiredActions.trim()) { setError("Las acciones requeridas son obligatorias"); return; }
-    if (!deadline) { setError("El plazo es obligatorio"); return; }
+    if (!deadline)               { setError("El plazo es obligatorio"); return; }
+    if (!selectedBranch)         { setError("Seleccioná una sucursal"); return; }
+    if (!allFilled)              { setError("Completá todos los ítems de evaluación"); return; }
+    if (!generalScore)           { setError("Seleccioná una calificación general"); return; }
 
     setSaving(true);
     setError(null);
@@ -63,11 +79,11 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
     try {
       // 1. Create ActionPlan
       const planRes = await fetch("/api/action-plans", {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           employeeId,
-          branchId: branchId ?? "",
+          branchId:        selectedBranch,
           date,
           reason,
           requiredActions,
@@ -87,11 +103,11 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
 
       // 2. Create ActionPlanForm
       const formRes = await fetch("/api/action-plan-forms", {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actionPlanId:  plan.id,
-          templateType:  "MOSTRADOR",
+          actionPlanId:    plan.id,
+          templateType:    "MOSTRADOR",
           formData,
           generalScore,
           improvementPlan: improvementPlan || null,
@@ -119,6 +135,24 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
       {/* Datos generales */}
       <div className="card p-5 space-y-4">
         <h3 className="text-sm font-semibold text-gray-700">Datos del plan</h3>
+
+        {/* Sucursal — solo visible para rotativos */}
+        {branchId === null && (
+          <div>
+            <label className="label">Sucursal *</label>
+            <select
+              className="input"
+              value={selectedBranch}
+              onChange={e => setSelectedBranch(e.target.value)}
+              required
+            >
+              <option value="">Seleccioná una sucursal</option>
+              {branches.map((b: { id: string; name: string }) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -151,7 +185,6 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
             value={reason}
             onChange={e => setReason(e.target.value)}
             placeholder="Describí el motivo por el que se genera este plan..."
-            required
           />
         </div>
 
@@ -162,7 +195,6 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
             value={requiredActions}
             onChange={e => setRequiredActions(e.target.value)}
             placeholder="Listá las acciones concretas que debe realizar el empleado..."
-            required
           />
         </div>
 
@@ -224,6 +256,12 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
             </div>
           </div>
         ))}
+
+        {!allFilled && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            Completá todos los ítems antes de guardar.
+          </p>
+        )}
       </div>
 
       {/* Calificación general */}
@@ -248,7 +286,7 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
         </div>
       </div>
 
-      {/* Plan de mejora y próxima revisión */}
+      {/* Seguimiento */}
       <div className="card p-5 space-y-4">
         <h3 className="text-sm font-semibold text-gray-700">Seguimiento</h3>
 
@@ -279,16 +317,10 @@ export default function NuevoPlanForm({ employeeId, branchId, encargado }: Props
         <p className="error-msg">{error}</p>
       )}
 
-      {!allFilled && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          Completá todos los ítems de evaluación antes de guardar.
-        </p>
-      )}
-
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={saving || !allFilled || !generalScore}
+          disabled={saving}
           className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? "Guardando..." : "Guardar plan de acción"}
