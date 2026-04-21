@@ -78,6 +78,13 @@ enum ActionPlanStatus {
   CANCELLED
 }
 
+enum ActionPlanTemplateType {
+  MOSTRADOR
+  CADETE
+  CAJERA
+  AUDITORIA
+}
+
 enum OvertimeStatus {
   REPORTED
   APPROVED
@@ -276,10 +283,32 @@ model ActionPlan {
   updatedAt       DateTime  @updatedAt
   closedAt        DateTime?
 
+  form            ActionPlanForm?
+
   @@index([employeeId])
   @@index([branchId])
   @@index([status])
   @@index([deadline])
+}
+
+// ---------------------------------------------------------------------------
+// ACTION PLAN FORM
+// ---------------------------------------------------------------------------
+model ActionPlanForm {
+  id             String                 @id @default(cuid())
+  actionPlanId   String                 @unique
+  actionPlan     ActionPlan             @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
+  templateType   ActionPlanTemplateType
+  formData       Json
+  generalScore   String
+  improvementPlan String?
+  nextReview     DateTime?
+  signedAt       DateTime?
+  signedDocUrl   String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([actionPlanId])
 }
 
 // ---------------------------------------------------------------------------

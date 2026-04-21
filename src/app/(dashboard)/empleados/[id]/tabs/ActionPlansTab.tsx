@@ -1,12 +1,13 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   Plus, ClipboardList, AlertTriangle,
-  CheckCircle2, ChevronDown, ChevronUp, Clock, XCircle,
+  CheckCircle2, ChevronDown, ChevronUp, Clock, XCircle, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -107,9 +108,17 @@ export default function ActionPlansTab({
           )}
         </div>
         {canCreate && (
-          <button onClick={() => setShowForm(v => !v)} className="btn-primary">
-            <Plus className="w-4 h-4" />Nuevo plan
-          </button>
+          <div className="flex gap-2">
+            <Link
+              href={`/empleados/${employeeId}/planes/nuevo`}
+              className="btn-primary inline-flex items-center gap-1.5"
+            >
+              <FileText className="w-4 h-4" />Plan digital
+            </Link>
+            <button onClick={() => setShowForm(v => !v)} className="btn-secondary">
+              <Plus className="w-4 h-4" />Rápido
+            </button>
+          </div>
         )}
       </div>
 

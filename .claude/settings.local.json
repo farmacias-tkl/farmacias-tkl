@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(mkdir -p \"C:/Users/Daniel/Desktop/tkl-etapa3-v2/src/app/api/action-plan-forms/[id]\")",
+      "Bash(mkdir -p \"C:/Users/Daniel/Desktop/tkl-etapa3-v2/src/app/api/action-plan-forms/[id]/pdf\")",
+      "Bash(npm run *)",
+      "Bash(git add *)"
+    ]
+  }
+}
