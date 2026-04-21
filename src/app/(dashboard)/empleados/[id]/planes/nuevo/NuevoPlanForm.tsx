@@ -48,8 +48,9 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
   const [improvementPlan, setImprovementPlan] = useState("");
   const [nextReview,      setNextReview]      = useState("");
 
-  const [saving,  setSaving]  = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
+  const [saving,    setSaving]    = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
 
   // Only fetch branches when employee is rotating (no fixed branchId)
   const { data: branchRes } = useQuery({
@@ -66,6 +67,7 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving || submitted) return;
     if (!reason.trim())          { setError("El motivo es obligatorio"); return; }
     if (!requiredActions.trim()) { setError("Las acciones requeridas son obligatorias"); return; }
     if (!deadline)               { setError("El plazo es obligatorio"); return; }
@@ -77,8 +79,7 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
     setError(null);
 
     try {
-      // 1. Create ActionPlan
-      const planRes = await fetch("/api/action-plans", {
+      const res = await fetch("/api/action-plan-forms/complete", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -88,25 +89,7 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
           reason,
           requiredActions,
           deadline,
-          notes: notes || null,
-        }),
-      });
-
-      if (!planRes.ok) {
-        const err = await planRes.json();
-        setError(err.error ?? "Error al crear el plan");
-        setSaving(false);
-        return;
-      }
-
-      const plan = await planRes.json();
-
-      // 2. Create ActionPlanForm
-      const formRes = await fetch("/api/action-plan-forms", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          actionPlanId:    plan.id,
+          notes:           notes || null,
           templateType:    "MOSTRADOR",
           formData,
           generalScore,
@@ -115,13 +98,14 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
         }),
       });
 
-      if (!formRes.ok) {
-        const err = await formRes.json();
-        setError(err.error ?? "Error al guardar el formulario");
+      if (!res.ok) {
+        const err = await res.json();
+        setError(err.error ?? "Error al guardar el plan");
         setSaving(false);
         return;
       }
 
+      setSubmitted(true);
       router.push(`/empleados/${employeeId}?tab=planes`);
     } catch {
       setError("Error de conexión");
@@ -320,10 +304,10 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || submitted}
           className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {saving ? "Guardando..." : "Guardar plan de acción"}
+          {saving ? "Guardando..." : submitted ? "Redirigiendo..." : "Guardar plan de acción"}
         </button>
         <button
           type="button"
