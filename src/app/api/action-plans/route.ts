@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
         employee: { select: { id: true, firstName: true, lastName: true,
           position: { select: { name: true } } } },
         branch: { select: { id: true, name: true } },
+        form:   { select: { id: true } },
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,

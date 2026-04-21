@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   Plus, ClipboardList, AlertTriangle,
-  CheckCircle2, ChevronDown, ChevronUp, Clock, XCircle, FileText,
+  CheckCircle2, ChevronDown, ChevronUp, Clock, XCircle, FileText, FileDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -272,24 +272,36 @@ function PlanCard({ plan: p, canManage, onUpdateStatus }: {
           </div>
           {p.notes && <p className="text-xs text-gray-500 italic">{p.notes}</p>}
           {p.closedAt && <p className="text-xs text-gray-400">Cerrado: {fmt(p.closedAt)}</p>}
-          {canManage && !TERMINAL.includes(p.status) && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {p.status !== "IN_PROGRESS" && (
-                <button onClick={() => onUpdateStatus(p.id, "IN_PROGRESS")}
-                  className="btn-secondary text-xs py-1.5 px-3 text-amber-700 border-amber-300 hover:bg-amber-50">
-                  Marcar en curso
+          <div className="flex flex-wrap gap-2 pt-1">
+            {p.form?.id && (
+              <a
+                href={`/api/action-plan-forms/${p.form.id}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary text-xs py-1.5 px-3 text-blue-700 border-blue-300 hover:bg-blue-50 inline-flex items-center gap-1"
+              >
+                <FileDown className="w-3.5 h-3.5" /> Descargar PDF
+              </a>
+            )}
+            {canManage && !TERMINAL.includes(p.status) && (
+              <>
+                {p.status !== "IN_PROGRESS" && (
+                  <button onClick={() => onUpdateStatus(p.id, "IN_PROGRESS")}
+                    className="btn-secondary text-xs py-1.5 px-3 text-amber-700 border-amber-300 hover:bg-amber-50">
+                    Marcar en curso
+                  </button>
+                )}
+                <button onClick={() => onUpdateStatus(p.id, "COMPLETED")}
+                  className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
+                  Completado
                 </button>
-              )}
-              <button onClick={() => onUpdateStatus(p.id, "COMPLETED")}
-                className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
-                Completado
-              </button>
-              <button onClick={() => onUpdateStatus(p.id, "CLOSED")}
-                className="btn-secondary text-xs py-1.5 px-3">Cerrar</button>
-              <button onClick={() => onUpdateStatus(p.id, "CANCELLED")}
-                className="btn-secondary text-xs py-1.5 px-3 text-gray-500">Cancelar</button>
-            </div>
-          )}
+                <button onClick={() => onUpdateStatus(p.id, "CLOSED")}
+                  className="btn-secondary text-xs py-1.5 px-3">Cerrar</button>
+                <button onClick={() => onUpdateStatus(p.id, "CANCELLED")}
+                  className="btn-secondary text-xs py-1.5 px-3 text-gray-500">Cancelar</button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
