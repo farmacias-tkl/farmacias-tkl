@@ -37,11 +37,10 @@ function LoginForm() {
       return;
     }
 
-    // OWNER: ruta default → /executive. Si tiene callbackUrl explícito
-    // (vino redirigido desde una página), respetarlo.
-    const wantsDefault = callbackUrl === "/dashboard";
+    // OWNER siempre a /executive (ignorando callbackUrl — por spec).
+    // Otros roles respetan callbackUrl.
     const sess = await getSession();
-    const target = (sess?.user?.role === "OWNER" && wantsDefault) ? "/executive" : callbackUrl;
+    const target = sess?.user?.role === "OWNER" ? "/executive" : callbackUrl;
     router.push(target);
     router.refresh();
   }

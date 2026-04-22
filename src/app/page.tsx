@@ -3,5 +3,6 @@ import { auth } from "@/lib/auth";
 
 export default async function RootPage() {
   const session = await auth();
-  redirect(session?.user ? "/dashboard" : "/login");
+  if (!session?.user) redirect("/login");
+  redirect(session.user.role === "OWNER" ? "/executive" : "/dashboard");
 }

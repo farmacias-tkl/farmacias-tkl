@@ -18,6 +18,7 @@ export const MENU_BY_ROLE: Record<UserRole, string[]> = {
 // Permisos por ruta — usado por middleware
 // ---------------------------------------------------------------------------
 export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
+  "/":              ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/dashboard":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/sucursales":    ["SUPERVISOR","CO_SUPERVISOR","OWNER","ADMIN"],
   "/empleados":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
