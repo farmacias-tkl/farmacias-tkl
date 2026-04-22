@@ -23,6 +23,9 @@ dist/
 .env.production.local
 .env.neon
 .env.production
+
+# Service Account credentials para el script Python del servidor SIAF
+scripts/server/credentials.json
 # .env.example SÍ se commitea (sin valores reales)
 
 # Prisma

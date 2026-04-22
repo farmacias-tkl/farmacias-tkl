@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Trigger sync webhook
         run: |
-          SOURCE="${{ github.event.inputs.source || 'balances' }}"
+          SOURCE="${{ github.event.inputs.source || 'all' }}"
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.DASHBOARD_URL }}/api/sync/trigger" \
             -H "Authorization: Bearer ${{ secrets.SYNC_WEBHOOK_SECRET }}" \
             -H "Content-Type: application/json" \

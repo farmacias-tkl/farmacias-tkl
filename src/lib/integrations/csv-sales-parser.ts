@@ -1,0 +1,72 @@
+/**
+ * Parser de los CSV generados por scripts/server/siaf_to_drive.py.
+ *
+ * Formato esperado (una sola fila de datos por archivo):
+ *   sucursal,fecha,total_ventas,total_tickets,ticket_promedio,total_unidades,ventas_efectivo,ventas_tarjeta,ventas_obra_social
+ *   America,2026-04-21,1234567.89,89,13871.10,245,450000.00,650000.00,134567.89
+ */
+export interface ParsedSalesDay {
+  sucursal:         string;
+  fecha:            string;  // YYYY-MM-DD
+  totalVentas:      number;
+  totalTickets:     number;
+  ticketPromedio:   number;
+  totalUnidades:    number;
+  ventasEfectivo:   number;
+  ventasTarjeta:    number;
+  ventasObraSocial: number;
+}
+
+const EXPECTED_HEADER = [
+  "sucursal", "fecha", "total_ventas", "total_tickets", "ticket_promedio",
+  "total_unidades", "ventas_efectivo", "ventas_tarjeta", "ventas_obra_social",
+] as const;
+
+function toNum(s: string): number {
+  const n = parseFloat(s.trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toInt(s: string): number {
+  const n = parseInt(s.trim(), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function parseSalesCSV(csvContent: string): ParsedSalesDay[] {
+  // Remover BOM UTF-8 si está presente (Python csv a veces lo agrega)
+  const cleaned = csvContent.replace(/^\uFEFF/, "").trim();
+  if (!cleaned) return [];
+
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+
+  const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const idx = Object.fromEntries(EXPECTED_HEADER.map((k) => [k, header.indexOf(k)]));
+
+  const missing = EXPECTED_HEADER.filter((k) => idx[k] < 0);
+  if (missing.length > 0) {
+    throw new Error(
+      `CSV header inválido. Faltan columnas: ${missing.join(", ")}. Recibido: ${header.join(",")}`,
+    );
+  }
+
+  const rows: ParsedSalesDay[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",").map((c) => c.trim());
+    if (cols.length < EXPECTED_HEADER.length) continue;
+
+    rows.push({
+      sucursal:         cols[idx.sucursal],
+      fecha:            cols[idx.fecha],
+      totalVentas:      toNum(cols[idx.total_ventas]),
+      totalTickets:     toInt(cols[idx.total_tickets]),
+      ticketPromedio:   toNum(cols[idx.ticket_promedio]),
+      totalUnidades:    toInt(cols[idx.total_unidades]),
+      ventasEfectivo:   toNum(cols[idx.ventas_efectivo]),
+      ventasTarjeta:    toNum(cols[idx.ventas_tarjeta]),
+      ventasObraSocial: toNum(cols[idx.ventas_obra_social]),
+    });
+  }
+
+  return rows;
+}
