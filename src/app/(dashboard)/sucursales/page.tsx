@@ -25,6 +25,7 @@ export default async function SucursalesPage() {
   todayEnd.setHours(23, 59, 59, 999);
 
   const branches = await prisma.branch.findMany({
+    where: { showInOperative: true },
     orderBy: { name: "asc" },
     include: {
       _count: { select: { employees: { where: { active: true } } } },

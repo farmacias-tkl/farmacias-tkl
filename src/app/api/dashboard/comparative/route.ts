@@ -56,11 +56,13 @@ export async function GET(request: NextRequest) {
 
   const ranges = getPeriodRanges(period)!;
   const branchFilter = branchId !== "ALL" ? { branchId } : {};
+  const execVisibility = { branch: { showInExecutive: true } };
 
   const [currentRows, pastRows, branches] = await Promise.all([
     prisma.salesSnapshot.findMany({
       where: {
         ...branchFilter,
+        ...execVisibility,
         snapshotDate: { gte: ranges.currentStart, lte: ranges.currentEnd },
       },
       select: { branchId: true, totalSales: true, snapshotDate: true,
@@ -69,13 +71,18 @@ export async function GET(request: NextRequest) {
     prisma.salesSnapshot.findMany({
       where: {
         ...branchFilter,
+        ...execVisibility,
         snapshotDate: { gte: ranges.pastStart, lte: ranges.pastEnd },
       },
       select: { branchId: true, totalSales: true, snapshotDate: true,
                 branch: { select: { id: true, name: true } } },
     }),
     prisma.branch.findMany({
-      where: { active: true, ...(branchId !== "ALL" && { id: branchId }) },
+      where: {
+        active: true,
+        showInExecutive: true,
+        ...(branchId !== "ALL" && { id: branchId }),
+      },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),

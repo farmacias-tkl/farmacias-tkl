@@ -23,7 +23,9 @@ export async function GET(req: NextRequest) {
   const includeInactive = req.nextUrl.searchParams.get("includeInactive") === "true";
 
   const branches = await prisma.branch.findMany({
-    where:   includeInactive ? undefined : { active: true },
+    where: includeInactive
+      ? { showInOperative: true }
+      : { active: true, showInOperative: true },
     orderBy: { name: "asc" },
     select:  { id: true, name: true, address: true, phone: true, active: true, notes: true },
   });

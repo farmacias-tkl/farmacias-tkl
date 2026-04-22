@@ -71,7 +71,7 @@ export default async function DashboardPage() {
 
   const [totalEmployees, totalBranches] = await Promise.all([
     prisma.employee.count({ where: empWhere }),
-    prisma.branch.count({ where: { active: true } }),
+    prisma.branch.count({ where: { active: true, showInOperative: true } }),
   ]);
 
   const todayFormatted = today.toLocaleDateString("es-AR", {

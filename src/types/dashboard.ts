@@ -19,6 +19,8 @@ export interface BranchSales {
   receipts: number;
   avgTicket: number;
   vsYesterday: number | null;
+  dataSource?: string | null;
+  rawData?: Record<string, unknown> | null;
 }
 
 export interface DashboardKPIs {

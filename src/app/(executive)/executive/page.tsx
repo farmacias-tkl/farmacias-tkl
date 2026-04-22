@@ -18,7 +18,11 @@ export default async function ExecutivePage({
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
-  const balanceWhere = { snapshotDate: today, ...(branchId !== "ALL" && { branchId }) };
+  const balanceWhere = {
+    snapshotDate: today,
+    ...(branchId !== "ALL" && { branchId }),
+    branch: { showInExecutive: true },
+  };
   let balances = await prisma.bankBalanceSnapshot.findMany({
     where: balanceWhere,
     include: { branch: { select: { id: true, name: true } } },
@@ -27,7 +31,9 @@ export default async function ExecutivePage({
   let isStaleBalances = false;
   if (balances.length === 0) {
     balances = await prisma.bankBalanceSnapshot.findMany({
-      where: branchId !== "ALL" ? { branchId } : {},
+      where: branchId !== "ALL"
+        ? { branchId }
+        : { branch: { showInExecutive: true } },
       include: { branch: { select: { id: true, name: true } } },
       orderBy: { snapshotDate: "desc" },
       take: 200,
@@ -36,17 +42,25 @@ export default async function ExecutivePage({
   }
 
   const sales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: today, ...(branchId !== "ALL" && { branchId }) },
+    where: {
+      snapshotDate: today,
+      ...(branchId !== "ALL" && { branchId }),
+      branch: { showInExecutive: true },
+    },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
   const yesterdaySales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: yesterday, ...(branchId !== "ALL" && { branchId }) },
+    where: {
+      snapshotDate: yesterday,
+      ...(branchId !== "ALL" && { branchId }),
+      branch: { showInExecutive: true },
+    },
     select: { branchId: true, totalSales: true },
   });
   const yesterdayMap = Object.fromEntries(yesterdaySales.map((s) => [s.branchId, Number(s.totalSales)]));
   const branches = await prisma.branch.findMany({
-    where: { active: true },
+    where: { active: true, showInExecutive: true },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
@@ -102,6 +116,8 @@ export default async function ExecutivePage({
       vsYesterday: yesterdayMap[s.branchId]
         ? ((Number(s.totalSales) - yesterdayMap[s.branchId]) / yesterdayMap[s.branchId]) * 100
         : null,
+      dataSource: s.dataSource,
+      rawData:    s.rawData as Record<string, unknown> | null,
     })),
     lastBalanceDate: balances[0]?.snapshotDate ?? null,
     isStaleBalances,

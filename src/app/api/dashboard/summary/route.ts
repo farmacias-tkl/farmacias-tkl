@@ -16,7 +16,11 @@ export async function GET(request: NextRequest) {
   const targetDate = new Date();
   targetDate.setHours(0, 0, 0, 0);
 
-  const balanceWhere = { snapshotDate: targetDate, ...(branchId !== "ALL" && { branchId }) };
+  const balanceWhere = {
+    snapshotDate: targetDate,
+    ...(branchId !== "ALL" && { branchId }),
+    branch: { showInExecutive: true },
+  };
   let balances = await prisma.bankBalanceSnapshot.findMany({
     where: balanceWhere,
     include: { branch: { select: { id: true, name: true } } },
@@ -25,7 +29,9 @@ export async function GET(request: NextRequest) {
   let isStale = false;
   if (balances.length === 0) {
     balances = await prisma.bankBalanceSnapshot.findMany({
-      where: branchId !== "ALL" ? { branchId } : {},
+      where: branchId !== "ALL"
+        ? { branchId }
+        : { branch: { showInExecutive: true } },
       include: { branch: { select: { id: true, name: true } } },
       orderBy: { snapshotDate: "desc" },
       take: 200,
@@ -34,14 +40,22 @@ export async function GET(request: NextRequest) {
   }
 
   const sales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: targetDate, ...(branchId !== "ALL" && { branchId }) },
+    where: {
+      snapshotDate: targetDate,
+      ...(branchId !== "ALL" && { branchId }),
+      branch: { showInExecutive: true },
+    },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
   const yesterday = new Date(targetDate);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdaySales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: yesterday, ...(branchId !== "ALL" && { branchId }) },
+    where: {
+      snapshotDate: yesterday,
+      ...(branchId !== "ALL" && { branchId }),
+      branch: { showInExecutive: true },
+    },
     select: { branchId: true, totalSales: true },
   });
   const yesterdayMap = Object.fromEntries(yesterdaySales.map((s) => [s.branchId, Number(s.totalSales)]));

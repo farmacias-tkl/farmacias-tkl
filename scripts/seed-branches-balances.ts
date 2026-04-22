@@ -38,6 +38,13 @@ const NEW_BRANCHES: Array<{ name: string; aliases: string[]; code: string }> = [
   { name: "Condominio ET", aliases: ["Condominio ET", "CONDOMINIO ET", "CET"], code: "CET" },
 ];
 
+// Overrides de visibilidad por módulo (solo branches con reglas especiales)
+const VISIBILITY_OVERRIDES: Record<string, { showInExecutive?: boolean; showInOperative?: boolean }> = {
+  "Call Center":   { showInExecutive: false },    // solo operativo (no aparece en ejecutivo)
+  "Patricios":     { showInOperative: false },    // solo ejecutivo (no aparece en operativo)
+  "Condominio ET": { showInOperative: false },    // solo ejecutivo (no aparece en operativo)
+};
+
 async function main() {
   const host = process.env.DATABASE_URL?.split("@")[1]?.split("/")[0] ?? "unknown";
   console.log("🏦 Seed branches — módulo saldos bancarios");
@@ -54,11 +61,15 @@ async function main() {
       missing++;
       continue;
     }
+    const visibility = VISIBILITY_OVERRIDES[name] ?? {};
     await prisma.branch.update({
       where: { name },
-      data:  { aliases },
+      data:  { aliases, ...visibility },
     });
-    console.log(`   ✓ ${name.padEnd(16)} aliases: ${JSON.stringify(aliases)}`);
+    const visTag = Object.keys(visibility).length > 0
+      ? ` [${Object.entries(visibility).map(([k, v]) => `${k}=${v}`).join(", ")}]`
+      : "";
+    console.log(`   ✓ ${name.padEnd(16)} aliases: ${JSON.stringify(aliases)}${visTag}`);
     updated++;
   }
 
@@ -69,13 +80,14 @@ async function main() {
   let created = 0;
   let alreadyExisted = 0;
   for (const b of NEW_BRANCHES) {
+    const visibility = VISIBILITY_OVERRIDES[b.name] ?? {};
     const existing = await prisma.branch.findUnique({ where: { name: b.name } });
     if (existing) {
       await prisma.branch.update({
         where: { name: b.name },
-        data:  { aliases: b.aliases, code: b.code },
+        data:  { aliases: b.aliases, code: b.code, ...visibility },
       });
-      console.log(`   ℹ  ${b.name.padEnd(16)} ya existía — aliases/code actualizados`);
+      console.log(`   ℹ  ${b.name.padEnd(16)} ya existía — aliases/code/visibility actualizados`);
       alreadyExisted++;
     } else {
       await prisma.branch.create({
@@ -84,9 +96,13 @@ async function main() {
           aliases: b.aliases,
           code:    b.code,
           active:  true,
+          ...visibility,
         },
       });
-      console.log(`   ✓ ${b.name.padEnd(16)} CREADA (code=${b.code})`);
+      const visTag = Object.keys(visibility).length > 0
+        ? ` (${Object.entries(visibility).map(([k, v]) => `${k}=${v}`).join(", ")})`
+        : "";
+      console.log(`   ✓ ${b.name.padEnd(16)} CREADA (code=${b.code})${visTag}`);
       created++;
     }
   }

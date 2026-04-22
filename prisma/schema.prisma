@@ -110,6 +110,8 @@ model Branch {
   address   String?
   phone     String?
   active    Boolean  @default(true)
+  showInExecutive Boolean @default(true)
+  showInOperative Boolean @default(true)
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -125,6 +127,8 @@ model Branch {
   salesSnapshots       SalesSnapshot[]
 
   @@index([active])
+  @@index([showInExecutive])
+  @@index([showInOperative])
 }
 
 // ---------------------------------------------------------------------------

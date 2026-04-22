@@ -1,64 +1,224 @@
 "use client";
-import { TrendingUp, TrendingDown, Minus, ShoppingBag } from "lucide-react";
+import { useState } from "react";
+import { TrendingUp, TrendingDown, Minus, ShoppingBag, ChevronDown, ChevronRight } from "lucide-react";
 import type { BranchSales } from "@/types/dashboard";
 
 const fmtARS = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
 const fmtInt = (n: number) => new Intl.NumberFormat("es-AR").format(n);
 
+const SALES_CSS = `
+/* Fila de sucursal (header clickeable) */
+.sal-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.1s;
+  background: white;
+  min-width: 0;
+}
+.sal-row:hover { background: #f9fafb; }
+.sal-row:last-child { border-bottom: none; }
+.sal-name {
+  font-size: 14px; font-weight: 600; color: #111827;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sal-total { font-size: 14px; font-weight: 700; color: #1E2D5A; white-space: nowrap; }
+.sal-var {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+
+/* Columnas extras (Unidades, Comprobantes, Ticket) — solo desktop */
+.sal-extras { display: none; }
+@media (min-width: 640px) {
+  .sal-extras { display: contents; }
+  .sal-row {
+    grid-template-columns: auto 1fr auto auto auto auto auto;
+  }
+}
+.sal-num-col {
+  text-align: right;
+  font-size: 12px; color: #6b7280; font-variant-numeric: tabular-nums;
+  min-width: 60px;
+}
+
+/* Detalle expandido */
+.sal-detail {
+  background: #fafafa;
+  padding: 1rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+.sal-detail-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #6b7280; font-weight: 600; margin-bottom: 0.5rem;
+}
+.sal-detail-list {
+  display: flex; flex-direction: column; gap: 0.375rem;
+}
+.sal-detail-item {
+  display: flex; justify-content: space-between;
+  font-size: 13px;
+}
+.sal-detail-item .label { color: #374151; }
+.sal-detail-item .value { color: #1E2D5A; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sal-detail-placeholder {
+  font-size: 12px; color: #9ca3af; font-style: italic;
+  padding: 0.375rem 0;
+}
+.sal-detail-divider {
+  border: none; border-top: 1px dashed #e5e7eb;
+  margin: 0.75rem 0;
+}
+
+/* Encabezado tabla solo desktop */
+.sal-head {
+  display: none;
+  grid-template-columns: auto 1fr auto auto auto auto auto;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+@media (min-width: 640px) { .sal-head { display: grid; } }
+.sal-head span {
+  font-size: 10px;
+  color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.sal-head .num { text-align: right; }
+
+.sal-empty { padding: 2rem 1rem; text-align: center; color: #9ca3af; }
+`;
+
 export function SalesTable({ sales }: { sales: BranchSales[] }) {
   const sorted = [...sales].sort((a, b) => b.totalSales - a.totalSales);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggle = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   if (sorted.length === 0) {
     return (
-      <div className="card p-8 text-center">
-        <ShoppingBag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-        <p className="text-sm text-gray-400">Sin datos de ventas para mostrar.</p>
-      </div>
+      <>
+        <style dangerouslySetInnerHTML={{ __html: SALES_CSS }} />
+        <section className="exec-section">
+          <div className="exec-section-header">
+            <h3 className="exec-section-title">Ventas por sucursal</h3>
+          </div>
+          <div className="exec-section-body">
+            <div className="sal-empty">
+              <ShoppingBag style={{ width: 32, height: 32, color: "#d1d5db", margin: "0 auto 0.5rem" }} />
+              <p>Sin datos de ventas para mostrar.</p>
+            </div>
+          </div>
+        </section>
+      </>
     );
   }
 
   return (
-    <div className="card overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-        <h3 className="text-sm font-semibold" style={{ color: "#1E2D5A" }}>Ventas por sucursal</h3>
-        <span className="text-xs text-gray-400">{sorted.length} sucursales</span>
+    <>
+      <style dangerouslySetInnerHTML={{ __html: SALES_CSS }} />
+      <section className="exec-section">
+        <div className="exec-section-header">
+          <h3 className="exec-section-title">Ventas por sucursal</h3>
+          <span className="exec-section-meta">{sorted.length} sucursales</span>
+        </div>
+        <div className="exec-section-body">
+          {/* Encabezado (solo desktop) */}
+          <div className="sal-head">
+            <span></span>
+            <span>Sucursal</span>
+            <span className="num">Ventas</span>
+            <span className="num">Unid.</span>
+            <span className="num">Compr.</span>
+            <span className="num">Ticket prom.</span>
+            <span className="num">vs ayer</span>
+          </div>
+
+          {sorted.map((s) => {
+            const open = expanded.has(s.branchId);
+            const v = s.vsYesterday;
+            const varColor = v == null ? "#9ca3af"
+              : v > 0 ? "#059669"
+              : v < 0 ? "#ef4444" : "#9ca3af";
+            const VarIcon = v == null || v === 0 ? Minus : v > 0 ? TrendingUp : TrendingDown;
+
+            return (
+              <div key={s.branchId}>
+                <div className="sal-row" onClick={() => toggle(s.branchId)}>
+                  {open
+                    ? <ChevronDown style={{ width: 16, height: 16, color: "#9ca3af" }} />
+                    : <ChevronRight style={{ width: 16, height: 16, color: "#9ca3af" }} />}
+                  <span className="sal-name">{s.branchName}</span>
+                  <span className="sal-total">{fmtARS(s.totalSales)}</span>
+                  {/* Extras desktop */}
+                  <span className="sal-extras sal-num-col">{fmtInt(s.units)}</span>
+                  <span className="sal-extras sal-num-col">{fmtInt(s.receipts)}</span>
+                  <span className="sal-extras sal-num-col">{fmtARS(s.avgTicket)}</span>
+                  <span className="sal-var" style={{ color: varColor }}>
+                    <VarIcon style={{ width: 14, height: 14 }} />
+                    {v != null ? `${v > 0 ? "+" : ""}${v.toFixed(1)}%` : "—"}
+                  </span>
+                </div>
+                {open && <SalesDetail sales={s} />}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function SalesDetail({ sales }: { sales: BranchSales }) {
+  const isSiaf = sales.dataSource === "siaf";
+  const raw = sales.rawData as { efectivo?: number; tarjeta?: number; obra_social?: number } | null | undefined;
+
+  return (
+    <div className="sal-detail">
+      <div className="sal-detail-title">Detalle por forma de pago</div>
+      <div className="sal-detail-list">
+        {isSiaf && raw ? (
+          <>
+            <div className="sal-detail-item">
+              <span className="label">Efectivo</span>
+              <span className="value">{fmtARS(Number(raw.efectivo ?? 0))}</span>
+            </div>
+            <div className="sal-detail-item">
+              <span className="label">Tarjeta</span>
+              <span className="value">{fmtARS(Number(raw.tarjeta ?? 0))}</span>
+            </div>
+            <div className="sal-detail-item">
+              <span className="label">Obra social</span>
+              <span className="value">{fmtARS(Number(raw.obra_social ?? 0))}</span>
+            </div>
+          </>
+        ) : (
+          <div className="sal-detail-placeholder">
+            Detalle por forma de pago: pendiente de datos reales
+          </div>
+        )}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-            <tr>
-              <th className="text-left px-4 py-2 font-medium">Sucursal</th>
-              <th className="text-right px-4 py-2 font-medium">Ventas</th>
-              <th className="text-right px-4 py-2 font-medium">Unid.</th>
-              <th className="text-right px-4 py-2 font-medium">Comprobantes</th>
-              <th className="text-right px-4 py-2 font-medium">Ticket prom.</th>
-              <th className="text-right px-4 py-2 font-medium">vs ayer</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {sorted.map(s => {
-              const v = s.vsYesterday;
-              const varColor = v == null ? "text-gray-400" : v > 0 ? "text-emerald-600" : v < 0 ? "text-red-500" : "text-gray-400";
-              const VarIcon  = v == null || v === 0 ? Minus : v > 0 ? TrendingUp : TrendingDown;
-              return (
-                <tr key={s.branchId} className="hover:bg-gray-50/60">
-                  <td className="px-4 py-2.5 text-gray-800 font-medium">{s.branchName}</td>
-                  <td className="px-4 py-2.5 text-right font-semibold" style={{ color: "#1E2D5A" }}>{fmtARS(s.totalSales)}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-600">{fmtInt(s.units)}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-600">{fmtInt(s.receipts)}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-600">{fmtARS(s.avgTicket)}</td>
-                  <td className={`px-4 py-2.5 text-right ${varColor}`}>
-                    <span className="inline-flex items-center gap-1 text-xs font-medium">
-                      <VarIcon className="w-3.5 h-3.5" />
-                      {v != null ? `${v > 0 ? "+" : ""}${v.toFixed(1)}%` : "—"}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+
+      <hr className="sal-detail-divider" />
+
+      <div className="sal-detail-list">
+        <div className="sal-detail-placeholder">
+          Detalle por vendedor: pendiente de datos reales
+        </div>
+        <div className="sal-detail-placeholder">
+          Detalle por obra social: pendiente de datos reales
+        </div>
       </div>
     </div>
   );

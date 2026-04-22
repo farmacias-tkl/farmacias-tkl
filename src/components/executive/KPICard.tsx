@@ -2,36 +2,90 @@
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface Props {
-  label:    string;
-  value:    string;
+  label:     string;
+  value:     string;
   sublabel?: string;
   variation?: number | null;
-  accent?:   boolean;
+  variant?:   "default" | "navy";
 }
 
-export function KPICard({ label, value, sublabel, variation, accent }: Props) {
-  const varColor = variation == null
-    ? "text-gray-400"
-    : variation > 0 ? "text-emerald-600"
-    : variation < 0 ? "text-red-500" : "text-gray-400";
+const KPI_CSS = `
+.kpi-card {
+  padding: 1.125rem 1rem;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  border-left: 4px solid #D4632A;
+  min-height: 120px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+@media (min-width: 768px) {
+  .kpi-card { padding: 1.5rem 1.25rem; min-height: 130px; }
+}
+.kpi-card--navy {
+  background: #1E2D5A;
+  border-left: 4px solid #D4632A;
+}
+.kpi-label {
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+.kpi-card--navy .kpi-label { color: rgba(255,255,255,0.75); }
+@media (min-width: 768px) { .kpi-label { font-size: 11px; } }
+
+.kpi-value {
+  margin-top: 0.5rem;
+  font-size: clamp(1.5rem, 6vw, 2.25rem);
+  font-weight: 900;
+  line-height: 1.1;
+  color: #1E2D5A;
+  word-break: break-word;
+}
+.kpi-card--navy .kpi-value { color: #D4632A; }
+
+.kpi-footer {
+  margin-top: 0.5rem;
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.kpi-var {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  font-size: 11px; font-weight: 600;
+}
+.kpi-sublabel { font-size: 11px; color: #9ca3af; }
+.kpi-card--navy .kpi-sublabel { color: rgba(255,255,255,0.55); }
+`;
+
+export function KPICard({ label, value, sublabel, variation, variant = "default" }: Props) {
+  const varColor = variation == null ? "#9ca3af"
+    : variation > 0 ? "#059669"
+    : variation < 0 ? "#ef4444" : "#9ca3af";
   const VarIcon = variation == null || variation === 0 ? Minus : variation > 0 ? TrendingUp : TrendingDown;
+  const showVariation = variation != null;
 
   return (
-    <div
-      className="card p-5"
-      style={accent ? { borderColor: "#D4632A", borderWidth: 1 } : {}}
-    >
-      <p className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">{label}</p>
-      <p className="mt-1.5 text-2xl font-bold" style={{ color: "#1E2D5A" }}>{value}</p>
-      <div className="flex items-center gap-2 mt-2">
-        {variation != null && (
-          <span className={`inline-flex items-center gap-1 text-xs font-medium ${varColor}`}>
-            <VarIcon className="w-3.5 h-3.5" />
-            {variation > 0 ? "+" : ""}{variation.toFixed(1)}%
-          </span>
+    <>
+      <style dangerouslySetInnerHTML={{ __html: KPI_CSS }} />
+      <div className={variant === "navy" ? "kpi-card kpi-card--navy" : "kpi-card"}>
+        <div className="kpi-label">{label}</div>
+        <div className="kpi-value">{value}</div>
+        {(showVariation || sublabel) && (
+          <div className="kpi-footer">
+            {showVariation && (
+              <span className="kpi-var" style={{ color: varColor }}>
+                <VarIcon style={{ width: 14, height: 14 }} />
+                {variation! > 0 ? "+" : ""}{variation!.toFixed(1)}%
+              </span>
+            )}
+            {sublabel && <span className="kpi-sublabel">{sublabel}</span>}
+          </div>
         )}
-        {sublabel && <span className="text-xs text-gray-400">{sublabel}</span>}
       </div>
-    </div>
+    </>
   );
 }
