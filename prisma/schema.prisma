@@ -105,6 +105,8 @@ enum OvertimeReason {
 model Branch {
   id        String   @id @default(cuid())
   name      String   @unique
+  aliases   String[] @default([])
+  code      String?  @unique
   address   String?
   phone     String?
   active    Boolean  @default(true)
@@ -112,13 +114,15 @@ model Branch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users             User[]
-  employees         Employee[]
-  branchAssignments EmployeeBranchAssignment[]
-  positionScopes    PositionBranchScope[]
-  absenceRecords    AbsenceRecord[]
-  actionPlans       ActionPlan[]
-  overtimeRecords   OvertimeRecord[]
+  users                User[]
+  employees            Employee[]
+  branchAssignments    EmployeeBranchAssignment[]
+  positionScopes       PositionBranchScope[]
+  absenceRecords       AbsenceRecord[]
+  actionPlans          ActionPlan[]
+  overtimeRecords      OvertimeRecord[]
+  bankBalanceSnapshots BankBalanceSnapshot[]
+  salesSnapshots       SalesSnapshot[]
 
   @@index([active])
 }
@@ -358,9 +362,10 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  accounts  Account[]
-  sessions  Session[]
-  auditLogs AuditLog[]
+  accounts   Account[]
+  sessions   Session[]
+  auditLogs  AuditLog[]
+  accessLogs AccessLog[]
 
   @@index([email])
   @@index([role])
@@ -443,4 +448,119 @@ model Notification {
 
   @@index([userId, read])
   @@index([createdAt])
+}
+
+// ============================================================================
+// DASHBOARD EJECUTIVO — enums y modelos
+// ============================================================================
+
+enum SyncStatus {
+  SUCCESS
+  ERROR
+  PARTIAL
+  NO_FILE
+  STALE
+}
+
+enum SyncSource {
+  GOOGLE_DRIVE
+  SALES_API
+}
+
+enum SyncTrigger {
+  CRON
+  MANUAL
+  WEBHOOK
+}
+
+enum AccessAction {
+  LOGIN
+  LOGOUT
+  VIEW_DASHBOARD
+  VIEW_BALANCES
+  VIEW_SALES
+  VIEW_COMPARATIVE
+  EXPORT
+}
+
+model BankBalanceSnapshot {
+  id           String   @id @default(cuid())
+  branchId     String
+  bankName     String
+  accountLabel String
+  balance      Decimal  @db.Decimal(15, 2)
+  checks       Decimal? @db.Decimal(15, 2)
+  prevBalance  Decimal? @db.Decimal(15, 2)
+  snapshotDate DateTime @db.Date
+  sourceSheet  String
+  createdAt    DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, bankName, accountLabel, snapshotDate])
+  @@index([snapshotDate(sort: Desc)])
+  @@index([branchId, snapshotDate(sort: Desc)])
+}
+
+model SalesSnapshot {
+  id           String   @id @default(cuid())
+  branchId     String
+  snapshotDate DateTime @db.Date
+  totalSales   Decimal  @db.Decimal(15, 2)
+  units        Int
+  receipts     Int
+  avgTicket    Decimal  @db.Decimal(10, 2)
+  rawData      Json
+  dataSource   String
+  createdAt    DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, snapshotDate])
+  @@index([snapshotDate(sort: Desc)])
+  @@index([branchId, snapshotDate(sort: Desc)])
+}
+
+model SyncLog {
+  id            String      @id @default(cuid())
+  source        SyncSource
+  status        SyncStatus
+  message       String?
+  rowsProcessed Int?
+  warnings      Json?
+  durationMs    Int?
+  syncDate      DateTime    @db.Date
+  triggeredBy   SyncTrigger
+  createdAt     DateTime    @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([source, syncDate])
+}
+
+model SourceFile {
+  id          String   @id @default(cuid())
+  driveFileId String   @unique
+  filename    String
+  fileDate    DateTime @db.Date
+  processedAt DateTime
+  rowsCount   Int
+  status      String
+  createdAt   DateTime @default(now())
+
+  @@index([fileDate(sort: Desc)])
+}
+
+model AccessLog {
+  id           String       @id @default(cuid())
+  userId       String
+  action       AccessAction
+  branchFilter String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
 }

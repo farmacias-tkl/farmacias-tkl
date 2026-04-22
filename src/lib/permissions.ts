@@ -34,6 +34,8 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/admin":         ["ADMIN"],
   "/admin/usuarios":["ADMIN"],
   "/perfil":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/executive":     ["OWNER","ADMIN","SUPERVISOR"],
+  "/sin-acceso":    ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   // API routes
   "/api/me":            ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/api/profile":       ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
@@ -45,6 +47,8 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/overtime":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/assignments":   ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
+  "/api/dashboard":     ["OWNER","ADMIN","SUPERVISOR"],
+  "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {

@@ -1,0 +1,38 @@
+name: Daily Sync — Saldos Bancarios
+
+on:
+  schedule:
+    - cron: "0 9 * * 1-6"
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Fuente a sincronizar"
+        required: false
+        default: "balances"
+        type: choice
+        options:
+          - balances
+          - all
+
+jobs:
+  sync:
+    name: Sync Balances
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger sync webhook
+        run: |
+          SOURCE="${{ github.event.inputs.source || 'balances' }}"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.DASHBOARD_URL }}/api/sync/trigger" \
+            -H "Authorization: Bearer ${{ secrets.SYNC_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"source\": \"$SOURCE\"}" \
+            --max-time 120)
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "Status: $HTTP_STATUS"
+          echo "Response: $BODY"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Sync failed with status $HTTP_STATUS"
+            exit 1
+          fi

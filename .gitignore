@@ -21,6 +21,8 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.neon
+.env.production
 # .env.example SÍ se commitea (sin valores reales)
 
 # Prisma

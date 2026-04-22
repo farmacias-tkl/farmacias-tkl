@@ -75,17 +75,33 @@ const USERS: Array<{ name: string; email: string; role: UserRole; branchName: st
 async function main() {
   console.log("🌱 Seed Farmacias TKL v2\n");
 
-  // Sucursales
+  // Sucursales — code único por branch real; aliases vacíos hasta que el cliente entregue el mapeo
   console.log("📍 Sucursales...");
+  const BRANCH_CODES: Record<string, string> = {
+    "Tekiel":      "TEK",
+    "San Miguel":  "SMI",
+    "Galesa":      "GAL",
+    "San Agustin": "SAG",
+    "Etcheverry":  "ETC",
+    "Quintana":    "QUI",
+    "America":     "AME",
+    "Naveira":     "NAV",
+    "Facultad":    "FAC",
+    "La Perla":    "LPE",
+    "Larcade":     "LAR",
+    "Call Center": "CCE",
+  };
   const branchMap: Record<string, string> = {};
   for (const name of BRANCHES) {
+    const code = BRANCH_CODES[name] ?? name.substring(0, 3).toUpperCase();
     const b = await prisma.branch.upsert({
-      where: { name }, update: {},
-      create: { name, active: true },
+      where:  { name },
+      update: { code, aliases: [] }, // force-refresh aliases/code en branches existentes
+      create: { name, active: true, code, aliases: [] },
     });
     branchMap[name] = b.id;
   }
-  console.log(`   ✓ ${BRANCHES.length} sucursales`);
+  console.log(`   ✓ ${BRANCHES.length} sucursales (codes actualizados, aliases vacíos pendientes del cliente)`);
 
   // Puestos
   console.log("💼 Puestos...");
