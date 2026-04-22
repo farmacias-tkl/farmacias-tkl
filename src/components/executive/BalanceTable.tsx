@@ -30,12 +30,16 @@ const BALANCE_CSS = `
   font-size: 14px; font-weight: 700; color: #1E2D5A; white-space: nowrap;
 }
 
-/* --- DESKTOP: tabla detallada dentro del row expandido --- */
+/* Mobile-first: mobile visible por default, desktop oculto */
+.bal-detail-mobile  { display: block; background: #fafafa; padding: 0.5rem 1rem 1rem 1rem; }
 .bal-detail-desktop { display: none; }
+
+/* Desktop (≥640px): override — mobile oculto, desktop visible */
 @media (min-width: 640px) {
-  .bal-detail-desktop { display: block; padding: 0.5rem 1rem 1rem 1rem; background: #fafafa; }
   .bal-detail-mobile  { display: none; }
+  .bal-detail-desktop { display: block; padding: 0.5rem 1rem 1rem 1rem; background: #fafafa; }
 }
+
 .bal-table { width: 100%; font-size: 12px; border-collapse: collapse; }
 .bal-table thead tr { border-bottom: 1px solid #e5e7eb; }
 .bal-table th {
@@ -47,9 +51,6 @@ const BALANCE_CSS = `
   padding: 0.5rem; border-top: 1px solid #f3f4f6;
   color: #374151;
 }
-
-/* --- MOBILE: lista vertical (sin tabla) --- */
-.bal-detail-mobile { display: block; background: #fafafa; padding: 0.5rem 1rem 1rem 1rem; }
 .bal-account-row {
   display: flex; justify-content: space-between; align-items: center;
   gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid #f3f4f6;

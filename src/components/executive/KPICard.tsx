@@ -16,13 +16,14 @@ const KPI_CSS = `
   background: white;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   border-left: 4px solid #D4632A;
-  min-height: 120px;
-  display: flex; flex-direction: column; justify-content: space-between;
+  min-height: 110px;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 0.5rem;
   box-sizing: border-box;
   overflow: hidden;
 }
 @media (min-width: 768px) {
-  .kpi-card { padding: 1.5rem 1.25rem; min-height: 130px; }
+  .kpi-card { padding: 1.5rem 1.25rem; min-height: 120px; }
 }
 .kpi-card--navy {
   background: #1E2D5A;
@@ -40,17 +41,18 @@ const KPI_CSS = `
 @media (min-width: 768px) { .kpi-label { font-size: 11px; } }
 
 .kpi-value {
-  margin-top: 0.5rem;
-  font-size: clamp(1.5rem, 6vw, 2.25rem);
+  font-size: clamp(1.1rem, 2.2vw, 1.5rem);
   font-weight: 900;
   line-height: 1.1;
   color: #1E2D5A;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.kpi-value--long { font-size: 1.1rem; }
 .kpi-card--navy .kpi-value { color: #D4632A; }
 
 .kpi-footer {
-  margin-top: 0.5rem;
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
 }
 .kpi-var {
@@ -73,7 +75,7 @@ export function KPICard({ label, value, sublabel, variation, variant = "default"
       <style dangerouslySetInnerHTML={{ __html: KPI_CSS }} />
       <div className={variant === "navy" ? "kpi-card kpi-card--navy" : "kpi-card"}>
         <div className="kpi-label">{label}</div>
-        <div className="kpi-value">{value}</div>
+        <div className={value.length > 10 ? "kpi-value kpi-value--long" : "kpi-value"}>{value}</div>
         {(showVariation || sublabel) && (
           <div className="kpi-footer">
             {showVariation && (

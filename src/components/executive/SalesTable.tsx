@@ -8,10 +8,10 @@ const fmtARS = (n: number) =>
 const fmtInt = (n: number) => new Intl.NumberFormat("es-AR").format(n);
 
 const SALES_CSS = `
-/* Fila de sucursal (header clickeable) */
+/* Fila de sucursal (header clickeable) — mobile: 4 columnas */
 .sal-row {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: 20px 1fr auto auto;
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
@@ -26,25 +26,29 @@ const SALES_CSS = `
 .sal-name {
   font-size: 14px; font-weight: 600; color: #111827;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-align: left;
 }
-.sal-total { font-size: 14px; font-weight: 700; color: #1E2D5A; white-space: nowrap; }
+.sal-total { font-size: 14px; font-weight: 700; color: #1E2D5A; white-space: nowrap; text-align: right; }
 .sal-var {
   display: inline-flex; align-items: center; gap: 0.25rem;
   font-size: 11px; font-weight: 600; white-space: nowrap;
+  justify-content: flex-end;
 }
 
 /* Columnas extras (Unidades, Comprobantes, Ticket) — solo desktop */
 .sal-extras { display: none; }
-@media (min-width: 640px) {
-  .sal-extras { display: contents; }
-  .sal-row {
-    grid-template-columns: auto 1fr auto auto auto auto auto;
-  }
-}
 .sal-num-col {
   text-align: right;
   font-size: 12px; color: #6b7280; font-variant-numeric: tabular-nums;
-  min-width: 60px;
+  white-space: nowrap;
+}
+@media (min-width: 640px) {
+  .sal-extras { display: block; }
+  /* Desktop: 7 columnas con fracciones proporcionales fijas
+     chevron(20px) | sucursal(25) | ventas(18) | unid(12) | compr(12) | ticket(18) | var(15) */
+  .sal-row {
+    grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr;
+  }
 }
 
 /* Detalle expandido */
@@ -75,16 +79,21 @@ const SALES_CSS = `
   margin: 0.75rem 0;
 }
 
-/* Encabezado tabla solo desktop */
+/* Encabezado tabla solo desktop, misma grid que .sal-row */
 .sal-head {
   display: none;
-  grid-template-columns: auto 1fr auto auto auto auto auto;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   background: #f9fafb;
   border-bottom: 1px solid #e5e7eb;
 }
-@media (min-width: 640px) { .sal-head { display: grid; } }
+@media (min-width: 640px) {
+  .sal-head {
+    display: grid;
+    grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr;
+    align-items: center;
+  }
+}
 .sal-head span {
   font-size: 10px;
   color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;
