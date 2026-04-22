@@ -51,7 +51,9 @@ function pickN<T>(arr: T[], n: number): T[] {
 }
 
 async function main() {
-  console.log("🌱 Seed demo — Dashboard Ejecutivo\n");
+  const host = process.env.DATABASE_URL?.split("@")[1]?.split("/")[0] ?? "unknown";
+  console.log("🌱 Seed demo — Dashboard Ejecutivo");
+  console.log(`   → Target DB host: ${host}\n`);
 
   // ─── Cleanup ─────────────────────────────────────────────
   console.log("🧹 Limpiando datos demo previos...");
