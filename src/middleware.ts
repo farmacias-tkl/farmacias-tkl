@@ -16,7 +16,11 @@ export default auth((req: NextRequest & { auth: any }) => {
   if (pathname.startsWith("/api/auth") || pathname.startsWith("/_next") ||
       pathname === "/login" || pathname === "/cambiar-password" || pathname === "/sin-acceso") {
     if (pathname === "/login" && session?.user) {
-      return NextResponse.redirect(new URL(isDashboardHost ? "/executive" : "/dashboard", req.url));
+      const isOwner = session.user.role === "OWNER";
+      return NextResponse.redirect(new URL(
+        (isDashboardHost || isOwner) ? "/executive" : "/dashboard",
+        req.url,
+      ));
     }
     return NextResponse.next();
   }

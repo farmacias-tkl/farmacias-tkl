@@ -1,7 +1,8 @@
 "use client";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LogOut, Wallet, ShoppingBag, Receipt, Package, BarChart3 } from "lucide-react";
+import { LogOut, LayoutDashboard } from "lucide-react";
 import { KPICard } from "./KPICard";
 import { BalanceTable } from "./BalanceTable";
 import { SalesTable } from "./SalesTable";
@@ -12,15 +13,37 @@ const fmtARS = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
 const fmtInt = (n: number) => new Intl.NumberFormat("es-AR").format(n);
 
+// Formatters deterministas — mismo output en server y client (sin locale-dependent toLocale*)
+const WEEKDAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const MONTHS   = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+function fmtLongDate(d: Date | string): string {
+  const date = new Date(d);
+  return `${WEEKDAYS[date.getDay()]}, ${date.getDate()} de ${MONTHS[date.getMonth()]} de ${date.getFullYear()}`;
+}
+
+function fmtDateTime(d: Date | string): string {
+  const date    = new Date(d);
+  const day     = date.getDate().toString().padStart(2, "0");
+  const month   = (date.getMonth() + 1).toString().padStart(2, "0");
+  const year    = date.getFullYear().toString().slice(-2);
+  const hours   = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${day}/${month}/${year}, ${hours}:${minutes}`;
+}
+
 interface Props {
   data: DashboardSummary;
   user: { name: string; role: string };
+  children?: React.ReactNode;
 }
 
-export function ExecutiveDashboard({ data, user }: Props) {
+export function ExecutiveDashboard({ data, user, children }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentBranch = searchParams.get("branch") ?? "ALL";
+  const operativaUrl = process.env.NEXT_PUBLIC_OPERATIONAL_URL || "/dashboard";
 
   const onBranchChange = (id: string) => {
     const p = new URLSearchParams(searchParams.toString());
@@ -29,7 +52,7 @@ export function ExecutiveDashboard({ data, user }: Props) {
   };
 
   const lastSyncFmt = data.lastSync
-    ? `${new Date(data.lastSync.at).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })} · ${data.lastSync.status}`
+    ? `${fmtDateTime(data.lastSync.at)} · ${data.lastSync.status}`
     : "sin datos";
 
   return (
@@ -57,6 +80,15 @@ export function ExecutiveDashboard({ data, user }: Props) {
               <p className="text-xs text-white/80 leading-none">{user.name}</p>
               <p className="text-[10px] text-white/50 mt-0.5 uppercase tracking-wide">{user.role}</p>
             </div>
+            {user.role === "OWNER" && (
+              <Link
+                href={operativaUrl}
+                className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white border border-white/20 hover:border-white/40 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                Plataforma Operativa →
+              </Link>
+            )}
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white border border-white/20 hover:border-white/40 rounded-lg px-3 py-1.5 transition-colors"
@@ -73,7 +105,7 @@ export function ExecutiveDashboard({ data, user }: Props) {
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-lg font-bold" style={{ color: "#1E2D5A" }}>
-              {new Date(data.date).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              {fmtLongDate(data.date)}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">Última sync: {lastSyncFmt}</p>
           </div>
@@ -107,6 +139,7 @@ export function ExecutiveDashboard({ data, user }: Props) {
         {/* Tablas */}
         <BalanceTable balances={data.balancesByBranch} />
         <SalesTable   sales={data.salesByBranch} />
+        {children}
       </main>
     </div>
   );

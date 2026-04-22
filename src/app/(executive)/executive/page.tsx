@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ExecutiveDashboard } from "@/components/executive/ExecutiveDashboard";
+import { ComparativeSection } from "@/components/executive/ComparativeSection";
 
 export const revalidate = 300;
 
@@ -109,5 +110,9 @@ export default async function ExecutivePage({
     alertas,
   };
 
-  return <ExecutiveDashboard data={data} user={session.user} />;
+  return (
+    <ExecutiveDashboard data={data} user={session.user}>
+      <ComparativeSection />
+    </ExecutiveDashboard>
+  );
 }

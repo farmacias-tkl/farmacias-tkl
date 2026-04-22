@@ -56,6 +56,7 @@ export function BalanceTable({ balances }: { balances: BranchBalance[] }) {
                     <thead>
                       <tr className="text-left text-gray-500">
                         <th className="py-1.5 font-medium">Banco</th>
+                        <th className="py-1.5 font-medium">Cuenta</th>
                         <th className="py-1.5 font-medium text-right">Saldo</th>
                         <th className="py-1.5 font-medium text-right">Cheques</th>
                         <th className="py-1.5 font-medium text-right">Saldo ant.</th>
@@ -65,6 +66,7 @@ export function BalanceTable({ balances }: { balances: BranchBalance[] }) {
                       {b.accounts.map((a, i) => (
                         <tr key={`${b.branchId}-${i}`} className="border-t border-gray-200">
                           <td className="py-1.5">{a.bankName}</td>
+                          <td className="py-1.5 text-gray-500">{a.accountLabel.replace(`${a.bankName} - `, "")}</td>
                           <td className="py-1.5 text-right font-medium">{fmtARS(a.balance)}</td>
                           <td className="py-1.5 text-right text-gray-500">{a.checks != null ? fmtARS(a.checks) : "—"}</td>
                           <td className="py-1.5 text-right text-gray-500">{a.prevBalance != null ? fmtARS(a.prevBalance) : "—"}</td>

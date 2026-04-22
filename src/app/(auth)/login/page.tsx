@@ -1,7 +1,7 @@
 "use client";
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -36,7 +36,13 @@ function LoginForm() {
       setServerErr("Email o contrasena incorrectos");
       return;
     }
-    router.push(callbackUrl);
+
+    // OWNER: ruta default → /executive. Si tiene callbackUrl explícito
+    // (vino redirigido desde una página), respetarlo.
+    const wantsDefault = callbackUrl === "/dashboard";
+    const sess = await getSession();
+    const target = (sess?.user?.role === "OWNER" && wantsDefault) ? "/executive" : callbackUrl;
+    router.push(target);
     router.refresh();
   }
 
