@@ -56,7 +56,9 @@ export async function GET(request: NextRequest) {
 
   const ranges = getPeriodRanges(period)!;
   const branchFilter = branchId !== "ALL" ? { branchId } : {};
-  const execVisibility = { branch: { showInExecutive: true } };
+  // Sales queries: requieren tanto showInExecutive=true como showInOperative=true
+  // (excluye Patricios y Condominio ET que son exec-only y no tienen ventas reales)
+  const execVisibility = { branch: { showInExecutive: true, showInOperative: true } };
 
   const [currentRows, pastRows, branches] = await Promise.all([
     prisma.salesSnapshot.findMany({
@@ -81,6 +83,7 @@ export async function GET(request: NextRequest) {
       where: {
         active: true,
         showInExecutive: true,
+        showInOperative: true,
         ...(branchId !== "ALL" && { id: branchId }),
       },
       select: { id: true, name: true },

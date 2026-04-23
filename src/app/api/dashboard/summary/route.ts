@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     where: {
       snapshotDate: targetDate,
       ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true },
+      branch: { showInExecutive: true, showInOperative: true },
     },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     where: {
       snapshotDate: yesterday,
       ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true },
+      branch: { showInExecutive: true, showInOperative: true },
     },
     select: { branchId: true, totalSales: true },
   });

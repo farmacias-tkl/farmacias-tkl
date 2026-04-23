@@ -132,12 +132,15 @@ async function main() {
   console.log(`   ✓ SyncLog borrados:             ${delLogs.count}\n`);
 
   // ─── Cargar branches ─────────────────────────────────────
-  const branches = await prisma.branch.findMany({
+  // allBranches: todas las activas (para balances — incluye Patricios, Condominio ET)
+  // salesBranches: solo showInOperative=true (para ventas — excluye exec-only)
+  const allBranches = await prisma.branch.findMany({
     where:  { active: true },
-    select: { id: true, name: true },
+    select: { id: true, name: true, showInOperative: true },
     orderBy: { name: "asc" },
   });
-  console.log(`📍 ${branches.length} sucursales activas detectadas\n`);
+  const salesBranches = allBranches.filter((b) => b.showInOperative !== false);
+  console.log(`📍 ${allBranches.length} sucursales activas (${salesBranches.length} con ventas; ${allBranches.length - salesBranches.length} solo balance)\n`);
 
   // ─── Rangos de fechas ────────────────────────────────────
   // Balances: últimos 30 días (no se muestran históricos en UI)
@@ -164,7 +167,7 @@ async function main() {
   let branchesWithAccounts = 0;
   let branchesSkipped      = 0;
 
-  for (const branch of branches) {
+  for (const branch of allBranches) {
     const accounts = BRANCH_ACCOUNTS[branch.name];
     if (!accounts) {
       console.log(`   ⚠  Sin config de cuentas para "${branch.name}" — skip`);
@@ -198,10 +201,10 @@ async function main() {
   await prisma.bankBalanceSnapshot.createMany({ data: balanceData });
   console.log(`   ✓ ${balanceData.length} saldos bancarios insertados (${branchesWithAccounts} sucursales con cuentas, ${branchesSkipped} sin config)\n`);
 
-  // ─── Ventas ──────────────────────────────────────────────
+  // ─── Ventas — solo para branches con showInOperative=true ─
   console.log("🛒 Generando ventas...");
   const salesData: Prisma.SalesSnapshotCreateManyInput[] = [];
-  for (const branch of branches) {
+  for (const branch of salesBranches) {
     const tier      = BRANCH_TIERS[branch.name] ?? 1.5;
     const baseSales = tier * 1_000_000;
 
@@ -251,7 +254,7 @@ async function main() {
     syncData.push({
       source:        "GOOGLE_DRIVE",
       status:        "SUCCESS",
-      message:       `[DEMO] Sincronización exitosa — ${branches.length} sucursales, ${rowsPerDay} saldos procesados`,
+      message:       `[DEMO] Sincronización exitosa — ${allBranches.length} sucursales, ${rowsPerDay} saldos procesados`,
       rowsProcessed: rowsPerDay,
       durationMs:    randInt(2500, 5500),
       syncDate:      day,
@@ -268,7 +271,7 @@ async function main() {
   console.log(`   BankBalanceSnapshot: ${balanceData.length.toString().padStart(5)}`);
   console.log(`   SalesSnapshot:       ${salesData.length.toString().padStart(5)}`);
   console.log(`   SyncLog:             ${syncData.length.toString().padStart(5)}`);
-  console.log(`   Sucursales:          ${branches.length.toString().padStart(5)}`);
+  console.log(`   Sucursales:          ${allBranches.length.toString().padStart(5)}`);
   console.log(`   Rango balances:      ${balanceDays[0].toLocaleDateString("es-AR")}  →  ${balanceDays[balanceDays.length - 1].toLocaleDateString("es-AR")}`);
   console.log(`   Rango ventas:        ${salesDays[0].toLocaleDateString("es-AR")}  →  ${salesDays[salesDays.length - 1].toLocaleDateString("es-AR")}`);
   console.log("═".repeat(55));

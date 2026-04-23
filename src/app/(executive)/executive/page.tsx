@@ -58,7 +58,7 @@ export default async function ExecutivePage({
     where: {
       snapshotDate: today,
       ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true },
+      branch: { showInExecutive: true, showInOperative: true },
     },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
@@ -67,7 +67,7 @@ export default async function ExecutivePage({
     where: {
       snapshotDate: yesterday,
       ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true },
+      branch: { showInExecutive: true, showInOperative: true },
     },
     select: { branchId: true, totalSales: true },
   });
