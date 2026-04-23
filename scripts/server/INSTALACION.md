@@ -1,245 +1,296 @@
-# Instalación — siaf_to_drive.py (Servidor TKL)
+# Instalación — siaf_to_drive.py
 
-Guía paso a paso para instalar y programar la extracción diaria de datos de ventas
-desde el sistema SIAF y subida a Google Drive.
+Guía paso a paso para instalar y programar la extracción diaria de ventas
+del sistema SIAF hacia la carpeta de red de Farmacias TKL.
 
-## 1. Requisitos
+---
+
+## 1. Requisitos previos
 
 - Windows Server 2016+ o Windows 10+
-- Permisos de administrador para instalar Python y crear tareas programadas
-- Acceso a internet desde el servidor (para contactar Google Drive)
-- Carpeta `C:\_Datos\_administracion\temporal_sucursales\` con los datos de SIAF
+- Permisos de administrador en el servidor
+- **Python 3.11.15** instalado con la casilla "Add Python to PATH" marcada
+- **Acceso de escritura** a la carpeta de red:
+  ```
+  \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\
+  ```
+- Carpeta `C:\_Datos\_administracion\temporal_sucursales\` con los DBF
+  de SIAF (debe existir y actualizarse diariamente)
+
+**NOTA sobre la carpeta de saldos:** La administración sube el Excel de saldos
+bancarios a `\\192.168.0.250\TKL_sync_IA\TKL-Saldos\`. **Este script NO toca
+esa carpeta** — solo escribe CSVs de ventas en `TKL-SIAF-CSV\`.
 
 ---
 
 ## 2. Instalar Python 3.11
 
-1. Abrí un navegador en el servidor y andá a https://www.python.org/downloads/
-2. Descargá **Python 3.11.x** (el instalador de 64-bit para Windows)
-3. Ejecutá el instalador
-4. **IMPORTANTE**: en la primera pantalla marcá la casilla **"Add python.exe to PATH"**
-   antes de clickear "Install Now"
-5. Esperá que termine. Te va a decir "Setup was successful".
+1. Abrí un navegador en el servidor y descargá Python 3.11.x desde
+   https://www.python.org/downloads/
+2. Ejecutá el instalador.
+3. **IMPORTANTE**: en la primera pantalla marcá **"Add python.exe to PATH"**
+   antes de clickear "Install Now".
+4. Esperá que termine.
 
-**Verificá la instalación:** Abrí `cmd` (Símbolo del sistema) y escribí:
-
+**Verificá** abriendo `cmd` y escribiendo:
 ```
 python --version
 ```
-
-Deberías ver algo como `Python 3.11.8`. Si dice "no se reconoce el comando", re-instalá
-Python asegurándote de marcar la casilla PATH.
+Debe mostrar `Python 3.11.15` (o similar 3.11.x).
 
 ---
 
-## 3. Instalar las dependencias
+## 3. Instalar dependencias
 
-1. Copiá toda la carpeta `scripts\server\` a una ruta estable del servidor. Por ejemplo:
+1. Copiá la carpeta del script al servidor en una ubicación estable:
    ```
    C:\TKL\siaf_sync\
    ```
-   Debería contener estos archivos:
+   Debe contener:
    - `siaf_to_drive.py`
    - `requirements.txt`
    - `INSTALACION.md` (este archivo)
 
-2. Abrí `cmd` **como administrador**
-3. Navegá a la carpeta:
+2. Abrí `cmd` **como administrador**:
    ```
    cd C:\TKL\siaf_sync
-   ```
-4. Instalá las dependencias:
-   ```
    pip install -r requirements.txt
    ```
 
-La primera vez tarda unos minutos (descarga Google API libraries).
+Tarda pocos segundos — solo instala `dbfread`.
 
 ---
 
-## 4. Configurar el Service Account de Google
+## 4. Verificar rutas en el script
 
-Para que el script pueda subir archivos a Drive necesita un "Service Account".
-Este archivo lo provee Daniel (administrador del sistema).
+Abrí `siaf_to_drive.py` con el Bloc de notas o Notepad++ y confirmá que las
+constantes al inicio coinciden con el servidor real:
 
-1. Pedile a Daniel el archivo `credentials.json`
-2. Copialo a la misma carpeta del script:
-   ```
-   C:\TKL\siaf_sync\credentials.json
-   ```
-3. Verificá que quedó ahí. El archivo es un JSON que empieza con `{"type": "service_account", ...`
-
-**⚠️ Este archivo es un secreto.** No lo subas a internet ni lo mandes por mail sin cifrar.
-
----
-
-## 5. Configurar el ID de la carpeta de Drive
-
-Daniel también te va a pasar un **ID de carpeta de Google Drive**. Es un string largo,
-algo como: `1A2bCdE3FgHiJk4LmNoPqRsTuVwXyZ`.
-
-1. Abrí el archivo `siaf_to_drive.py` con el Bloc de notas o Notepad++
-2. Buscá la línea que dice:
-   ```
-   DRIVE_FOLDER_ID = "REEMPLAZAR_CON_ID_DE_CARPETA_DRIVE"
-   ```
-3. Reemplazá `REEMPLAZAR_CON_ID_DE_CARPETA_DRIVE` con el ID real que te pasó Daniel.
-   Ejemplo:
-   ```
-   DRIVE_FOLDER_ID = "1A2bCdE3FgHiJk4LmNoPqRsTuVwXyZ"
-   ```
-4. Guardá el archivo.
-
----
-
-## 6. Test manual del script
-
-Antes de programar la tarea, probalo manualmente para confirmar que funciona.
-
-1. Abrí `cmd` **como administrador**
-2. Navegá a la carpeta:
-   ```
-   cd C:\TKL\siaf_sync
-   ```
-3. Ejecutá:
-   ```
-   python siaf_to_drive.py
-   ```
-
-**Qué deberías ver:**
+```python
+BASE_PATH    = Path(r"C:\_Datos\_administracion\temporal_sucursales")
+OUTPUT_DIR   = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV")
+CONTROL_FILE = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
+LOG_PATH     = Path(r"C:\_Datos\_administracion\tkl_sync.log")
 ```
-2026-04-22 23:00:01 [INFO] ============================================================
-2026-04-22 23:00:01 [INFO] 🚀 Iniciando sync — fecha objetivo: 2026-04-21
-2026-04-22 23:00:02 [INFO] [America] procesando…
-2026-04-22 23:00:02 [INFO] [America] CSV generado: America_20260421.csv (ventas=..., tickets=..., unidades=...)
-2026-04-22 23:00:03 [INFO] [America] ✓ subido a Drive (file_id=...)
+
+Si alguna ruta cambió, editá y guardá el archivo.
+
+---
+
+## 5. Primera ejecución (manual)
+
+La primera vez que corra, el script procesa **todo el historial disponible**
+de cada sucursal. Esto puede tardar varios minutos.
+
+```
+cd C:\TKL\siaf_sync
+python siaf_to_drive.py
+```
+
+**Qué deberías ver en pantalla:**
+```
+[2026-04-22 03:00:01] [INFO] ============================================================
+[2026-04-22 03:00:01] [INFO] === Inicio sync TKL SIAF ===
+[2026-04-22 03:00:01] [INFO] ============================================================
+[2026-04-22 03:00:02] [INFO] [America] procesando — full-history (primera vez)
+[2026-04-22 03:00:45] [INFO] [America] ✓ 547 día(s) procesados | ventas.csv=547, vendedores.csv=8234, ossocial.csv=6102
+[2026-04-22 03:00:45] [INFO] [Facultad] procesando — full-history (primera vez)
 ...
-2026-04-22 23:00:45 [INFO] Resumen: ✓ 11 OK   ✗ 0 errores   de 11 sucursales
+[2026-04-22 03:08:22] [INFO] === Fin sync: ✓ 11 OK   ✗ 0 con errores   de 11 sucursales ===
 ```
 
-4. Verificá en Google Drive que aparecieron los CSVs en la carpeta.
-5. Si hay errores, mirá la sección **Troubleshooting** al final.
+**Verificá** que en `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\` aparecieron
+33 archivos CSV (3 por sucursal × 11 sucursales).
+
+Si hay errores, mirá la sección **Troubleshooting** al final.
 
 ---
 
-## 7. Programar la tarea diaria (Windows Task Scheduler)
+## 6. Programar tarea diaria en Windows
 
-1. Presioná **Win + R**, escribí `taskschd.msc` y Enter. Se abre el "Programador de tareas".
-2. En el panel derecho clickeá **"Crear tarea..."** (NO "Crear tarea básica" — necesitamos
-   opciones avanzadas).
+1. Abrí el **Programador de tareas** (escribí `taskschd.msc` en Inicio).
+2. En el panel derecho: **"Crear tarea básica..."**
 
-### Pestaña **General**
+### Paso 1 — Nombre
+- **Nombre:** `TKL Sync SIAF`
+- **Descripción:** `Extrae ventas del día y las escribe en \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\`
 
-- **Nombre:** `TKL - Sync SIAF a Drive`
-- **Descripción:** `Extrae ventas del día y las sube a Google Drive. Corre diariamente a las 23:00.`
-- Marcar ☑ **"Ejecutar tanto si el usuario inició sesión como si no"**
-- Marcar ☑ **"Ejecutar con los privilegios más altos"**
-- **Configurar para:** Windows Server 2019 (o la versión que corresponda)
+### Paso 2 — Desencadenador
+- **Diariamente**
+- **Iniciar:** hoy a las **03:00:00** AM
+- **Repetir cada:** 1 día
 
-### Pestaña **Desencadenadores (Triggers)**
+### Paso 3 — Acción
+- **Iniciar un programa**
+- **Programa o script:** `python`
+- **Agregar argumentos:** `C:\TKL\siaf_sync\siaf_to_drive.py`
+- **Iniciar en (opcional):** `C:\TKL\siaf_sync\`
 
-1. Clickeá **"Nuevo..."**
-2. **Iniciar la tarea:** "Según una programación"
-3. **Diariamente**, comenzando hoy a las **23:00:00**
-4. Marcar ☑ **"Habilitado"**
-5. OK
+### Paso 4 — Finalizar
+- Marcar ☑ **"Abrir el diálogo Propiedades de esta tarea cuando haga clic en Finalizar"**
+- Clickear **Finalizar**
 
-### Pestaña **Acciones**
+### Paso 5 — Propiedades (ventana que se abre)
+Pestaña **General**:
+- ☑ **"Ejecutar tanto si el usuario inició sesión como si no"**
+- ☑ **"Ejecutar con los privilegios más altos"**
 
-1. Clickeá **"Nueva..."**
-2. **Acción:** "Iniciar un programa"
-3. **Programa o script:** (clickear "Examinar…" y buscar `python.exe`, típicamente en
-   `C:\Users\[Usuario]\AppData\Local\Programs\Python\Python311\python.exe`, o bien
-   escribir directamente `python`)
-4. **Agregar argumentos (opcional):** `siaf_to_drive.py`
-5. **Iniciar en (opcional):** `C:\TKL\siaf_sync`
-6. OK
+Pestaña **Condiciones**:
+- ☐ Desmarcar "Iniciar la tarea solo si el equipo está con corriente alterna"
+- ☑ **"Reactivar el equipo para ejecutar esta tarea"** (opcional)
 
-### Pestaña **Condiciones**
+Pestaña **Configuración**:
+- ☑ **"Permitir ejecutar la tarea a petición"**
+- ☑ **"Si la tarea no se ejecuta cuando está programada, iniciarla lo antes posible"**
+- **Detener la tarea si se ejecuta durante más de:** `1 hora`
 
-- Desmarcá ☐ "Iniciar la tarea solo si el equipo está inactivo"
-- Desmarcá ☐ "Iniciar la tarea solo si está disponible una conexión a Internet"
-  (el script lo maneja con retries)
-- Dejar **marcado** ☑ "Reactivar el equipo para ejecutar esta tarea" (opcional,
-  si querés que despierte el server si está dormido)
-
-### Pestaña **Configuración**
-
-- Marcar ☑ "Permitir ejecutar la tarea a petición"
-- Marcar ☑ "Si la tarea no se ejecuta cuando está programada, iniciar lo antes posible"
-- **Detener la tarea si se ejecuta durante más de:** 1 hora
-
-Clickeá **Aceptar**. Si te pide contraseña, ingresá la de administrador.
+**Aceptar**. Windows te va a pedir la contraseña del administrador.
 
 ---
 
-## 8. Verificar que la tarea corre
+## 7. ⚠️ ARCHIVO CRÍTICO — tkl_sync_control.json
 
-**Al día siguiente** (después de las 23:00):
+### 🔴 NO BORRAR — NO MOVER — NO EDITAR A MANO
 
-1. Abrí el log:
-   ```
-   C:\_Datos\_administracion\tkl_sync.log
-   ```
-2. Verificá que aparecen entradas del día. Deberías ver el resumen `✓ 11 OK`.
+**Ubicación:**
+```
+C:\TKL\siaf_sync\tkl_sync_control.json
+```
 
-**También en Drive:** Los CSVs con la fecha del día anterior (ej: `America_20260421.csv`)
-deberían estar en la carpeta.
+**Para qué sirve:**
+Registra hasta qué fecha se procesaron los datos de cada sucursal.
+Por ejemplo:
+```json
+{
+  "America":     "2026-04-22",
+  "Facultad":    "2026-04-22",
+  "Etcheverry":  "2026-04-22",
+  ...
+}
+```
+
+**Cómo funciona:**
+- Cada noche, el script lee este archivo, procesa solo los días nuevos
+  (desde la última fecha + 1 hasta ayer), y lo actualiza.
+- Sin este archivo, el script re-procesaría todo el historial cada vez
+  (tarda mucho más).
+
+**Qué pasa si se borra accidentalmente:**
+- **No se pierden datos.** Los CSVs en la carpeta de red permanecen intactos.
+- El próximo run tarda más (procesa todo el historial de nuevo).
+- Los CSVs se regeneran con el mismo contenido (el script es idempotente).
+
+**Si necesitás forzar un reset completo:**
+```
+python siaf_to_drive.py --full-reset
+```
+Te va a pedir confirmación escrita ("SI" en mayúsculas) antes de borrar.
+
+---
+
+## 8. Verificación post-instalación
+
+### Revisar el log
+
+```
+notepad C:\_Datos\_administracion\tkl_sync.log
+```
+
+Cada línea tiene el formato:
+```
+[YYYY-MM-DD HH:MM:SS] [NIVEL] [SUCURSAL] mensaje
+```
+
+**Niveles:**
+- `INFO` — operación normal
+- `WARNING` — algo faltó pero el script continuó (ej: un DBF no existe)
+- `ERROR` — algo falló en esa sucursal, pero las demás se procesaron
+
+**Qué buscar al día siguiente de la primera corrida:**
+
+Éxito esperado:
+```
+=== Fin sync: ✓ 11 OK   ✗ 0 con errores   de 11 sucursales ===
+```
+
+Si alguna sucursal falló:
+```
+=== Fin sync: ✓ 9 OK   ✗ 2 con errores   de 11 sucursales ===
+```
+Buscar en el log las líneas `[ERROR]` para ver qué pasó.
+
+### Revisar los CSVs en la carpeta de red
+
+Abrí `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\` en el Explorador de Windows.
+Deberían aparecer 33 archivos:
+
+```
+America_ventas.csv
+America_vendedores.csv
+America_ossocial.csv
+Facultad_ventas.csv
+Facultad_vendedores.csv
+Facultad_ossocial.csv
+... (11 sucursales × 3 archivos = 33 archivos)
+```
+
+Abrí uno con Excel o Notepad — debe tener encabezado + al menos 1 fila.
 
 ---
 
 ## 9. Troubleshooting
 
-### Caracteres raros en el CSV (ñ, acentos, ç)
-El DBF usa un encoding distinto al default. Editá `siaf_to_drive.py` y cambiá:
-```
+### "Carpeta destino no disponible"
+El script no pudo acceder a `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\`.
+
+**Soluciones:**
+- Verificar que el servidor `192.168.0.250` está prendido y accesible por red
+- Verificar que la carpeta compartida existe y el usuario del servidor tiene
+  permiso de **escritura**
+- Probar abrir la ruta manualmente en el Explorador de Windows
+- Si usás credenciales de red: usar `net use \\192.168.0.250\TKL_sync_IA /persistent:yes`
+  para mapear el acceso
+
+### "DBF no existe" (WARNING)
+Alguna sucursal no tiene el archivo DBF esperado.
+El script sigue con las demás. Revisar manualmente si es una situación
+temporal (archivo siendo actualizado) o permanente (sucursal dada de baja).
+
+### "DBF bloqueado" / "permission denied"
+SIAF tiene el archivo abierto. El script reintenta 1 vez a los 30 segundos.
+Si el error persiste en un horario fijo, considerar mover la tarea programada
+a un horario donde SIAF no esté activo (las 03:00 AM debería estar libre).
+
+### Caracteres raros en nombres de vendedores u obras sociales
+El DBF usa un encoding distinto al default. Editar `siaf_to_drive.py` y cambiar:
+```python
 DBF_ENCODING = "cp1252"
 ```
-por `"cp437"` o `"latin-1"`. Probá con `python siaf_to_drive.py` hasta que los
-nombres se vean correctos.
+Alternativas a probar: `"cp437"`, `"latin-1"`, `"utf-8"`.
 
-### "DBF falló tras retry"
-El archivo DBF está siendo usado por SIAF en ese momento. El script reintentó a los
-30 segundos y seguía bloqueado. Soluciones:
-- Correr el script en un horario donde SIAF no esté activo (23:00 suele estar libre)
-- Si el error persiste siempre, revisar que SIAF cierre los archivos al terminar la jornada
-
-### "credentials.json no encontrado"
-El archivo no está en la carpeta del script. Revisá el paso 4.
-
-### "DRIVE_FOLDER_ID no configurado"
-Olvidaste el paso 5. Editá el script y reemplazá el placeholder.
-
-### "Se produjo un error inesperado al autenticar en Drive"
-Probables causas:
-- El `credentials.json` está corrupto o incompleto
-- El Service Account NO tiene permiso sobre la carpeta de Drive (tiene que estar
-  compartida con el email del service account, visible dentro del `credentials.json`
-  en el campo `client_email`)
-- El servidor no tiene internet
-
-### Test de conectividad a Drive
-Si nada funciona, intentá correr este mini-script de prueba:
-```
-python -c "from google.oauth2 import service_account; c = service_account.Credentials.from_service_account_file('credentials.json'); print('OK:', c.service_account_email)"
-```
-Debería imprimir el email del service account. Si falla, el problema está en
-las credenciales.
-
-### Backfill manual (reprocesar un día pasado)
-Si un día la tarea no corrió y necesitás generar los CSVs retroactivamente:
+### Backfill manual (reprocesar un día específico)
+Si un día la tarea programada no corrió y necesitás generar los CSVs de ese día:
 ```
 python siaf_to_drive.py --date 2026-04-15
 ```
+**NO actualiza el control.json** — así que el próximo run incremental no
+se salta ningún día entre medio.
 
-### Ver el log en vivo durante un test
+### Cómo hacer un reset completo
+Si por alguna razón querés reprocesar TODO el historial de cero:
 ```
-python siaf_to_drive.py
+python siaf_to_drive.py --full-reset
 ```
-El log aparece en la consola y en el archivo `tkl_sync.log` simultáneamente.
+Va a pedir confirmación. Escribí `SI` en mayúsculas y Enter.
+El script borra `control.json` y en la próxima ejecución (o inmediatamente
+después si lo corrés sin parámetros) reprocesa desde cero.
 
----
+### El log está vacío después de la primera corrida
+El script no arrancó. Verificar:
+1. Que Python está en el PATH: abrir `cmd` y escribir `python --version`
+2. Que el script está en la ruta correcta
+3. Que la tarea programada tiene el comando bien escrito
+   (`python` como programa, `C:\TKL\siaf_sync\siaf_to_drive.py` como argumento)
 
-## Contacto
-
-Problemas o dudas: **Daniel** (administrador del sistema).
+### Contacto
+Problemas o dudas no cubiertas acá: **Daniel** (administrador del sistema).
