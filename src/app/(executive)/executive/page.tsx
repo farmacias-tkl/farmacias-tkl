@@ -30,14 +30,27 @@ export default async function ExecutivePage({
   });
   let isStaleBalances = false;
   if (balances.length === 0) {
-    balances = await prisma.bankBalanceSnapshot.findMany({
+    // Buscar el último snapshotDate con data y traer SOLO las rows de esa fecha.
+    // (Antes un "take 200" mezclaba múltiples fechas → cuentas "duplicadas" en UI.)
+    const latestBalance = await prisma.bankBalanceSnapshot.findFirst({
       where: branchId !== "ALL"
         ? { branchId }
         : { branch: { showInExecutive: true } },
-      include: { branch: { select: { id: true, name: true } } },
       orderBy: { snapshotDate: "desc" },
-      take: 200,
+      select:  { snapshotDate: true },
     });
+    if (latestBalance) {
+      balances = await prisma.bankBalanceSnapshot.findMany({
+        where: {
+          snapshotDate: latestBalance.snapshotDate,
+          ...(branchId !== "ALL"
+            ? { branchId }
+            : { branch: { showInExecutive: true } }),
+        },
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: [{ branch: { name: "asc" } }, { bankName: "asc" }],
+      });
+    }
     isStaleBalances = true;
   }
 

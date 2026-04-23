@@ -61,15 +61,20 @@ const SALES_CSS = `
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
   color: #6b7280; font-weight: 600; margin-bottom: 0.5rem;
 }
+.sal-detail-subtitle {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #1E2D5A; font-weight: 600; margin-bottom: 0.375rem;
+}
 .sal-detail-list {
   display: flex; flex-direction: column; gap: 0.375rem;
 }
 .sal-detail-item {
-  display: flex; justify-content: space-between;
-  font-size: 13px;
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; gap: 0.5rem;
 }
-.sal-detail-item .label { color: #374151; }
-.sal-detail-item .value { color: #1E2D5A; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sal-detail-item .label { color: #374151; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sal-detail-item .value { color: #1E2D5A; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sal-detail-item .sub   { font-size: 11px; color: #9ca3af; margin-left: 0.375rem; font-weight: 400; }
 .sal-detail-placeholder {
   font-size: 12px; color: #9ca3af; font-style: italic;
   padding: 0.375rem 0;
@@ -77,6 +82,10 @@ const SALES_CSS = `
 .sal-detail-divider {
   border: none; border-top: 1px dashed #e5e7eb;
   margin: 0.75rem 0;
+}
+.sal-detail-scroll {
+  max-height: 260px; overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 /* Encabezado tabla solo desktop, misma grid que .sal-row */
@@ -189,12 +198,31 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
   );
 }
 
+interface SiafVendorRaw {
+  codigo: string; nombre: string; ventas: number; tickets: number; descuentos: number;
+}
+interface SiafObraSocialRaw {
+  codigo: string; nombre: string; ventas_bruto: number; descuentos: number; ventas_neto: number;
+}
+interface SiafRawData {
+  source?: string;
+  efectivo?: number;
+  tarjeta?: number;
+  obra_social?: number;
+  vendedores?: SiafVendorRaw[];
+  obras_sociales?: SiafObraSocialRaw[];
+}
+
 function SalesDetail({ sales }: { sales: BranchSales }) {
   const isSiaf = sales.dataSource === "siaf";
-  const raw = sales.rawData as { efectivo?: number; tarjeta?: number; obra_social?: number } | null | undefined;
+  const raw = sales.rawData as SiafRawData | null | undefined;
+
+  const vendedores = Array.isArray(raw?.vendedores) ? raw!.vendedores : [];
+  const obrasSoc   = Array.isArray(raw?.obras_sociales) ? raw!.obras_sociales : [];
 
   return (
     <div className="sal-detail">
+      {/* Forma de pago */}
       <div className="sal-detail-title">Detalle por forma de pago</div>
       <div className="sal-detail-list">
         {isSiaf && raw ? (
@@ -221,14 +249,53 @@ function SalesDetail({ sales }: { sales: BranchSales }) {
 
       <hr className="sal-detail-divider" />
 
-      <div className="sal-detail-list">
+      {/* Vendedores */}
+      {vendedores.length > 0 ? (
+        <>
+          <div className="sal-detail-subtitle">Por vendedor ({vendedores.length})</div>
+          <div className="sal-detail-list sal-detail-scroll">
+            {vendedores.map((v, i) => (
+              <div key={`v-${i}`} className="sal-detail-item">
+                <span className="label">
+                  {v.nombre}
+                  <span className="sub">· {v.tickets} tk</span>
+                </span>
+                <span className="value">{fmtARS(Number(v.ventas ?? 0))}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
         <div className="sal-detail-placeholder">
           Detalle por vendedor: pendiente de datos reales
         </div>
+      )}
+
+      <hr className="sal-detail-divider" />
+
+      {/* Obras sociales */}
+      {obrasSoc.length > 0 ? (
+        <>
+          <div className="sal-detail-subtitle">Por obra social ({obrasSoc.length})</div>
+          <div className="sal-detail-list sal-detail-scroll">
+            {obrasSoc.map((o, i) => (
+              <div key={`o-${i}`} className="sal-detail-item">
+                <span className="label">
+                  {o.nombre}
+                  {Number(o.descuentos ?? 0) > 0 && (
+                    <span className="sub">· desc {fmtARS(Number(o.descuentos))}</span>
+                  )}
+                </span>
+                <span className="value">{fmtARS(Number(o.ventas_neto ?? 0))}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
         <div className="sal-detail-placeholder">
           Detalle por obra social: pendiente de datos reales
         </div>
-      </div>
+      )}
     </div>
   );
 }

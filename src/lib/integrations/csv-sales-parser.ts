@@ -70,3 +70,110 @@ export function parseSalesCSV(csvContent: string): ParsedSalesDay[] {
 
   return rows;
 }
+
+// ============================================================================
+// Parser de {Sucursal}_vendedores.csv
+// Columnas: sucursal, fecha, codigo_vendedor, nombre_vendedor, ventas, tickets, descuentos
+// ============================================================================
+export interface ParsedVendorDay {
+  sucursal:       string;
+  fecha:          string;
+  codigoVendedor: string;
+  nombreVendedor: string;
+  ventas:         number;
+  tickets:        number;
+  descuentos:     number;
+}
+
+const VENDORS_HEADER = [
+  "sucursal", "fecha", "codigo_vendedor", "nombre_vendedor",
+  "ventas", "tickets", "descuentos",
+] as const;
+
+export function parseSalesVendedoresCSV(csvContent: string): ParsedVendorDay[] {
+  const cleaned = csvContent.replace(/^\uFEFF/, "").trim();
+  if (!cleaned) return [];
+
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+
+  const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const idx = Object.fromEntries(VENDORS_HEADER.map((k) => [k, header.indexOf(k)]));
+
+  const missing = VENDORS_HEADER.filter((k) => idx[k] < 0);
+  if (missing.length > 0) {
+    throw new Error(
+      `Vendedores CSV header inválido. Faltan columnas: ${missing.join(", ")}. Recibido: ${header.join(",")}`,
+    );
+  }
+
+  const rows: ParsedVendorDay[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",").map((c) => c.trim());
+    if (cols.length < VENDORS_HEADER.length) continue;
+    rows.push({
+      sucursal:       cols[idx.sucursal],
+      fecha:          cols[idx.fecha],
+      codigoVendedor: cols[idx.codigo_vendedor],
+      nombreVendedor: cols[idx.nombre_vendedor],
+      ventas:         toNum(cols[idx.ventas]),
+      tickets:        toInt(cols[idx.tickets]),
+      descuentos:     toNum(cols[idx.descuentos]),
+    });
+  }
+  return rows;
+}
+
+// ============================================================================
+// Parser de {Sucursal}_ossocial.csv
+// Columnas: sucursal, fecha, codigo_os, nombre_os, ventas_bruto, descuentos, ventas_neto
+// Nota: codigo_os puede venir vacío (PARTICULAR).
+// ============================================================================
+export interface ParsedOSocialDay {
+  sucursal:    string;
+  fecha:       string;
+  codigoOS:    string;
+  nombreOS:    string;
+  ventasBruto: number;
+  descuentos:  number;
+  ventasNeto:  number;
+}
+
+const OSSOCIAL_HEADER = [
+  "sucursal", "fecha", "codigo_os", "nombre_os",
+  "ventas_bruto", "descuentos", "ventas_neto",
+] as const;
+
+export function parseSalesOSSocialCSV(csvContent: string): ParsedOSocialDay[] {
+  const cleaned = csvContent.replace(/^\uFEFF/, "").trim();
+  if (!cleaned) return [];
+
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+
+  const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const idx = Object.fromEntries(OSSOCIAL_HEADER.map((k) => [k, header.indexOf(k)]));
+
+  const missing = OSSOCIAL_HEADER.filter((k) => idx[k] < 0);
+  if (missing.length > 0) {
+    throw new Error(
+      `OS Social CSV header inválido. Faltan columnas: ${missing.join(", ")}. Recibido: ${header.join(",")}`,
+    );
+  }
+
+  const rows: ParsedOSocialDay[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",").map((c) => c.trim());
+    if (cols.length < OSSOCIAL_HEADER.length) continue;
+    rows.push({
+      sucursal:    cols[idx.sucursal],
+      fecha:       cols[idx.fecha],
+      codigoOS:    cols[idx.codigo_os],
+      nombreOS:    cols[idx.nombre_os],
+      ventasBruto: toNum(cols[idx.ventas_bruto]),
+      descuentos:  toNum(cols[idx.descuentos]),
+      ventasNeto:  toNum(cols[idx.ventas_neto]),
+    });
+  }
+  return rows;
+}

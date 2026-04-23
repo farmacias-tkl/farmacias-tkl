@@ -14,8 +14,75 @@ import { PrismaClient, Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const BANKS = ["Galicia", "BBVA", "Santander", "Macro", "Nación", "Provincia", "HSBC"];
-const ACCOUNT_TYPES = ["Cta. Corriente", "Caja de Ahorro", "Cta. USD"];
+// Estructura fija de cuentas bancarias por sucursal — NO random, NO pickN.
+// Esto garantiza que cada run del seed produzca exactamente la misma shape,
+// evitando que se acumulen variantes entre ejecuciones repetidas.
+const BRANCH_ACCOUNTS: Record<string, Array<{ bank: string; type: string; baseBalance: number }>> = {
+  "Tekiel":         [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 4_500_000 },
+    { bank: "BBVA",      type: "Caja de Ahorro", baseBalance: 2_800_000 },
+    { bank: "Santander", type: "Cta. USD",       baseBalance: 1_400_000 },
+  ],
+  "San Miguel":     [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 3_800_000 },
+    { bank: "Macro",     type: "Caja de Ahorro", baseBalance: 2_100_000 },
+    { bank: "HSBC",      type: "Cta. Corriente", baseBalance: 1_500_000 },
+  ],
+  "Galesa":         [
+    { bank: "Nación",    type: "Cta. Corriente", baseBalance: 3_200_000 },
+    { bank: "BBVA",      type: "Caja de Ahorro", baseBalance: 1_800_000 },
+    { bank: "Santander", type: "Cta. USD",       baseBalance: 900_000 },
+  ],
+  "Call Center":    [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 2_500_000 },
+    { bank: "Nación",    type: "Caja de Ahorro", baseBalance: 1_200_000 },
+  ],
+  "La Perla":       [
+    { bank: "BBVA",      type: "Cta. Corriente", baseBalance: 2_200_000 },
+    { bank: "Santander", type: "Caja de Ahorro", baseBalance: 1_400_000 },
+    { bank: "Macro",     type: "Cta. Corriente", baseBalance: 800_000 },
+  ],
+  "Larcade":        [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 2_000_000 },
+    { bank: "Provincia", type: "Caja de Ahorro", baseBalance: 900_000 },
+  ],
+  "Quintana":       [
+    { bank: "BBVA",      type: "Cta. Corriente", baseBalance: 1_800_000 },
+    { bank: "HSBC",      type: "Caja de Ahorro", baseBalance: 750_000 },
+  ],
+  "Facultad":       [
+    { bank: "Santander", type: "Cta. Corriente", baseBalance: 1_500_000 },
+    { bank: "Nación",    type: "Caja de Ahorro", baseBalance: 800_000 },
+    { bank: "Galicia",   type: "Cta. USD",       baseBalance: 500_000 },
+  ],
+  "Naveira":        [
+    { bank: "BBVA",      type: "Cta. Corriente", baseBalance: 1_300_000 },
+    { bank: "Macro",     type: "Caja de Ahorro", baseBalance: 700_000 },
+    { bank: "Provincia", type: "Cta. Corriente", baseBalance: 600_000 },
+  ],
+  "America":        [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 1_200_000 },
+    { bank: "HSBC",      type: "Caja de Ahorro", baseBalance: 700_000 },
+    { bank: "Nación",    type: "Cta. Corriente", baseBalance: 550_000 },
+  ],
+  "Etcheverry":     [
+    { bank: "Santander", type: "Cta. Corriente", baseBalance: 1_100_000 },
+    { bank: "Provincia", type: "Caja de Ahorro", baseBalance: 600_000 },
+  ],
+  "San Agustin":    [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 1_000_000 },
+    { bank: "BBVA",      type: "Caja de Ahorro", baseBalance: 550_000 },
+  ],
+  // Sucursales exclusivas del dashboard ejecutivo
+  "Patricios":      [
+    { bank: "Galicia",   type: "Cta. Corriente", baseBalance: 1_800_000 },
+    { bank: "Nación",    type: "Caja de Ahorro", baseBalance: 900_000 },
+  ],
+  "Condominio ET":  [
+    { bank: "BBVA",      type: "Cta. Corriente", baseBalance: 3_200_000 },
+    { bank: "HSBC",      type: "Cta. USD",       baseBalance: 1_500_000 },
+  ],
+};
 
 // Niveles de ventas diarias base por sucursal (en millones de ARS)
 const BRANCH_TIERS: Record<string, number> = {
@@ -91,24 +158,31 @@ async function main() {
     salesDays.push(new Date(d));
   }
 
-  // ─── Saldos bancarios ────────────────────────────────────
+  // ─── Saldos bancarios (estructura fija por sucursal) ─────
   console.log("💰 Generando saldos bancarios...");
   const balanceData: Prisma.BankBalanceSnapshotCreateManyInput[] = [];
-  for (const branch of branches) {
-    const accountCount = randInt(2, 4);
-    const branchBanks  = pickN(BANKS, accountCount);
+  let branchesWithAccounts = 0;
+  let branchesSkipped      = 0;
 
-    for (const bankName of branchBanks) {
-      const accountLabel = `${bankName} - ${ACCOUNT_TYPES[randInt(0, ACCOUNT_TYPES.length - 1)]}`;
-      let prevBalance = rand(500_000, 8_000_000);
+  for (const branch of branches) {
+    const accounts = BRANCH_ACCOUNTS[branch.name];
+    if (!accounts) {
+      console.log(`   ⚠  Sin config de cuentas para "${branch.name}" — skip`);
+      branchesSkipped++;
+      continue;
+    }
+
+    for (const acct of accounts) {
+      const accountLabel = `${acct.bank} - ${acct.type}`;
+      let prevBalance = acct.baseBalance;
 
       for (const day of balanceDays) {
-        const variation   = rand(-0.15, 0.15); // +/- 5-15%
-        const newBalance  = Math.max(100_000, prevBalance * (1 + variation));
-        const hasChecks   = Math.random() > 0.5;
+        const variation  = rand(-0.15, 0.15); // +/- 5-15% día a día (único random que queda)
+        const newBalance = Math.max(100_000, prevBalance * (1 + variation));
+        const hasChecks  = Math.random() > 0.5;
         balanceData.push({
           branchId:     branch.id,
-          bankName,
+          bankName:     acct.bank,
           accountLabel,
           balance:      Math.round(newBalance),
           checks:       hasChecks ? Math.round(rand(50_000, 500_000)) : null,
@@ -119,9 +193,10 @@ async function main() {
         prevBalance = newBalance;
       }
     }
+    branchesWithAccounts++;
   }
   await prisma.bankBalanceSnapshot.createMany({ data: balanceData });
-  console.log(`   ✓ ${balanceData.length} saldos bancarios insertados\n`);
+  console.log(`   ✓ ${balanceData.length} saldos bancarios insertados (${branchesWithAccounts} sucursales con cuentas, ${branchesSkipped} sin config)\n`);
 
   // ─── Ventas ──────────────────────────────────────────────
   console.log("🛒 Generando ventas...");

@@ -28,14 +28,26 @@ export async function GET(request: NextRequest) {
   });
   let isStale = false;
   if (balances.length === 0) {
-    balances = await prisma.bankBalanceSnapshot.findMany({
+    // Buscar el último snapshotDate con data y traer SOLO las rows de esa fecha.
+    const latestBalance = await prisma.bankBalanceSnapshot.findFirst({
       where: branchId !== "ALL"
         ? { branchId }
         : { branch: { showInExecutive: true } },
-      include: { branch: { select: { id: true, name: true } } },
       orderBy: { snapshotDate: "desc" },
-      take: 200,
+      select:  { snapshotDate: true },
     });
+    if (latestBalance) {
+      balances = await prisma.bankBalanceSnapshot.findMany({
+        where: {
+          snapshotDate: latestBalance.snapshotDate,
+          ...(branchId !== "ALL"
+            ? { branchId }
+            : { branch: { showInExecutive: true } }),
+        },
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: [{ branch: { name: "asc" } }, { bankName: "asc" }],
+      });
+    }
     isStale = true;
   }
 
@@ -86,6 +98,8 @@ export async function GET(request: NextRequest) {
       vsYesterday: yesterdayMap[s.branchId]
         ? ((Number(s.totalSales) - yesterdayMap[s.branchId]) / yesterdayMap[s.branchId]) * 100
         : null,
+      dataSource: s.dataSource,
+      rawData:    s.rawData,
     })),
     isStaleBalances: isStale,
     lastBalanceDate: balances[0]?.snapshotDate ?? null,

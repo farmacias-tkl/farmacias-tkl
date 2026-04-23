@@ -60,69 +60,84 @@ export async function getBalancesFileBuffer(folderId: string) {
 }
 
 // ============================================================================
-// SALES CSVs — archivos generados por el script Python del servidor SIAF
+// SALES CSVs — archivos generados por scripts/server/siaf_to_drive.py
+//
+// El script Python escribe 33 archivos fijos (11 sucursales × 3 tipos):
+//   {Sucursal}_ventas.csv       — agregados diarios
+//   {Sucursal}_vendedores.csv   — breakdown por vendedor
+//   {Sucursal}_ossocial.csv     — breakdown por obra social
+//
+// Los nombres son fijos y los archivos acumulan historial entre runs.
+// Google Drive Desktop sincroniza la carpeta de red del server → folder Drive
+// configurada en GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID.
 // ============================================================================
 
-export interface SalesCSVFile {
-  sucursalName:  string;   // ej: "America"
-  csvContent:    string;   // contenido del CSV como texto
-  fileDate:      string;   // YYYY-MM-DD derivado del filename
+export type SalesCSVKind = "ventas" | "vendedores" | "ossocial";
+
+export interface SalesCSVEntry {
+  csvContent:    string;
   driveFileId:   string;
   driveFileName: string;
+  modifiedTime:  string;
 }
 
-function yyyymmdd(d: Date): string {
-  const y   = d.getFullYear();
-  const m   = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}${m}${day}`;
+export interface BranchCSVSet {
+  sucursalName: string;
+  ventas?:      SalesCSVEntry;
+  vendedores?:  SalesCSVEntry;
+  ossocial?:    SalesCSVEntry;
 }
 
-/** Descarga los CSVs de ventas de los últimos 2 días calendario. Tolera defases de timing. */
-export async function downloadSalesCSVs(folderId: string): Promise<SalesCSVFile[]> {
+const CSV_FILENAME_RE = /^(.+?)_(ventas|vendedores|ossocial)\.csv$/i;
+
+/** Descarga los 3 CSVs por sucursal y los agrupa.
+ *  Si un archivo falta para una sucursal, su campo queda undefined. */
+export async function downloadSalesCSVs(folderId: string): Promise<BranchCSVSet[]> {
   const drive = getDriveClient();
 
-  const today      = new Date(); today.setHours(0, 0, 0, 0);
-  const yesterday  = new Date(today);    yesterday.setDate(yesterday.getDate() - 1);
-  const dayBefore  = new Date(today);    dayBefore.setDate(dayBefore.getDate() - 2);
-  const targetDates = [yyyymmdd(yesterday), yyyymmdd(dayBefore)];
-
+  // 1. Listar todos los archivos de la carpeta en una sola llamada
   const response = await drive.files.list({
     q: `'${folderId}' in parents and trashed=false`,
     fields: "files(id, name, modifiedTime)",
-    orderBy: "modifiedTime desc",
-    pageSize: 200,
+    orderBy: "name",
+    pageSize: 500,
   });
 
-  const files = (response.data.files ?? []).filter((f) => {
+  // 2. Matchear por patrón y agrupar por sucursal
+  const bySucursal = new Map<string, BranchCSVSet>();
+  for (const f of response.data.files ?? []) {
     const name = f.name ?? "";
-    if (!name.toLowerCase().endsWith(".csv")) return false;
-    return targetDates.some((d) => name.includes(`_${d}.csv`));
-  });
+    const match = name.match(CSV_FILENAME_RE);
+    if (!match || !f.id) continue;
 
-  const results: SalesCSVFile[] = [];
-  for (const file of files) {
-    if (!file.id || !file.name) continue;
-    const match = file.name.match(/^(.+?)_(\d{4})(\d{2})(\d{2})\.csv$/i);
-    if (!match) continue;
+    const sucursalName = match[1];
+    const kind         = match[2].toLowerCase() as SalesCSVKind;
 
-    const downloadResp = await drive.files.get(
-      { fileId: file.id, alt: "media" },
-      { responseType: "text" },
-    );
-    // googleapis devuelve el body como `any`; lo forzamos a string
-    const csvContent = typeof downloadResp.data === "string"
-      ? downloadResp.data
-      : String(downloadResp.data ?? "");
-
-    results.push({
-      sucursalName:  match[1],
-      csvContent,
-      fileDate:      `${match[2]}-${match[3]}-${match[4]}`,
-      driveFileId:   file.id,
-      driveFileName: file.name,
-    });
+    if (!bySucursal.has(sucursalName)) {
+      bySucursal.set(sucursalName, { sucursalName });
+    }
+    const set = bySucursal.get(sucursalName)!;
+    set[kind] = {
+      csvContent:    "",
+      driveFileId:   f.id,
+      driveFileName: name,
+      modifiedTime:  f.modifiedTime ?? "",
+    };
   }
 
-  return results;
+  // 3. Descargar contenido de cada archivo identificado
+  for (const set of bySucursal.values()) {
+    for (const kind of ["ventas", "vendedores", "ossocial"] as SalesCSVKind[]) {
+      const entry = set[kind];
+      if (!entry) continue;
+      const dl = await drive.files.get(
+        { fileId: entry.driveFileId, alt: "media" },
+        { responseType: "text" },
+      );
+      entry.csvContent = typeof dl.data === "string" ? dl.data : String(dl.data ?? "");
+    }
+  }
+
+  return Array.from(bySucursal.values())
+    .sort((a, b) => a.sucursalName.localeCompare(b.sucursalName));
 }
