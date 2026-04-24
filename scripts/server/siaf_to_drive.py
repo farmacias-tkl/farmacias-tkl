@@ -26,7 +26,7 @@ Uso:
        (pide confirmación interactiva antes)
 
 Salida (33 archivos fijos, acumulativos entre runs):
-  {Sucursal}_ventas.csv       — una fila por día
+  {Sucursal}_ventas.csv       — una fila por día (total_ventas = SUM TOTBRUTO)
   {Sucursal}_vendedores.csv   — una fila por vendedor por día
   {Sucursal}_ossocial.csv     — una fila por obra social por día
 
@@ -45,7 +45,7 @@ import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable
 
 from dbfread import DBF
 
@@ -56,7 +56,7 @@ from dbfread import DBF
 BASE_PATH    = Path(r"C:\_Datos\_administracion\temporal_sucursales")
 OUTPUT_DIR   = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV")
 CONTROL_FILE = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
-LOG_PATH     = Path(r"C:\_Datos\_administracion\tkl_sync.log")
+LOG_PATH     = Path(r"C:\TKL\siaf_sync\tkl_sync.log")
 
 DBF_ENCODING = "cp1252"
 
@@ -74,8 +74,12 @@ FOLDER_MAP: dict[str, str] = {
     "TK": "Tekiel",
 }
 
-# Códigos de tarjeta conocidos (case-insensitive) — clasifican como "tarjeta"
-TARJETA_CODES = {"BAN", "VIS", "MAS", "AME", "NAR", "CAB", "TAR", "CRE", "DEB"}
+# Códigos que NUNCA son ventas
+CODIGOS_EXCLUIR: set[str] = {
+    "NCR", "NDB", "REM", "MCC", "MOS", "REC",
+    "BAJ", "ALT", "PRE", "PED", "COM", "REA",
+    "OP",  "OI",  "OTR", "IMD", "IME", "WHA",
+}
 
 # =============================================================================
 # LOGGING
@@ -92,6 +96,59 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("tkl-sync")
+
+# =============================================================================
+# DETECCIÓN DE CÓDIGOS DE VENTA
+# =============================================================================
+
+def es_codigo_venta(codigo: str) -> bool:
+    """True si el código identifica un comprobante de venta."""
+    c = codigo.strip().upper()
+    # Códigos fijos conocidos
+    if c in {"DET", "TKT", "FAC", "MOV", "NOV"}:
+        return True
+    # Punto de venta numérico: 001-999
+    if len(c) == 3 and c.isdigit():
+        return True
+    # Punto de venta 2 dígitos: 01-99
+    if len(c) == 2 and c.isdigit():
+        return True
+    # Factura tipo A, B o C: A01-C99
+    if len(c) == 3 and c[0] in ("A", "B", "C") and c[1:].isdigit():
+        return True
+    return False
+
+
+def incluir_registro(codigo: str) -> bool:
+    """True si el registro se incluye como venta (no está en CODIGOS_EXCLUIR)."""
+    c = codigo.strip().upper()
+    if c in CODIGOS_EXCLUIR:
+        return False
+    return es_codigo_venta(c)
+
+# =============================================================================
+# HELPERS de parseo robusto (bytes nulos, bytes crudos, etc.)
+# =============================================================================
+
+def safe_float(value: Any) -> float:
+    """Convierte a float tolerando bytes nulos. Devuelve 0.0 si no parsea."""
+    try:
+        if isinstance(value, bytes):
+            stripped = value.strip(b"\x00").strip()
+            return float(stripped) if stripped else 0.0
+        s = str(value).strip() if value is not None else ""
+        return float(s) if s else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def safe_str(value: Any) -> str:
+    """Convierte a string tolerando bytes nulos."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.strip(b"\x00").decode(DBF_ENCODING, errors="replace").strip()
+    return str(value).strip()
 
 # =============================================================================
 # CONTROL FILE
@@ -122,22 +179,21 @@ def save_control(control: dict[str, str]) -> None:
 # =============================================================================
 
 def normalize_fecha(val: Any) -> str | None:
-    """Devuelve YYYYMMDD o None. Soporta D-type (date) o string 'YYYYMMDD' / 'YYYY-MM-DD'."""
+    """Devuelve YYYYMMDD o None. Soporta D-type (date) o string."""
     if val is None:
         return None
     if isinstance(val, date):
         return val.strftime("%Y%m%d")
-    s = str(val).strip().replace("-", "")
+    s = safe_str(val).replace("-", "")
     if len(s) == 8 and s.isdigit():
         return s
     return None
 
 
 def read_dbf_safely(path: Path, name: str) -> list[dict] | None:
-    """Lee un DBF devolviendo lista de registros (dict).
-    Reintenta 1 vez a los 30s si falla. Retorna None si el archivo no existe o falla definitivamente."""
+    """Lee un DBF. Reintenta 1 vez a los 30s si falla. None si el archivo no existe."""
     if not path.exists():
-        log.warning(f"[{name}] DBF no existe: {path}")
+        log.warning(f"[{name}] DBF no existe: {path.name}")
         return None
     for attempt in range(2):
         try:
@@ -158,10 +214,11 @@ def read_dbf_safely(path: Path, name: str) -> list[dict] | None:
     return None
 
 
-def load_code_name_map(path: Path, name: str, label: str) -> dict[str, str]:
-    """Carga un DBF donde field[0]=código y field[1]=nombre. Lee por índice, no por nombre de campo."""
+def leer_usr_dbf(path: Path, name: str) -> dict[str, str]:
+    """USR.DBF — lee por índice (nombres de campo tienen caracteres especiales).
+    Índice 0: código (3 chars). Índice 1: nombre (hasta 30 chars)."""
     if not path.exists():
-        log.warning(f"[{name}] {label} no existe: {path.name} — se usarán códigos como nombres")
+        log.warning(f"[{name}] USR.DBF no existe — se usarán códigos como nombres")
         return {}
     try:
         dbf = DBF(
@@ -175,22 +232,59 @@ def load_code_name_map(path: Path, name: str, label: str) -> dict[str, str]:
             values = list(record.values())
             if len(values) < 2:
                 continue
-            code = str(values[0] or "").strip()
-            nom  = str(values[1] or "").strip()
-            if code:
-                result[code] = nom or code
+            codigo = safe_str(values[0])[:3]
+            nombre = safe_str(values[1])[:30]
+            if codigo:
+                result[codigo] = nombre or codigo
         return result
     except Exception as e:
-        log.warning(f"[{name}] No se pudo leer {label} {path.name}: {e}")
+        log.warning(f"[{name}] No se pudo leer USR.DBF: {e}")
+        return {}
+
+
+def leer_os_dbf(path: Path, name: str) -> dict[str, str]:
+    """OS.DBF — intenta por nombre de campo (CODIGO/NOMBRE) primero, luego por índice."""
+    if not path.exists():
+        log.warning(f"[{name}] OS.DBF no existe — se usarán códigos como nombres")
+        return {}
+    try:
+        dbf = DBF(
+            str(path),
+            encoding=DBF_ENCODING,
+            ignore_missing_memofile=True,
+            char_decode_errors="replace",
+        )
+        result: dict[str, str] = {}
+        for record in dbf:
+            codigo: str | None = None
+            nombre: str | None = None
+            # Intentar por nombre limpio (primeros 6 chars upper)
+            for k, v in record.items():
+                k_clean = k.strip()[:6].upper()
+                if k_clean == "CODIGO":
+                    codigo = safe_str(v)
+                elif k_clean == "NOMBRE":
+                    nombre = safe_str(v)
+            # Fallback por índice
+            if not codigo:
+                values = list(record.values())
+                if len(values) >= 2:
+                    codigo = safe_str(values[0])
+                    nombre = safe_str(values[1])
+            if codigo:
+                result[codigo] = (nombre or codigo).strip()
+        return result
+    except Exception as e:
+        log.warning(f"[{name}] No se pudo leer OS.DBF: {e}")
         return {}
 
 # =============================================================================
-# CLASIFICACIÓN DE PAGO
+# CLASIFICACIÓN DE FORMA DE PAGO
 # =============================================================================
 
 def classify_payment(tarjeta: str, os_code: str) -> str:
-    """Devuelve 'efectivo' | 'tarjeta' | 'obra_social' según la regla del spec."""
-    t = (tarjeta or "").strip().upper()
+    """Devuelve 'efectivo' | 'tarjeta' | 'obra_social' según los campos TARJETA y OS."""
+    t = (tarjeta or "").strip()
     o = (os_code or "").strip()
     if t:
         return "tarjeta"
@@ -199,7 +293,7 @@ def classify_payment(tarjeta: str, os_code: str) -> str:
     return "efectivo"
 
 # =============================================================================
-# PROCESAMIENTO POR SUCURSAL
+# DETERMINACIÓN DE FECHAS A PROCESAR
 # =============================================================================
 
 def determine_dates_to_process(
@@ -207,7 +301,7 @@ def determine_dates_to_process(
     yesterday: date,
     force_date: date | None,
 ) -> tuple[set[str] | None, str]:
-    """Devuelve (set de YYYYMMDD a procesar | None si es full-history, mode_label)."""
+    """Devuelve (set de YYYYMMDD | None si full-history, label del modo)."""
     if force_date is not None:
         return ({force_date.strftime("%Y%m%d")}, f"backfill {force_date}")
     if control_last:
@@ -227,34 +321,9 @@ def determine_dates_to_process(
         return (dates, f"incremental {start} → {yesterday}")
     return (None, "full-history (primera vez)")
 
-
-def read_detmov_units(folder: Path, sucursal: str, date_filter: set[str] | None) -> dict[str, int]:
-    """Suma cantidades de DETMOV.DBF por fecha (CODIGO='DET'). Devuelve {YYYYMMDD: units}."""
-    path = folder / "DETMOV.DBF"
-    if not path.exists():
-        return {}
-    records = read_dbf_safely(path, sucursal)
-    if records is None:
-        return {}
-    result: dict[str, int] = defaultdict(int)
-    for r in records:
-        fecha_str = normalize_fecha(r.get("FECHA"))
-        if fecha_str is None:
-            continue
-        if date_filter is not None and fecha_str not in date_filter:
-            continue
-        codigo = str(r.get("CODIGO") or r.get("CPBT") or "").strip().upper()
-        if codigo != "DET":
-            continue
-        cantidad = r.get("CANTIDAD")
-        if cantidad is None:
-            continue
-        try:
-            result[fecha_str] += int(float(cantidad))
-        except (ValueError, TypeError):
-            pass
-    return dict(result)
-
+# =============================================================================
+# PROCESAMIENTO POR SUCURSAL
+# =============================================================================
 
 def process_branch(
     folder_code: str,
@@ -262,30 +331,29 @@ def process_branch(
     date_filter: set[str] | None,
     yesterday: date,
 ) -> tuple[list[dict], list[dict], list[dict], set[str]]:
-    """Procesa una sucursal. Devuelve (ventas_rows, vendedores_rows, ossocial_rows, processed_dates_yyyymmdd)."""
+    """Devuelve (ventas_rows, vendedores_rows, ossocial_rows, processed_dates)."""
     folder = BASE_PATH / folder_code
 
-    # Leer vendedores y obras sociales de ESA sucursal
-    vendor_map = load_code_name_map(folder / "USR.DBF", sucursal, "USR.DBF")
-    os_map     = load_code_name_map(folder / "OS.DBF",  sucursal, "OS.DBF")
+    # Referencias por sucursal
+    vendor_map = leer_usr_dbf(folder / "USR.DBF", sucursal)
+    os_map     = leer_os_dbf(folder / "OS.DBF",  sucursal)
 
-    # Leer CPBTEMI.DBF — fuente principal
+    # Fuente principal
     cpbtemi = read_dbf_safely(folder / "CPBTEMI.DBF", sucursal)
     if cpbtemi is None:
         return ([], [], [], set())
 
-    # Filtrar: CODIGO='DET', fecha en date_filter (o todas si es None), fecha ≤ ayer
     yesterday_str = yesterday.strftime("%Y%m%d")
     records_by_date: dict[str, list[dict]] = defaultdict(list)
     for r in cpbtemi:
-        codigo = str(r.get("CODIGO") or "").strip().upper()
-        if codigo != "DET":
+        codigo = safe_str(r.get("CODIGO"))
+        if not incluir_registro(codigo):
             continue
         fecha_str = normalize_fecha(r.get("FECHA"))
         if fecha_str is None:
             continue
         if fecha_str > yesterday_str:
-            continue  # nunca procesamos datos de hoy o futuro
+            continue  # nunca procesar hoy o futuro
         if date_filter is not None and fecha_str not in date_filter:
             continue
         records_by_date[fecha_str].append(r)
@@ -293,13 +361,13 @@ def process_branch(
     if not records_by_date:
         return ([], [], [], set())
 
-    # DETMOV para unidades
+    # Unidades desde DETMOV.DBF (opcional)
     detmov_units = read_detmov_units(folder, sucursal, set(records_by_date.keys()))
 
-    ventas_rows: list[dict]     = []
+    ventas_rows:     list[dict] = []
     vendedores_rows: list[dict] = []
-    ossocial_rows: list[dict]   = []
-    processed: set[str]         = set()
+    ossocial_rows:   list[dict] = []
+    processed:       set[str]   = set()
 
     for date_str in sorted(records_by_date.keys()):
         recs = records_by_date[date_str]
@@ -316,48 +384,48 @@ def process_branch(
         os_agg:     dict[str, dict] = defaultdict(lambda: {"ventas_bruto": 0.0, "descuentos": 0.0})
 
         for r in recs:
-            bruto   = float(r.get("TOTBRUTO")  or 0)
-            desc    = float(r.get("TOTDESCTO") or 0)
-            neto    = bruto - desc
-            numero  = r.get("NUMERO")
-            vcode   = str(r.get("VENDEDOR") or "").strip()
-            ocode   = str(r.get("OS")       or "").strip()
-            tcode   = str(r.get("TARJETA")  or "").strip()
+            bruto  = safe_float(r.get("TOTBRUTO"))
+            desc   = safe_float(r.get("TOTDESCTO"))
+            numero = r.get("NUMERO")
+            vcode  = safe_str(r.get("VENDEDOR"))
+            ocode  = safe_str(r.get("OS"))
+            tcode  = safe_str(r.get("TARJETA"))
 
             total_bruto += bruto
             total_desc  += desc
             if numero is not None:
                 tickets.add(numero)
 
+            # Ventas brutas por forma de pago (SUM TOTBRUTO, no neto)
             payment = classify_payment(tcode, ocode)
             if payment == "efectivo":
-                ventas_efectivo += neto
+                ventas_efectivo += bruto
             elif payment == "tarjeta":
-                ventas_tarjeta += neto
+                ventas_tarjeta += bruto
             else:
-                ventas_os += neto
+                ventas_os += bruto
 
+            # Por vendedor (ventas = TOTBRUTO; descuentos = TOTDESCTO)
             if vcode:
                 v = vendor_agg[vcode]
-                v["ventas"] += neto
+                v["ventas"] += bruto
                 if numero is not None:
                     v["tickets"].add(numero)
                 v["descuentos"] += desc
 
-            os_key = ocode  # vacío → PARTICULAR (clave "")
-            o = os_agg[os_key]
+            # Por obra social (vacío = "" → renderea como "PAR")
+            o = os_agg[ocode]
             o["ventas_bruto"] += bruto
             o["descuentos"]   += desc
 
-        total_neto      = total_bruto - total_desc
         total_tickets   = len(tickets)
-        ticket_promedio = total_neto / total_tickets if total_tickets > 0 else 0.0
+        ticket_promedio = total_bruto / total_tickets if total_tickets > 0 else 0.0
         total_unidades  = detmov_units.get(date_str, 0)
 
         ventas_rows.append({
             "sucursal":           sucursal,
             "fecha":              fecha_iso,
-            "total_ventas":       round(total_neto, 2),
+            "total_ventas":       round(total_bruto, 2),
             "total_tickets":      total_tickets,
             "ticket_promedio":    round(ticket_promedio, 2),
             "total_unidades":     total_unidades,
@@ -379,15 +447,17 @@ def process_branch(
 
         for code, agg in os_agg.items():
             if code:
-                nombre = os_map.get(code, code)
+                codigo_out = code
+                nombre_out = os_map.get(code, code)
             else:
-                nombre = "PARTICULAR"
+                codigo_out = "PAR"
+                nombre_out = "PARTICULAR"
             neto_os = agg["ventas_bruto"] - agg["descuentos"]
             ossocial_rows.append({
                 "sucursal":     sucursal,
                 "fecha":        fecha_iso,
-                "codigo_os":    code,
-                "nombre_os":    nombre,
+                "codigo_os":    codigo_out,
+                "nombre_os":    nombre_out,
                 "ventas_bruto": round(agg["ventas_bruto"], 2),
                 "descuentos":   round(agg["descuentos"], 2),
                 "ventas_neto":  round(neto_os, 2),
@@ -397,10 +467,36 @@ def process_branch(
 
     return (ventas_rows, vendedores_rows, ossocial_rows, processed)
 
+
+def read_detmov_units(folder: Path, sucursal: str, date_filter: set[str] | None) -> dict[str, int]:
+    """Suma CANTIDAD de DETMOV.DBF por fecha (solo códigos de venta). Opcional."""
+    path = folder / "DETMOV.DBF"
+    if not path.exists():
+        return {}
+    records = read_dbf_safely(path, sucursal)
+    if records is None:
+        return {}
+    result: dict[str, int] = defaultdict(int)
+    for r in records:
+        fecha_str = normalize_fecha(r.get("FECHA"))
+        if fecha_str is None:
+            continue
+        if date_filter is not None and fecha_str not in date_filter:
+            continue
+        codigo = safe_str(r.get("CODIGO") or r.get("CPBT"))
+        if not incluir_registro(codigo):
+            continue
+        cantidad = r.get("CANTIDAD")
+        if cantidad is None:
+            continue
+        try:
+            result[fecha_str] += int(safe_float(cantidad))
+        except (ValueError, TypeError):
+            pass
+    return dict(result)
+
 # =============================================================================
 # CSV MERGE WRITER
-# Lee CSV existente + merge con nuevas filas (dedupe por key_fields) + escribe todo.
-# Esto garantiza CSVs acumulativos a través de runs.
 # =============================================================================
 
 def merge_and_write_csv(
@@ -409,7 +505,7 @@ def merge_and_write_csv(
     fieldnames: list[str],
     key_fields: list[str],
 ) -> int:
-    """Merge rows into CSV. Devuelve total de filas escritas."""
+    """Lee CSV existente + merge por key_fields + escribe todo sorted. Devuelve total de filas."""
     existing: dict[tuple, dict] = {}
     if path.exists():
         try:
@@ -510,7 +606,6 @@ def main() -> None:
         force_date = parse_cli_date(args.date)
         log.info(f"Modo backfill: fecha forzada = {force_date}")
 
-    # Load control
     control = load_control()
 
     today     = date.today()
@@ -526,7 +621,6 @@ def main() -> None:
             log.info(f"[{sucursal}] procesando — {mode_label}")
 
             if date_filter == set():
-                # Ya actualizado, nada por procesar (caso incremental sin días pendientes)
                 log.info(f"[{sucursal}] sin días pendientes, skip")
                 ok_count += 1
                 continue
@@ -540,7 +634,6 @@ def main() -> None:
                 ok_count += 1
                 continue
 
-            # Merge + escribir 3 CSVs (acumulativos)
             n_ventas     = merge_and_write_csv(OUTPUT_DIR / f"{sucursal}_ventas.csv",
                                                ventas_rows, VENTAS_FIELDS, ["fecha"])
             n_vendedores = merge_and_write_csv(OUTPUT_DIR / f"{sucursal}_vendedores.csv",
@@ -553,7 +646,6 @@ def main() -> None:
             log.info(f"[{sucursal}] ✓ {len(processed)} día(s) procesados | "
                      f"ventas.csv={n_ventas}, vendedores.csv={n_vendedores}, ossocial.csv={n_ossocial}")
 
-            # Actualizar control.json SOLO en modo incremental o full-history (NO en backfill --date)
             if force_date is None:
                 max_yyyymmdd = max(processed)
                 max_iso = f"{max_yyyymmdd[:4]}-{max_yyyymmdd[4:6]}-{max_yyyymmdd[6:8]}"
@@ -564,7 +656,6 @@ def main() -> None:
             log.exception(f"[{sucursal}] ERROR inesperado: {e}")
             error_count += 1
 
-    # Persistir control actualizado
     if force_date is None:
         try:
             save_control(control)

@@ -27,8 +27,7 @@ function getPeriodRanges(period: string): PeriodRanges | null {
 
   if (/^\d+m$/.test(period)) {
     const months = parseInt(period);
-    // Últimos N meses calendario completos (excluye el mes actual en curso)
-    const currentEnd = new Date(now.getFullYear(), now.getMonth(), 0); // último día del mes anterior
+    const currentEnd = new Date(now.getFullYear(), now.getMonth(), 0);
     currentEnd.setHours(0, 0, 0, 0);
     const currentStart = new Date(currentEnd.getFullYear(), currentEnd.getMonth() - months + 1, 1);
     const pastEnd      = new Date(currentEnd);   pastEnd.setFullYear(pastEnd.getFullYear() - 1);
@@ -37,6 +36,14 @@ function getPeriodRanges(period: string): PeriodRanges | null {
   }
 
   return null;
+}
+
+function buildMetric(current: number, yearAgo: number) {
+  return {
+    current,
+    yearAgo,
+    variation: yearAgo > 0 ? ((current - yearAgo) / yearAgo) * 100 : null,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -56,34 +63,32 @@ export async function GET(request: NextRequest) {
 
   const ranges = getPeriodRanges(period)!;
   const branchFilter = branchId !== "ALL" ? { branchId } : {};
-  // Sales queries: requieren tanto showInExecutive=true como showInOperative=true
-  // (excluye Patricios y Condominio ET que son exec-only y no tienen ventas reales)
   const execVisibility = { branch: { showInExecutive: true, showInOperative: true } };
 
   const [currentRows, pastRows, branches] = await Promise.all([
     prisma.salesSnapshot.findMany({
       where: {
-        ...branchFilter,
-        ...execVisibility,
+        ...branchFilter, ...execVisibility,
         snapshotDate: { gte: ranges.currentStart, lte: ranges.currentEnd },
       },
-      select: { branchId: true, totalSales: true, snapshotDate: true,
-                branch: { select: { id: true, name: true } } },
+      select: {
+        branchId: true, totalSales: true, units: true, receipts: true,
+        snapshotDate: true, branch: { select: { id: true, name: true } },
+      },
     }),
     prisma.salesSnapshot.findMany({
       where: {
-        ...branchFilter,
-        ...execVisibility,
+        ...branchFilter, ...execVisibility,
         snapshotDate: { gte: ranges.pastStart, lte: ranges.pastEnd },
       },
-      select: { branchId: true, totalSales: true, snapshotDate: true,
-                branch: { select: { id: true, name: true } } },
+      select: {
+        branchId: true, totalSales: true, units: true, receipts: true,
+        snapshotDate: true, branch: { select: { id: true, name: true } },
+      },
     }),
     prisma.branch.findMany({
       where: {
-        active: true,
-        showInExecutive: true,
-        showInOperative: true,
+        active: true, showInExecutive: true, showInOperative: true,
         ...(branchId !== "ALL" && { id: branchId }),
       },
       select: { id: true, name: true },
@@ -91,27 +96,58 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
-  // Agregados totales
-  const currentTotal = currentRows.reduce((s, r) => s + Number(r.totalSales), 0);
-  const pastTotal    = pastRows.reduce(   (s, r) => s + Number(r.totalSales), 0);
-  const variation    = pastTotal > 0 ? ((currentTotal - pastTotal) / pastTotal) * 100 : null;
+  // Totales agregados — 3 métricas × (current / yearAgo / variation)
+  const sumSales    = (rs: typeof currentRows) => rs.reduce((s, r) => s + Number(r.totalSales), 0);
+  const sumUnits    = (rs: typeof currentRows) => rs.reduce((s, r) => s + r.units, 0);
+  const sumReceipts = (rs: typeof currentRows) => rs.reduce((s, r) => s + r.receipts, 0);
 
-  // Por sucursal
-  const branchMap = new Map<string, { branchId: string; branchName: string; current: number; yearAgo: number }>();
-  for (const b of branches) branchMap.set(b.id, { branchId: b.id, branchName: b.name, current: 0, yearAgo: 0 });
+  const aggregate = {
+    sales:   buildMetric(sumSales(currentRows),    sumSales(pastRows)),
+    units:   buildMetric(sumUnits(currentRows),    sumUnits(pastRows)),
+    tickets: buildMetric(sumReceipts(currentRows), sumReceipts(pastRows)),
+  };
+
+  // Por sucursal — 3 métricas × (current / yearAgo / variation)
+  type BranchAcc = {
+    branchId:   string;
+    branchName: string;
+    salesCur:   number; salesPast:    number;
+    unitsCur:   number; unitsPast:    number;
+    ticketsCur: number; ticketsPast:  number;
+  };
+  const branchMap = new Map<string, BranchAcc>();
+  for (const b of branches) {
+    branchMap.set(b.id, {
+      branchId: b.id, branchName: b.name,
+      salesCur: 0, salesPast: 0, unitsCur: 0, unitsPast: 0, ticketsCur: 0, ticketsPast: 0,
+    });
+  }
   for (const r of currentRows) {
     const e = branchMap.get(r.branchId);
-    if (e) e.current += Number(r.totalSales);
+    if (!e) continue;
+    e.salesCur   += Number(r.totalSales);
+    e.unitsCur   += r.units;
+    e.ticketsCur += r.receipts;
   }
   for (const r of pastRows) {
     const e = branchMap.get(r.branchId);
-    if (e) e.yearAgo += Number(r.totalSales);
+    if (!e) continue;
+    e.salesPast   += Number(r.totalSales);
+    e.unitsPast   += r.units;
+    e.ticketsPast += r.receipts;
   }
-  const byBranch = Array.from(branchMap.values())
-    .map(e => ({ ...e, variation: e.yearAgo > 0 ? ((e.current - e.yearAgo) / e.yearAgo) * 100 : null }))
-    .sort((a, b) => (b.variation ?? -Infinity) - (a.variation ?? -Infinity));
 
-  // Por mes (solo para períodos mensuales)
+  const byBranch = Array.from(branchMap.values())
+    .map((e) => ({
+      branchId:   e.branchId,
+      branchName: e.branchName,
+      sales:      buildMetric(e.salesCur,   e.salesPast),
+      units:      buildMetric(e.unitsCur,   e.unitsPast),
+      tickets:    buildMetric(e.ticketsCur, e.ticketsPast),
+    }))
+    .sort((a, b) => (b.sales.variation ?? -Infinity) - (a.sales.variation ?? -Infinity));
+
+  // Por mes (solo ventas, para el gráfico)
   let byMonth: Array<{ month: string; current: number; yearAgo: number }> | null = null;
   if (ranges.isMonthly) {
     const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -123,14 +159,12 @@ export async function GET(request: NextRequest) {
       currentByMonth.set(k, (currentByMonth.get(k) ?? 0) + Number(r.totalSales));
     }
     for (const r of pastRows) {
-      // Alinear: el mes del past se mapea al mes equivalente del current (+ 1 año)
       const d = new Date(r.snapshotDate);
       const aligned = new Date(d.getFullYear() + 1, d.getMonth(), 1);
       const k = monthKey(aligned);
       pastByMonth.set(k, (pastByMonth.get(k) ?? 0) + Number(r.totalSales));
     }
 
-    // Iterar todos los meses del rango current para construir el output ordenado
     byMonth = [];
     const cursor = new Date(ranges.currentStart);
     while (cursor <= ranges.currentEnd) {
@@ -153,7 +187,7 @@ export async function GET(request: NextRequest) {
       pastStart:    ranges.pastStart.toISOString(),
       pastEnd:      ranges.pastEnd.toISOString(),
     },
-    aggregate: { current: currentTotal, yearAgo: pastTotal, variation },
+    aggregate,
     byBranch,
     byMonth,
   });

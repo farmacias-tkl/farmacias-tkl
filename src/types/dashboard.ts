@@ -62,6 +62,35 @@ export interface SiafSalesRawData {
   obras_sociales: SiafObraSocial[];
 }
 
+// ============================================================================
+// ComparativeSection — response de /api/dashboard/comparative
+// ============================================================================
+export interface ComparativeMetric {
+  current:   number;
+  yearAgo:   number;
+  variation: number | null;
+}
+
+export interface ComparativeBranchRow {
+  branchId:   string;
+  branchName: string;
+  sales:      ComparativeMetric;
+  units:      ComparativeMetric;
+  tickets:    ComparativeMetric;
+}
+
+export interface ComparativeResponse {
+  period:    string;
+  branchId:  string;
+  aggregate: {
+    sales:   ComparativeMetric;
+    units:   ComparativeMetric;
+    tickets: ComparativeMetric;
+  };
+  byBranch:  ComparativeBranchRow[];
+  byMonth:   Array<{ month: string; current: number; yearAgo: number }> | null;
+}
+
 export interface DashboardSummary {
   date: Date;
   isToday: boolean;

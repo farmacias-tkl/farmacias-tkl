@@ -40,9 +40,22 @@ Debe mostrar `Python 3.11.15` (o similar 3.11.x).
 
 ---
 
-## 3. Instalar dependencias
+## 3. Instalar dependencias (modo offline)
 
-1. Copiá la carpeta del script al servidor en una ubicación estable:
+⚠️ **El servidor TKL no tiene acceso a internet directo** (proxy corporativo).
+Por eso NO se puede usar `pip install -r requirements.txt` — hay que hacer
+instalación **offline** con el archivo `.whl`.
+
+### 3a. Desde una PC CON internet (tu notebook / otra máquina)
+
+1. Abrí https://pypi.org/project/dbfread/#files
+2. Descargá: **`dbfread-2.0.7-py2.py3-none-any.whl`**
+3. Copiá ese archivo al servidor (USB, red compartida, etc.)
+4. Guardalo junto al script en `C:\TKL\siaf_sync\`
+
+### 3b. En el servidor TKL
+
+1. Copiá toda la carpeta `TKL-SIAF/` al servidor en una ubicación estable:
    ```
    C:\TKL\siaf_sync\
    ```
@@ -50,14 +63,23 @@ Debe mostrar `Python 3.11.15` (o similar 3.11.x).
    - `siaf_to_drive.py`
    - `requirements.txt`
    - `INSTALACION.md` (este archivo)
+   - `dbfread-2.0.7-py2.py3-none-any.whl` ← copiado en el paso 3a
 
 2. Abrí `cmd` **como administrador**:
    ```
    cd C:\TKL\siaf_sync
-   pip install -r requirements.txt
+   pip install dbfread-2.0.7-py2.py3-none-any.whl
    ```
 
-Tarda pocos segundos — solo instala `dbfread`.
+Tarda pocos segundos — instala `dbfread` desde el archivo local sin conectar
+a pypi.org.
+
+### Verificar instalación
+
+```
+python -c "import dbfread; print(dbfread.__version__)"
+```
+Debe mostrar `2.0.7`. Si falla, volver al paso 3a y repetir.
 
 ---
 
