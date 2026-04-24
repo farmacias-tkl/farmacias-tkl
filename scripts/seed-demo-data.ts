@@ -132,15 +132,20 @@ async function main() {
   console.log(`   ✓ SyncLog borrados:             ${delLogs.count}\n`);
 
   // ─── Cargar branches ─────────────────────────────────────
-  // allBranches: todas las activas (para balances — incluye Patricios, Condominio ET)
-  // salesBranches: solo showInOperative=true (para ventas — excluye exec-only)
+  // allBranches: todas las activas (para balances — incluye Patricios, Condominio ET, Call Center)
+  // salesBranches: solo las que aparecen en BOTH ejecutivo y operativo (las 11 SIAF)
+  //   - excluye Call Center    (showInExecutive=false)
+  //   - excluye Patricios      (showInOperative=false)
+  //   - excluye Condominio ET  (showInOperative=false)
   const allBranches = await prisma.branch.findMany({
     where:  { active: true },
-    select: { id: true, name: true, showInOperative: true },
+    select: { id: true, name: true, showInExecutive: true, showInOperative: true },
     orderBy: { name: "asc" },
   });
-  const salesBranches = allBranches.filter((b) => b.showInOperative !== false);
-  console.log(`📍 ${allBranches.length} sucursales activas (${salesBranches.length} con ventas; ${allBranches.length - salesBranches.length} solo balance)\n`);
+  const salesBranches = allBranches.filter(
+    (b) => b.showInExecutive !== false && b.showInOperative !== false,
+  );
+  console.log(`📍 ${allBranches.length} sucursales activas (${salesBranches.length} con ventas; ${allBranches.length - salesBranches.length} sin ventas — solo balance o solo operativo)\n`);
 
   // ─── Rangos de fechas ────────────────────────────────────
   // Balances: últimos 30 días (no se muestran históricos en UI)
