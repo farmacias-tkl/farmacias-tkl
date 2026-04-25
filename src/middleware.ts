@@ -13,7 +13,9 @@ export default auth((req: NextRequest & { auth: any }) => {
   const isDashboardHost = host.startsWith("dashboard.");
 
   // Rutas públicas / de auth
+  // /api/sync/* tiene su propia autenticación con Authorization: Bearer (no usa session)
   if (pathname.startsWith("/api/auth") || pathname.startsWith("/_next") ||
+      pathname.startsWith("/api/sync") ||
       pathname === "/login" || pathname === "/cambiar-password" || pathname === "/sin-acceso") {
     if (pathname === "/login" && session?.user) {
       const isOwner = session.user.role === "OWNER";
