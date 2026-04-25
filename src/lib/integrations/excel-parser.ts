@@ -35,6 +35,16 @@ function parseNumber(value: unknown): number | null {
   return isNaN(num) ? null : num;
 }
 
+/** Encuentra el índice de la fila de header buscando "SALDO" en col C. */
+function findHeaderRow(rows: unknown[][]): number {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!Array.isArray(row)) continue;
+    if (normalizeText(row[2]) === "SALDO") return i;
+  }
+  return -1;
+}
+
 function parseSheet(sheetName: string, sheet: XLSX.WorkSheet, warnings: string[]): ParsedBalanceRow[] {
   let rawRows: unknown[][];
   try {
@@ -44,19 +54,35 @@ function parseSheet(sheetName: string, sheet: XLSX.WorkSheet, warnings: string[]
     return [];
   }
   if (rawRows.length === 0) return [];
+
+  // Header dinámico — saltea fila 1 (título + fecha en B1) y cualquier preámbulo
+  const headerIdx = findHeaderRow(rawRows);
+  if (headerIdx === -1) {
+    warnings.push(`Sheet "${sheetName}": no se encontró header con "SALDO" en col C — sheet ignorada`);
+    return [];
+  }
+
   const results: ParsedBalanceRow[] = [];
-  for (let i = 0; i < rawRows.length; i++) {
+  for (let i = headerIdx + 1; i < rawRows.length; i++) {
     const row = rawRows[i];
     if (!Array.isArray(row)) continue;
     const colA = row[0];
-    if (!colA || String(colA).trim() === "") continue;
+    const colC = row[2];
+
+    // Skip filas vacías intercaladas (col A Y col C ambas vacías)
+    const aEmpty = colA === null || colA === undefined || String(colA).trim() === "";
+    const cEmpty = colC === null || colC === undefined || String(colC).trim() === "";
+    if (aEmpty && cEmpty) continue;
+    // Sucursal vacía con saldo presente → fila inconsistente, skip
+    if (aEmpty) continue;
+
     const sucursal = normalizeText(colA);
-    if (sucursal === "SUCURSAL" || sucursal === "BRANCH") continue;
-    const saldo = parseNumber(row[2]);
+    const saldo = parseNumber(colC);
     if (saldo === null) {
       warnings.push(`Sheet "${sheetName}" fila ${i + 1}: saldo vacío para "${sucursal}" — ignorada`);
       continue;
     }
+
     results.push({
       sucursal,
       banco: normalizeText(row[1]),
@@ -80,17 +106,34 @@ export function parseBalancesExcel(buffer: ArrayBuffer): ParseResult {
   } catch (e) {
     throw new Error(`No se pudo leer el Excel: ${String(e)}`);
   }
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) { sheetsSkipped.push(sheetName); continue; }
-    const rows = parseSheet(sheetName, sheet, warnings);
-    if (rows.length > 0) {
-      allRows = allRows.concat(rows);
-      sheetsProcessed.push(sheetName);
-    } else {
-      sheetsSkipped.push(sheetName);
-    }
+  // Solo la primera hoja (índice 0 — "SALDOS"). Las restantes se ignoran explícitamente.
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    return {
+      rows: [],
+      warnings: ["Excel sin hojas"],
+      sheetsProcessed: [],
+      sheetsSkipped: [],
+      totalRows: 0,
+    };
   }
+  const sheet = workbook.Sheets[firstSheetName];
+  if (sheet) {
+    const rows = parseSheet(firstSheetName, sheet, warnings);
+    if (rows.length > 0) {
+      allRows = rows;
+      sheetsProcessed.push(firstSheetName);
+    } else {
+      sheetsSkipped.push(firstSheetName);
+    }
+  } else {
+    sheetsSkipped.push(firstSheetName);
+  }
+  // Las hojas restantes se registran como skipped (no se leen)
+  for (let i = 1; i < workbook.SheetNames.length; i++) {
+    sheetsSkipped.push(workbook.SheetNames[i]);
+  }
+
   return { rows: allRows, warnings, sheetsProcessed, sheetsSkipped, totalRows: allRows.length };
 }
 
