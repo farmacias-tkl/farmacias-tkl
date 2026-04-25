@@ -6,7 +6,6 @@ interface Props {
   value:     string;
   sublabel?: string;
   variation?: number | null;
-  variant?:   "default" | "navy";
 }
 
 const KPI_CSS = `
@@ -25,10 +24,6 @@ const KPI_CSS = `
 @media (min-width: 768px) {
   .kpi-card { padding: 1.5rem 1.25rem; min-height: 120px; }
 }
-.kpi-card--navy {
-  background: #1E2D5A;
-  border-left: 4px solid #D4632A;
-}
 .kpi-label {
   font-size: 10px;
   color: #6b7280;
@@ -37,7 +32,6 @@ const KPI_CSS = `
   text-transform: uppercase;
   line-height: 1.2;
 }
-.kpi-card--navy .kpi-label { color: rgba(255,255,255,0.75); }
 @media (min-width: 768px) { .kpi-label { font-size: 11px; } }
 
 .kpi-value {
@@ -50,7 +44,6 @@ const KPI_CSS = `
   text-overflow: ellipsis;
 }
 .kpi-value--long { font-size: 1.1rem; }
-.kpi-card--navy .kpi-value { color: #D4632A; }
 
 .kpi-footer {
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
@@ -60,10 +53,9 @@ const KPI_CSS = `
   font-size: 11px; font-weight: 600;
 }
 .kpi-sublabel { font-size: 11px; color: #9ca3af; }
-.kpi-card--navy .kpi-sublabel { color: rgba(255,255,255,0.55); }
 `;
 
-export function KPICard({ label, value, sublabel, variation, variant = "default" }: Props) {
+export function KPICard({ label, value, sublabel, variation }: Props) {
   const varColor = variation == null ? "#9ca3af"
     : variation > 0 ? "#059669"
     : variation < 0 ? "#ef4444" : "#9ca3af";
@@ -73,7 +65,7 @@ export function KPICard({ label, value, sublabel, variation, variant = "default"
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: KPI_CSS }} />
-      <div className={variant === "navy" ? "kpi-card kpi-card--navy" : "kpi-card"}>
+      <div className="kpi-card">
         <div className="kpi-label">{label}</div>
         <div className={value.length > 10 ? "kpi-value kpi-value--long" : "kpi-value"}>{value}</div>
         {(showVariation || sublabel) && (

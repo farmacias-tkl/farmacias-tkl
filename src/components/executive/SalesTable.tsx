@@ -259,6 +259,9 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
   };
 
   const filterActive = effectiveOs !== "ALL" || effectiveVendor !== "ALL";
+  const someExpanded = expanded.size > 0;
+  const expandAll   = () => setExpanded(new Set(sorted.map((s) => s.branchId)));
+  const collapseAll = () => setExpanded(new Set());
 
   return (
     <>
@@ -266,10 +269,20 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
       <section className="exec-section">
         <div className="exec-section-header">
           <h3 className="exec-section-title">Ventas por sucursal</h3>
-          <span className="exec-section-meta">
-            {sales.length} sucursales
-            {filterActive && ` · ${sorted.length} con datos filtrados`}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+            <span className="exec-section-meta">
+              {sales.length} sucursales
+              {filterActive && ` · ${sorted.length} con datos filtrados`}
+            </span>
+            {sorted.length > 0 && (
+              <button
+                className="exec-section-header-btn"
+                onClick={someExpanded ? collapseAll : expandAll}
+              >
+                {someExpanded ? "Comprimir todo" : "Expandir todo"}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="exec-section-body">
@@ -394,15 +407,13 @@ function GlobalFilters({
 // ═══════════════════════════════════════════════════════════════════════════
 // Detalle expandido con tabs
 // ═══════════════════════════════════════════════════════════════════════════
-type DetailTab = "pago" | "os" | "vendedor";
+type DetailTab = "os" | "vendedor";
 
 function SalesDetail({ sales }: { sales: BranchSales }) {
-  const [tab, setTab]     = useState<DetailTab>("pago");
+  const [tab, setTab]       = useState<DetailTab>("os");
   const [search, setSearch] = useState("");
 
-  const isSiaf = sales.dataSource === "siaf";
   const raw = getRaw(sales);
-
   const vendedores = Array.isArray(raw?.vendedores) ? raw!.vendedores : [];
   const obrasSoc   = Array.isArray(raw?.obras_sociales) ? raw!.obras_sociales : [];
 
@@ -416,13 +427,6 @@ function SalesDetail({ sales }: { sales: BranchSales }) {
     <div className="sal-detail">
       {/* Tabs */}
       <div className="sal-tabs" role="tablist">
-        <button
-          role="tab"
-          className={tab === "pago" ? "sal-tab sal-tab--active" : "sal-tab"}
-          onClick={() => onTabChange("pago")}
-        >
-          Forma de pago
-        </button>
         <button
           role="tab"
           className={tab === "os" ? "sal-tab sal-tab--active" : "sal-tab"}
@@ -440,29 +444,6 @@ function SalesDetail({ sales }: { sales: BranchSales }) {
       </div>
 
       {/* Contenido del tab activo */}
-      {tab === "pago" && (
-        isSiaf && raw ? (
-          <div className="sal-detail-list">
-            <div className="sal-detail-item">
-              <span className="label">Efectivo</span>
-              <span className="value">{fmtARS(Number(raw.efectivo ?? 0))}</span>
-            </div>
-            <div className="sal-detail-item">
-              <span className="label">Tarjeta</span>
-              <span className="value">{fmtARS(Number(raw.tarjeta ?? 0))}</span>
-            </div>
-            <div className="sal-detail-item">
-              <span className="label">Obra social</span>
-              <span className="value">{fmtARS(Number(raw.obra_social ?? 0))}</span>
-            </div>
-          </div>
-        ) : (
-          <div className="sal-detail-placeholder">
-            Detalle por forma de pago: pendiente de datos reales
-          </div>
-        )
-      )}
-
       {tab === "os" && (
         obrasSoc.length > 0 ? (
           <>
@@ -470,7 +451,9 @@ function SalesDetail({ sales }: { sales: BranchSales }) {
             <OSSocialList rows={obrasSoc} search={search} />
           </>
         ) : (
-          <div className="sal-detail-placeholder">Disponible con datos reales</div>
+          <div className="sal-detail-placeholder">
+            Detalle por obra social: pendiente de datos reales
+          </div>
         )
       )}
 
@@ -481,7 +464,9 @@ function SalesDetail({ sales }: { sales: BranchSales }) {
             <VendorList rows={vendedores} search={search} />
           </>
         ) : (
-          <div className="sal-detail-placeholder">Disponible con datos reales</div>
+          <div className="sal-detail-placeholder">
+            Detalle por vendedor: pendiente de datos reales
+          </div>
         )
       )}
     </div>

@@ -149,21 +149,22 @@ const EXEC_STYLES = `
 .exec-branch-select select:focus { border-color: #1E2D5A; }
 @media (min-width: 768px) { .exec-branch-select select { min-width: 180px; flex: none; } }
 
-/* === KPI GRID (prioridad: Saldo a la derecha siempre) === */
+/* === KPI GRID === */
 .exec-kpi-grid {
   display: grid;
-  gap: 0.625rem;
   grid-template-columns: 1fr 1fr;
   grid-template-areas:
-    "ventas saldo"
-    "unidades tickets"
-    "ticketprom ticketprom";
+    "ventas    ticketprom"
+    "unidades  tickets"
+    "saldo     saldo";
+  gap: 0.625rem;
 }
 @media (min-width: 768px) {
   .exec-kpi-grid {
     grid-template-columns: repeat(5, 1fr);
-    grid-template-areas: "ventas unidades tickets ticketprom saldo";
-    gap: 0.875rem;
+    grid-template-areas: "ventas ticketprom unidades tickets saldo";
+    gap: 1.25rem;
+    padding: 1rem 0;
   }
 }
 .kpi-slot-ventas     { grid-area: ventas; }
@@ -308,10 +309,13 @@ export function ExecutiveDashboard({ data, user, children }: Props) {
 
           <AlertBanner alertas={data.alertas} />
 
-          {/* KPIs — Saldo siempre a la derecha */}
+          {/* KPIs — orden: Ventas → Ticket prom → Unidades → Tickets → Saldo */}
           <div className="exec-kpi-grid">
             <div className="kpi-slot-ventas">
               <KPICard label="Ventas del día" value={fmtARS(data.kpis.totalSales)} variation={data.kpis.salesVariation} sublabel="vs ayer" />
+            </div>
+            <div className="kpi-slot-ticketprom">
+              <KPICard label="Ticket promedio" value={fmtARS(data.kpis.avgTicket)} />
             </div>
             <div className="kpi-slot-unidades">
               <KPICard label="Unidades" value={fmtInt(data.kpis.totalUnits)} />
@@ -319,11 +323,8 @@ export function ExecutiveDashboard({ data, user, children }: Props) {
             <div className="kpi-slot-tickets">
               <KPICard label="Tickets" value={fmtInt(data.kpis.totalReceipts)} />
             </div>
-            <div className="kpi-slot-ticketprom">
-              <KPICard label="Ticket promedio" value={fmtARS(data.kpis.avgTicket)} />
-            </div>
             <div className="kpi-slot-saldo">
-              <KPICard label="Saldo bancario total" value={fmtARS(data.kpis.totalBankBalance)} variant="navy" />
+              <KPICard label="Saldo bancario total" value={fmtARS(data.kpis.totalBankBalance)} />
             </div>
           </div>
 
