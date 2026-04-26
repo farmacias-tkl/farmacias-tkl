@@ -38,10 +38,16 @@ export async function syncBalances(): Promise<SyncBalancesResult> {
 
   const { buffer, file, isStale } = fileResult;
   const alreadyProcessed = await prisma.sourceFile.findUnique({ where: { driveFileId: file.id } });
-  if (alreadyProcessed?.status === "processed") {
+  // Idempotency por día: si el mismo archivo ya se procesó HOY, skip.
+  // Si fue procesado en un día anterior (ej: archivo viejo / stale), re-procesar
+  // para dejar snapshot de hoy en la DB.
+  if (
+    alreadyProcessed?.status === "processed" &&
+    alreadyProcessed.processedAt >= today
+  ) {
     return {
       status: "SUCCESS",
-      message: `Archivo ${file.name} ya procesado (idempotente)`,
+      message: `Archivo ${file.name} ya procesado hoy (idempotente)`,
       rowsProcessed: alreadyProcessed.rowsCount, rowsSkipped: 0, warnings: [],
       durationMs: Date.now() - startTime, isStale, syncDate: today,
     };
@@ -77,7 +83,9 @@ export async function syncBalances(): Promise<SyncBalancesResult> {
     where: { active: true },
     select: { id: true, name: true, aliases: true },
   });
-  const snapshotDate = isStale ? new Date(file.modifiedTime) : new Date(today);
+  // Siempre snapshotDate = hoy. El flag isStale solo informa al frontend
+  // (AlertBanner muestra "mostrando archivo viejo" pero los saldos se persisten igual).
+  const snapshotDate = new Date(today);
   snapshotDate.setHours(0, 0, 0, 0);
 
   for (const row of parseResult.rows) {
@@ -129,9 +137,12 @@ export async function syncBalances(): Promise<SyncBalancesResult> {
     rowsSkipped > 0                        ? "PARTIAL" :
     isStale                                ? "STALE" : "SUCCESS";
 
+  const fileModIso = new Date(file.modifiedTime).toISOString().slice(0, 10);
   const result: SyncBalancesResult = {
     status: finalStatus,
-    message: `${rowsProcessed} filas procesadas, ${rowsSkipped} ignoradas. Archivo: ${file.name}`,
+    message: isStale
+      ? `${rowsProcessed} filas guardadas con fecha de hoy (archivo viejo: ${file.name}, modificado ${fileModIso})`
+      : `${rowsProcessed} filas procesadas, ${rowsSkipped} ignoradas. Archivo: ${file.name}`,
     rowsProcessed, rowsSkipped, warnings,
     durationMs: Date.now() - startTime, isStale, syncDate: today,
   };
