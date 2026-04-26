@@ -63,126 +63,152 @@ export async function syncSales(): Promise<SyncSalesResult> {
   });
 
   for (const set of branchSets) {
-    const branchId = resolveBranchId(set.sucursalName.toUpperCase(), branches);
-    if (!branchId) {
-      warnings.push(`Sucursal "${set.sucursalName}" no encontrada en DB — skip`);
-      rowsSkipped++;
-      continue;
-    }
-
-    if (!set.ventas) {
-      warnings.push(`[${set.sucursalName}] falta ventas.csv — skip sucursal`);
-      rowsSkipped++;
-      continue;
-    }
-
-    // Parsear los 3 CSVs
-    let ventasRows;
     try {
-      ventasRows = parseSalesCSV(set.ventas.csvContent);
+      const branchId = resolveBranchId(set.sucursalName.toUpperCase(), branches);
+      if (!branchId) {
+        warnings.push(`Sucursal "${set.sucursalName}" no encontrada en DB — skip`);
+        continue;
+      }
+
+      if (!set.ventas) {
+        warnings.push(`[${set.sucursalName}] falta ventas.csv — skip sucursal`);
+        continue;
+      }
+
+      // Parsear los 3 CSVs
+      let ventasRows;
+      try {
+        ventasRows = parseSalesCSV(set.ventas.csvContent);
+      } catch (e) {
+        warnings.push(`[${set.sucursalName}] parse error ventas.csv: ${String(e)}`);
+        continue;
+      }
+
+      let vendedoresRows: ParsedVendorDay[] = [];
+      if (set.vendedores) {
+        try {
+          vendedoresRows = parseSalesVendedoresCSV(set.vendedores.csvContent);
+        } catch (e) {
+          warnings.push(`[${set.sucursalName}] parse error vendedores.csv: ${String(e)} — continuando sin detalle vendedores`);
+        }
+      } else {
+        warnings.push(`[${set.sucursalName}] falta vendedores.csv — continuando sin detalle vendedores`);
+      }
+
+      let ossocialRows: ParsedOSocialDay[] = [];
+      if (set.ossocial) {
+        try {
+          ossocialRows = parseSalesOSSocialCSV(set.ossocial.csvContent);
+        } catch (e) {
+          warnings.push(`[${set.sucursalName}] parse error ossocial.csv: ${String(e)} — continuando sin detalle OS`);
+        }
+      } else {
+        warnings.push(`[${set.sucursalName}] falta ossocial.csv — continuando sin detalle OS`);
+      }
+
+      // Indexar vendedores y OS por fecha para lookup rápido
+      const vendorsByDate = new Map<string, ParsedVendorDay[]>();
+      for (const v of vendedoresRows) {
+        const arr = vendorsByDate.get(v.fecha) ?? [];
+        arr.push(v);
+        vendorsByDate.set(v.fecha, arr);
+      }
+      const osByDate = new Map<string, ParsedOSocialDay[]>();
+      for (const o of ossocialRows) {
+        const arr = osByDate.get(o.fecha) ?? [];
+        arr.push(o);
+        osByDate.set(o.fecha, arr);
+      }
+
+      // Buscar último snapshot SIAF para esta sucursal
+      const lastSnap = await prisma.salesSnapshot.findFirst({
+        where:   { branchId, dataSource: "siaf" },
+        orderBy: { snapshotDate: "desc" },
+        select:  { snapshotDate: true },
+      });
+      const lastDate = lastSnap?.snapshotDate ?? null;
+
+      // Filtrar rows estrictamente más nuevas que lastDate
+      const newRows = ventasRows.filter((row) => {
+        const rowDate = new Date(row.fecha + "T00:00:00.000Z");
+        if (!lastDate) return true;
+        return rowDate.getTime() > lastDate.getTime();
+      });
+
+      console.log(
+        `[sync-sales]   ${set.sucursalName}: ventasRows=${ventasRows.length} ` +
+        `lastSnap=${lastDate ? lastDate.toISOString().slice(0, 10) : "none"} ` +
+        `→ newRows=${newRows.length}`,
+      );
+
+      if (newRows.length === 0) {
+        continue;
+      }
+
+      // Construir batch para createMany
+      const batch: Prisma.SalesSnapshotCreateManyInput[] = newRows.map((row) => {
+        const snapshotDate = new Date(row.fecha + "T00:00:00.000Z");
+
+        const vendors = (vendorsByDate.get(row.fecha) ?? [])
+          .sort((a, b) => b.ventas - a.ventas)
+          .map((v) => ({
+            codigo:     v.codigoVendedor,
+            nombre:     v.nombreVendedor,
+            ventas:     v.ventas,
+            tickets:    v.tickets,
+            descuentos: v.descuentos,
+          }));
+
+        const obrasSoc = (osByDate.get(row.fecha) ?? [])
+          .sort((a, b) => b.ventasNeto - a.ventasNeto)
+          .map((o) => ({
+            codigo:       o.codigoOS,
+            nombre:       o.nombreOS,
+            ventas_bruto: o.ventasBruto,
+            descuentos:   o.descuentos,
+            ventas_neto:  o.ventasNeto,
+          }));
+
+        const rawData: Prisma.InputJsonValue = {
+          source:         "siaf",
+          efectivo:       row.ventasEfectivo,
+          tarjeta:        row.ventasTarjeta,
+          obra_social:    row.ventasObraSocial,
+          vendedores:     vendors,
+          obras_sociales: obrasSoc,
+        };
+
+        return {
+          branchId,
+          snapshotDate,
+          totalSales: row.totalVentas,
+          units:      row.totalUnidades,
+          receipts:   row.totalTickets,
+          avgTicket:  row.ticketPromedio,
+          rawData,
+          dataSource: "siaf",
+        };
+      });
+
+      // Single batch insert con skipDuplicates (defensa contra carreras / re-runs)
+      const result = await prisma.salesSnapshot.createMany({
+        data:           batch,
+        skipDuplicates: true,
+      });
+
+      rowsProcessed += result.count;
+      if (result.count < batch.length) {
+        const skipped = batch.length - result.count;
+        rowsSkipped += skipped;
+        warnings.push(`[${set.sucursalName}] ${skipped} filas saltadas por skipDuplicates (ya existían)`);
+      }
+
+      console.log(`[sync-sales]   ${set.sucursalName}: insertadas=${result.count} de ${batch.length}`);
+
     } catch (e) {
-      warnings.push(`[${set.sucursalName}] parse error ventas.csv: ${String(e)}`);
+      // Una sucursal falla → siguen las demás
+      warnings.push(`[${set.sucursalName}] ERROR procesando: ${String(e)}`);
       rowsSkipped++;
-      continue;
-    }
-
-    let vendedoresRows: ParsedVendorDay[] = [];
-    if (set.vendedores) {
-      try {
-        vendedoresRows = parseSalesVendedoresCSV(set.vendedores.csvContent);
-      } catch (e) {
-        warnings.push(`[${set.sucursalName}] parse error vendedores.csv: ${String(e)} — continuando sin detalle vendedores`);
-      }
-    } else {
-      warnings.push(`[${set.sucursalName}] falta vendedores.csv — continuando sin detalle vendedores`);
-    }
-
-    let ossocialRows: ParsedOSocialDay[] = [];
-    if (set.ossocial) {
-      try {
-        ossocialRows = parseSalesOSSocialCSV(set.ossocial.csvContent);
-      } catch (e) {
-        warnings.push(`[${set.sucursalName}] parse error ossocial.csv: ${String(e)} — continuando sin detalle OS`);
-      }
-    } else {
-      warnings.push(`[${set.sucursalName}] falta ossocial.csv — continuando sin detalle OS`);
-    }
-
-    // Indexar vendedores y OS por fecha para lookup rápido
-    const vendorsByDate = new Map<string, ParsedVendorDay[]>();
-    for (const v of vendedoresRows) {
-      const arr = vendorsByDate.get(v.fecha) ?? [];
-      arr.push(v);
-      vendorsByDate.set(v.fecha, arr);
-    }
-    const osByDate = new Map<string, ParsedOSocialDay[]>();
-    for (const o of ossocialRows) {
-      const arr = osByDate.get(o.fecha) ?? [];
-      arr.push(o);
-      osByDate.set(o.fecha, arr);
-    }
-
-    // Procesar cada día de la sucursal
-    for (const row of ventasRows) {
-      const snapshotDate = new Date(row.fecha);
-      snapshotDate.setHours(0, 0, 0, 0);
-
-      // Construir rawData enriquecido — solo incluir listas si tienen contenido real
-      const vendors = (vendorsByDate.get(row.fecha) ?? [])
-        .sort((a, b) => b.ventas - a.ventas)
-        .map(v => ({
-          codigo:     v.codigoVendedor,
-          nombre:     v.nombreVendedor,
-          ventas:     v.ventas,
-          tickets:    v.tickets,
-          descuentos: v.descuentos,
-        }));
-
-      const obrasSoc = (osByDate.get(row.fecha) ?? [])
-        .sort((a, b) => b.ventasNeto - a.ventasNeto)
-        .map(o => ({
-          codigo:       o.codigoOS,
-          nombre:       o.nombreOS,
-          ventas_bruto: o.ventasBruto,
-          descuentos:   o.descuentos,
-          ventas_neto:  o.ventasNeto,
-        }));
-
-      const rawData: Prisma.InputJsonValue = {
-        source:         "siaf",
-        efectivo:       row.ventasEfectivo,
-        tarjeta:        row.ventasTarjeta,
-        obra_social:    row.ventasObraSocial,
-        vendedores:     vendors,
-        obras_sociales: obrasSoc,
-      };
-
-      try {
-        await prisma.salesSnapshot.upsert({
-          where: { branchId_snapshotDate: { branchId, snapshotDate } },
-          update: {
-            totalSales: row.totalVentas,
-            units:      row.totalUnidades,
-            receipts:   row.totalTickets,
-            avgTicket:  row.ticketPromedio,
-            rawData,
-            dataSource: "siaf",
-          },
-          create: {
-            branchId, snapshotDate,
-            totalSales: row.totalVentas,
-            units:      row.totalUnidades,
-            receipts:   row.totalTickets,
-            avgTicket:  row.ticketPromedio,
-            rawData,
-            dataSource: "siaf",
-          },
-        });
-        rowsProcessed++;
-      } catch (e) {
-        warnings.push(`[${set.sucursalName}] error upsert ${row.fecha}: ${String(e)}`);
-        rowsSkipped++;
-      }
     }
   }
 

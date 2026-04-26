@@ -29,7 +29,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.SYNC_WEBHOOK_SECRET }}" \
             -H "Content-Type: application/json" \
             -d "{\"source\": \"$SOURCE\"}" \
-            --max-time 120)
+            --max-time 300)
           HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n -1)
           echo "Status: $HTTP_STATUS"
