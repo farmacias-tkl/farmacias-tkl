@@ -32,20 +32,7 @@ export async function syncSales(): Promise<SyncSalesResult> {
   const folderId = process.env.GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID;
   if (!folderId) throw new Error("GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID not set");
 
-  // [TEMP DEBUG] — eliminar después de validar
-  console.log(`[sync-sales] folderId: ${folderId}`);
-
   const branchSets = await downloadSalesCSVs(folderId);
-
-  // [TEMP DEBUG] — resumen post-download
-  const totalCsv = branchSets.reduce(
-    (s, b) => s + (b.ventas ? 1 : 0) + (b.vendedores ? 1 : 0) + (b.ossocial ? 1 : 0),
-    0,
-  );
-  console.log(`[sync-sales] Branches con CSVs: ${branchSets.length} | Archivos totales: ${totalCsv}/33 esperados`);
-  for (const b of branchSets) {
-    console.log(`[sync-sales]   ${b.sucursalName}: ventas=${!!b.ventas} vendedores=${!!b.vendedores} ossocial=${!!b.ossocial}`);
-  }
   if (branchSets.length === 0) {
     const result: SyncSalesResult = {
       status: "NO_FILE",
