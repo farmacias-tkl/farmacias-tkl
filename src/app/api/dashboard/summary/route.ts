@@ -51,23 +51,37 @@ export async function GET(request: NextRequest) {
     isStale = true;
   }
 
-  const sales = await prisma.salesSnapshot.findMany({
-    where: {
-      snapshotDate: targetDate,
-      ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true, showInOperative: true },
-    },
+  const salesBranchFilter = {
+    ...(branchId !== "ALL" && { branchId }),
+    branch: { showInExecutive: true, showInOperative: true },
+  };
+  let sales = await prisma.salesSnapshot.findMany({
+    where: { snapshotDate: targetDate, ...salesBranchFilter },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
-  const yesterday = new Date(targetDate);
+  let isStaleSales = false;
+  let salesDate = targetDate;
+  if (sales.length === 0) {
+    const latestSales = await prisma.salesSnapshot.findFirst({
+      where: salesBranchFilter,
+      orderBy: { snapshotDate: "desc" },
+      select:  { snapshotDate: true },
+    });
+    if (latestSales) {
+      salesDate = latestSales.snapshotDate;
+      sales = await prisma.salesSnapshot.findMany({
+        where: { snapshotDate: latestSales.snapshotDate, ...salesBranchFilter },
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: { branch: { name: "asc" } },
+      });
+    }
+    isStaleSales = true;
+  }
+  const yesterday = new Date(salesDate);
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdaySales = await prisma.salesSnapshot.findMany({
-    where: {
-      snapshotDate: yesterday,
-      ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true, showInOperative: true },
-    },
+    where: { snapshotDate: yesterday, ...salesBranchFilter },
     select: { branchId: true, totalSales: true },
   });
   const yesterdayMap = Object.fromEntries(yesterdaySales.map((s) => [s.branchId, Number(s.totalSales)]));
@@ -103,5 +117,7 @@ export async function GET(request: NextRequest) {
     })),
     isStaleBalances: isStale,
     lastBalanceDate: balances[0]?.snapshotDate ?? null,
+    isStaleSales,
+    lastSalesDate: sales[0]?.snapshotDate ?? null,
   });
 }

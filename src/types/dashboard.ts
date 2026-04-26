@@ -100,6 +100,8 @@ export interface DashboardSummary {
   salesByBranch: BranchSales[];
   lastBalanceDate: Date | null;
   isStaleBalances: boolean;
+  lastSalesDate: Date | null;
+  isStaleSales: boolean;
   lastSync: { at: Date; status: string } | null;
   branches: Array<{ id: string; name: string }>;
   alertas: string[];

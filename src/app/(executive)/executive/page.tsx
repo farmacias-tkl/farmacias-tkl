@@ -16,7 +16,6 @@ export default async function ExecutivePage({
 
   const branchId = searchParams.branch ?? "ALL";
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
 
   const balanceWhere = {
     snapshotDate: today,
@@ -54,21 +53,36 @@ export default async function ExecutivePage({
     isStaleBalances = true;
   }
 
-  const sales = await prisma.salesSnapshot.findMany({
-    where: {
-      snapshotDate: today,
-      ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true, showInOperative: true },
-    },
+  const salesBranchFilter = {
+    ...(branchId !== "ALL" && { branchId }),
+    branch: { showInExecutive: true, showInOperative: true },
+  };
+  let sales = await prisma.salesSnapshot.findMany({
+    where: { snapshotDate: today, ...salesBranchFilter },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
+  let isStaleSales = false;
+  let salesDate = today;
+  if (sales.length === 0) {
+    const latestSales = await prisma.salesSnapshot.findFirst({
+      where: salesBranchFilter,
+      orderBy: { snapshotDate: "desc" },
+      select:  { snapshotDate: true },
+    });
+    if (latestSales) {
+      salesDate = latestSales.snapshotDate;
+      sales = await prisma.salesSnapshot.findMany({
+        where: { snapshotDate: latestSales.snapshotDate, ...salesBranchFilter },
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: { branch: { name: "asc" } },
+      });
+    }
+    isStaleSales = true;
+  }
+  const yesterday = new Date(salesDate); yesterday.setDate(yesterday.getDate() - 1);
   const yesterdaySales = await prisma.salesSnapshot.findMany({
-    where: {
-      snapshotDate: yesterday,
-      ...(branchId !== "ALL" && { branchId }),
-      branch: { showInExecutive: true, showInOperative: true },
-    },
+    where: { snapshotDate: yesterday, ...salesBranchFilter },
     select: { branchId: true, totalSales: true },
   });
   const yesterdayMap = Object.fromEntries(yesterdaySales.map((s) => [s.branchId, Number(s.totalSales)]));
@@ -95,7 +109,10 @@ export default async function ExecutivePage({
     alertas.push(`Saldos: mostrando ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")} (no se cargó el archivo de hoy)`);
   }
   if (isStaleBalances && balances.length === 0) alertas.push("No hay saldos bancarios disponibles");
-  if (sales.length === 0) alertas.push("Datos de ventas no disponibles para hoy");
+  if (isStaleSales && sales.length > 0) {
+    alertas.push(`Ventas: mostrando ${new Date(salesDate).toLocaleDateString("es-AR")} (no se cargó el archivo de hoy)`);
+  }
+  if (isStaleSales && sales.length === 0) alertas.push("No hay datos de ventas disponibles");
 
   const balancesByBranchMap = new Map<string, { branchId: string; branchName: string; total: number; accounts: any[] }>();
   for (const b of balances) {
@@ -134,6 +151,8 @@ export default async function ExecutivePage({
     })),
     lastBalanceDate: balances[0]?.snapshotDate ?? null,
     isStaleBalances,
+    lastSalesDate: sales[0]?.snapshotDate ?? null,
+    isStaleSales,
     lastSync: lastSync ? { at: lastSync.createdAt, status: lastSync.status } : null,
     branches,
     alertas,
