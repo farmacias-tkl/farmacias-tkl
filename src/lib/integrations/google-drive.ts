@@ -103,6 +103,14 @@ export async function downloadSalesCSVs(folderId: string): Promise<BranchCSVSet[
     pageSize: 500,
   });
 
+  // [TEMP DEBUG] — eliminar después de validar
+  const rawCount = (response.data.files ?? []).length;
+  console.log(`[downloadSalesCSVs] Drive devolvió ${rawCount} archivos en folder ${folderId}`);
+  if (rawCount > 0 && rawCount <= 50) {
+    const names = (response.data.files ?? []).map((f) => f.name).join(", ");
+    console.log(`[downloadSalesCSVs] Nombres: ${names}`);
+  }
+
   // 2. Matchear por patrón y agrupar por sucursal
   const bySucursal = new Map<string, BranchCSVSet>();
   for (const f of response.data.files ?? []) {
