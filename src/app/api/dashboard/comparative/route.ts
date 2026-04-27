@@ -13,13 +13,11 @@ type PeriodRanges = {
   isMonthly:    boolean;
 };
 
-function getPeriodRanges(period: string): PeriodRanges | null {
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-
+function getPeriodRanges(period: string, anchorDate: Date): PeriodRanges | null {
   if (/^\d+d$/.test(period)) {
     const days = parseInt(period);
-    const currentEnd   = new Date(now);
-    const currentStart = new Date(now); currentStart.setDate(currentStart.getDate() - days + 1);
+    const currentEnd   = new Date(anchorDate);
+    const currentStart = new Date(anchorDate); currentStart.setDate(currentStart.getDate() - days + 1);
     const pastEnd      = new Date(currentEnd);   pastEnd.setFullYear(pastEnd.getFullYear() - 1);
     const pastStart    = new Date(currentStart); pastStart.setFullYear(pastStart.getFullYear() - 1);
     return { currentStart, currentEnd, pastStart, pastEnd, isMonthly: false };
@@ -27,8 +25,8 @@ function getPeriodRanges(period: string): PeriodRanges | null {
 
   if (/^\d+m$/.test(period)) {
     const months = parseInt(period);
-    const currentEnd   = new Date(now);
-    const currentStart = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+    const currentEnd   = new Date(anchorDate);
+    const currentStart = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - months + 1, 1);
     const pastEnd      = new Date(currentEnd);   pastEnd.setFullYear(pastEnd.getFullYear() - 1);
     const pastStart    = new Date(currentStart); pastStart.setFullYear(pastStart.getFullYear() - 1);
     return { currentStart, currentEnd, pastStart, pastEnd, isMonthly: true };
@@ -60,9 +58,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: `Período inválido. Válidos: ${VALID_PERIODS.join(", ")}` }, { status: 400 });
   }
 
-  const ranges = getPeriodRanges(period)!;
   const branchFilter = branchId !== "ALL" ? { branchId } : {};
   const execVisibility = { branch: { showInExecutive: true, showInOperative: true } };
+
+  // Anchor = última fecha disponible bajo el filtro activo. Si la DB está vacía,
+  // fallback a hoy (los rangos quedarán vacíos pero no rompen).
+  const latestSnapshot = await prisma.salesSnapshot.findFirst({
+    where: { ...branchFilter, ...execVisibility },
+    orderBy: { snapshotDate: "desc" },
+    select: { snapshotDate: true },
+  });
+  const anchorDate = latestSnapshot?.snapshotDate
+    ? new Date(latestSnapshot.snapshotDate)
+    : new Date();
+  anchorDate.setHours(0, 0, 0, 0);
+
+  const ranges = getPeriodRanges(period, anchorDate)!;
 
   const [currentRows, pastRows, branches] = await Promise.all([
     prisma.salesSnapshot.findMany({
@@ -180,6 +191,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     period,
     branchId,
+    anchorDate: anchorDate.toISOString(),
     range: {
       currentStart: ranges.currentStart.toISOString(),
       currentEnd:   ranges.currentEnd.toISOString(),

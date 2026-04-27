@@ -82,6 +82,7 @@ export interface ComparativeBranchRow {
 export interface ComparativeResponse {
   period:    string;
   branchId:  string;
+  anchorDate?: string | null;
   aggregate: {
     sales:   ComparativeMetric;
     units:   ComparativeMetric;

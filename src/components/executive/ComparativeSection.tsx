@@ -121,6 +121,11 @@ const COMP_CSS = `
   .cmp-table .col-tkt-var { display: table-cell; }
 }
 
+.cmp-anchor-note {
+  font-size: 11.5px; color: #6b7280; font-style: italic;
+  margin-bottom: 0.75rem;
+}
+
 .cmp-empty { padding: 1.5rem; text-align: center; color: #9ca3af; font-size: 13px; }
 .cmp-error { font-size: 13px; color: #dc2626; background: #fef2f2; border-radius: 6px; padding: 0.625rem 0.875rem; }
 .cmp-loading { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
@@ -161,6 +166,7 @@ export function ComparativeSection() {
           {error && <p className="cmp-error">{(error as Error).message}</p>}
           {data && (
             <>
+              <AnchorNote anchorDate={data.anchorDate} />
               <MetricsMatrix aggregate={data.aggregate} />
               {isMonthly && data.byMonth && data.byMonth.length > 0 && <MonthlyChart data={data.byMonth} />}
               <BranchTable rows={data.byBranch} />
@@ -169,6 +175,20 @@ export function ComparativeSection() {
         </div>
       </section>
     </>
+  );
+}
+
+function AnchorNote({ anchorDate }: { anchorDate?: string | null }) {
+  if (!anchorDate) return null;
+  const anchor = new Date(anchorDate);
+  if (Number.isNaN(anchor.getTime())) return null;
+  anchor.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (anchor.getTime() >= today.getTime()) return null;
+  return (
+    <p className="cmp-anchor-note">
+      Período calculado hasta {anchor.toLocaleDateString("es-AR")} (último dato disponible)
+    </p>
   );
 }
 
