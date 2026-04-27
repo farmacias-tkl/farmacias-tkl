@@ -27,9 +27,8 @@ function getPeriodRanges(period: string): PeriodRanges | null {
 
   if (/^\d+m$/.test(period)) {
     const months = parseInt(period);
-    const currentEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    currentEnd.setHours(0, 0, 0, 0);
-    const currentStart = new Date(currentEnd.getFullYear(), currentEnd.getMonth() - months + 1, 1);
+    const currentEnd   = new Date(now);
+    const currentStart = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
     const pastEnd      = new Date(currentEnd);   pastEnd.setFullYear(pastEnd.getFullYear() - 1);
     const pastStart    = new Date(currentStart); pastStart.setFullYear(pastStart.getFullYear() - 1);
     return { currentStart, currentEnd, pastStart, pastEnd, isMonthly: true };

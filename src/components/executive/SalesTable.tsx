@@ -107,14 +107,34 @@ const SALES_CSS = `
 .sal-tab:hover { color: #1E2D5A; }
 .sal-tab--active { color: #1E2D5A; border-bottom-color: #D4632A; }
 
-.sal-detail-list { display: flex; flex-direction: column; gap: 0.375rem; }
+.sal-detail-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .sal-detail-item {
-  display: flex; justify-content: space-between; align-items: baseline;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   font-size: 13px; gap: 0.5rem;
 }
-.sal-detail-item .label { color: #374151; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sal-detail-item .value { color: #1E2D5A; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sal-detail-item .sub { font-size: 11px; color: #9ca3af; margin-left: 0.375rem; font-weight: 400; }
+.sal-detail-item .label-col { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.sal-detail-item .label-line {
+  display: flex; align-items: baseline; gap: 0.375rem; min-width: 0;
+}
+.sal-detail-item .cod {
+  font-size: 10.5px; color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex-shrink: 0;
+}
+.sal-detail-item .label {
+  color: #374151; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sal-detail-item .sub {
+  font-size: 11px; color: #9ca3af; font-weight: 400; flex-shrink: 0;
+}
+.sal-detail-item .sub-line { font-size: 11px; color: #9ca3af; }
+.sal-detail-item .value {
+  color: #1E2D5A; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .sal-detail-placeholder {
   font-size: 12px; color: #9ca3af; font-style: italic;
   padding: 0.5rem 0; text-align: center;
@@ -493,24 +513,32 @@ function OSSocialList({ rows, search }: { rows: SiafObraSocialRaw[]; search: str
     const list = q
       ? rows.filter((o) => o.nombre.toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q))
       : [...rows];
-    return list.sort((a, b) => Number(b.ventas_neto) - Number(a.ventas_neto));
+    return list.sort((a, b) => Number(b.ventas_bruto) - Number(a.ventas_bruto));
   }, [rows, search]);
 
   if (filtered.length === 0) return <div className="sal-search-empty">Sin coincidencias</div>;
 
   return (
     <div className="sal-detail-list sal-detail-scroll">
-      {filtered.map((o, i) => (
-        <div key={`o-${i}`} className="sal-detail-item">
-          <span className="label">
-            {o.nombre}
-            {Number(o.descuentos ?? 0) > 0 && (
-              <span className="sub">· desc {fmtARS(Number(o.descuentos))}</span>
-            )}
-          </span>
-          <span className="value">{fmtARS(Number(o.ventas_neto ?? 0))}</span>
-        </div>
-      ))}
+      {filtered.map((o, i) => {
+        const desc  = Number(o.descuentos  ?? 0);
+        const bruto = Number(o.ventas_bruto ?? 0);
+        return (
+          <div key={`o-${i}`} className="sal-detail-item">
+            <div className="label-col">
+              <div className="label-line">
+                {o.codigo && <span className="cod">[{o.codigo}]</span>}
+                <span className="label">{o.nombre}</span>
+                {/* TODO: agregar `tickets` por OS al CSV en siaf_to_drive.py */}
+              </div>
+              {desc > 0 && (
+                <span className="sub-line">· desc {fmtARS(desc)}</span>
+              )}
+            </div>
+            <span className="value">{fmtARS(bruto)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -530,10 +558,14 @@ function VendorList({ rows, search }: { rows: SiafVendorRaw[]; search: string })
     <div className="sal-detail-list sal-detail-scroll">
       {filtered.map((v, i) => (
         <div key={`v-${i}`} className="sal-detail-item">
-          <span className="label">
-            {v.nombre}
-            <span className="sub">· {v.tickets} tk</span>
-          </span>
+          <div className="label-col">
+            <div className="label-line">
+              {v.codigo && <span className="cod">[{v.codigo}]</span>}
+              <span className="label">{v.nombre}</span>
+              <span className="sub">· {fmtInt(v.tickets)} tk</span>
+              {/* TODO: agregar `unidades` por vendedor al CSV en siaf_to_drive.py */}
+            </div>
+          </div>
           <span className="value">{fmtARS(Number(v.ventas ?? 0))}</span>
         </div>
       ))}
