@@ -121,9 +121,12 @@ const COMP_CSS = `
   .cmp-table .col-tkt-var { display: table-cell; }
 }
 
-.cmp-anchor-note {
-  font-size: 11.5px; color: #6b7280; font-style: italic;
-  margin-bottom: 0.75rem;
+.cmp-anchor-note-block { margin-bottom: 0.75rem; }
+.cmp-anchor-main {
+  font-size: 12px; color: #6b7280; margin: 0;
+}
+.cmp-anchor-sub {
+  font-size: 10.5px; color: #9ca3af; margin: 0.125rem 0 0 0;
 }
 
 .cmp-empty { padding: 1.5rem; text-align: center; color: #9ca3af; font-size: 13px; }
@@ -166,7 +169,12 @@ export function ComparativeSection() {
           {error && <p className="cmp-error">{(error as Error).message}</p>}
           {data && (
             <>
-              <AnchorNote anchorDate={data.anchorDate} />
+              <AnchorNote
+                anchorDate={data.anchorDate}
+                branchId={branchId}
+                period={period}
+                byBranch={data.byBranch}
+              />
               <MetricsMatrix aggregate={data.aggregate} />
               {isMonthly && data.byMonth && data.byMonth.length > 0 && <MonthlyChart data={data.byMonth} />}
               <BranchTable rows={data.byBranch} />
@@ -178,17 +186,52 @@ export function ComparativeSection() {
   );
 }
 
-function AnchorNote({ anchorDate }: { anchorDate?: string | null }) {
+// Parsea "YYYY-MM-DD..." como fecha local a mediodía para evitar shift por TZ.
+function parseLocalDate(iso: string): Date | null {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+function AnchorNote({
+  anchorDate, branchId, period, byBranch,
+}: {
+  anchorDate?: string | null;
+  branchId:   string;
+  period:     Period;
+  byBranch:   ComparativeBranchRow[];
+}) {
   if (!anchorDate) return null;
-  const anchor = new Date(anchorDate);
-  if (Number.isNaN(anchor.getTime())) return null;
-  anchor.setHours(0, 0, 0, 0);
+  const anchor = parseLocalDate(anchorDate);
+  if (!anchor) return null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   if (anchor.getTime() >= today.getTime()) return null;
+
+  const isMonthly  = /^\d+m$/.test(period);
+  const n          = parseInt(period);
+  const periodText = isMonthly ? `${n} meses` : `${n} días`;
+  const dateText   = anchor.toLocaleDateString("es-AR");
+
+  if (branchId === "ALL") {
+    return (
+      <div className="cmp-anchor-note-block">
+        <p className="cmp-anchor-main">
+          Últimos {periodText} hasta {dateText}
+        </p>
+        <p className="cmp-anchor-sub">
+          Algunas sucursales pueden tener menos días operativos según actividad.
+        </p>
+      </div>
+    );
+  }
+
+  const days = byBranch[0]?.currentDaysWithData ?? 0;
   return (
-    <p className="cmp-anchor-note">
-      Período calculado hasta {anchor.toLocaleDateString("es-AR")} (último dato disponible)
-    </p>
+    <div className="cmp-anchor-note-block">
+      <p className="cmp-anchor-main">
+        Últimos {periodText} hasta {dateText} · {days} días con datos
+      </p>
+    </div>
   );
 }
 

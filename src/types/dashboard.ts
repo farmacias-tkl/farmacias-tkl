@@ -77,6 +77,7 @@ export interface ComparativeBranchRow {
   sales:      ComparativeMetric;
   units:      ComparativeMetric;
   tickets:    ComparativeMetric;
+  currentDaysWithData: number;
 }
 
 export interface ComparativeResponse {

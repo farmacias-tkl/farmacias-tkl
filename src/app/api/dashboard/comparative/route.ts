@@ -124,12 +124,14 @@ export async function GET(request: NextRequest) {
     salesCur:   number; salesPast:    number;
     unitsCur:   number; unitsPast:    number;
     ticketsCur: number; ticketsPast:  number;
+    currentDays: Set<string>;
   };
   const branchMap = new Map<string, BranchAcc>();
   for (const b of branches) {
     branchMap.set(b.id, {
       branchId: b.id, branchName: b.name,
       salesCur: 0, salesPast: 0, unitsCur: 0, unitsPast: 0, ticketsCur: 0, ticketsPast: 0,
+      currentDays: new Set<string>(),
     });
   }
   for (const r of currentRows) {
@@ -138,6 +140,7 @@ export async function GET(request: NextRequest) {
     e.salesCur   += Number(r.totalSales);
     e.unitsCur   += r.units;
     e.ticketsCur += r.receipts;
+    e.currentDays.add(new Date(r.snapshotDate).toISOString().slice(0, 10));
   }
   for (const r of pastRows) {
     const e = branchMap.get(r.branchId);
@@ -154,6 +157,7 @@ export async function GET(request: NextRequest) {
       sales:      buildMetric(e.salesCur,   e.salesPast),
       units:      buildMetric(e.unitsCur,   e.unitsPast),
       tickets:    buildMetric(e.ticketsCur, e.ticketsPast),
+      currentDaysWithData: e.currentDays.size,
     }))
     .sort((a, b) => (b.sales.variation ?? -Infinity) - (a.sales.variation ?? -Infinity));
 
