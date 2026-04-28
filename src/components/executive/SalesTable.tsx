@@ -57,7 +57,7 @@ const SALES_CSS = `
 .sal-row {
   display: grid;
   grid-template-columns: 20px 1fr auto auto;
-  align-items: center; gap: 0.5rem;
+  align-items: center; gap: 1rem;
   padding: 0.75rem 1rem;
   cursor: pointer;
   border-bottom: 1px solid #f3f4f6;
@@ -70,11 +70,16 @@ const SALES_CSS = `
   font-size: 14px; font-weight: 600; color: #111827;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
 }
-.sal-total { font-size: 14px; font-weight: 700; color: #1E2D5A; white-space: nowrap; text-align: right; }
+.sal-total {
+  font-size: 14px; font-weight: 700; color: #1E2D5A;
+  white-space: nowrap; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .sal-var {
   display: inline-flex; align-items: center; gap: 0.25rem;
   font-size: 11px; font-weight: 600; white-space: nowrap;
   justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
 }
 
 .sal-extras { display: none; }
@@ -119,7 +124,7 @@ const SALES_CSS = `
   display: flex; align-items: baseline; gap: 0.375rem; min-width: 0;
 }
 .sal-detail-item .cod {
-  font-size: 10.5px; color: #9ca3af;
+  font-size: 10.5px; color: #6b7280;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   flex-shrink: 0;
 }
@@ -128,9 +133,13 @@ const SALES_CSS = `
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sal-detail-item .sub {
-  font-size: 11px; color: #9ca3af; font-weight: 400; flex-shrink: 0;
+  font-size: 11px; color: #4b5563; font-weight: 400; flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
-.sal-detail-item .sub-line { font-size: 11px; color: #9ca3af; }
+.sal-detail-item .sub-line {
+  font-size: 11px; color: #4b5563;
+  font-variant-numeric: tabular-nums;
+}
 .sal-detail-item .value {
   color: #1E2D5A; font-weight: 700;
   font-variant-numeric: tabular-nums; white-space: nowrap;
@@ -155,7 +164,7 @@ const SALES_CSS = `
 
 /* Encabezado tabla solo desktop */
 .sal-head {
-  display: none; gap: 0.5rem;
+  display: none; gap: 1rem;
   padding: 0.5rem 1rem;
   background: #f9fafb;
   border-bottom: 1px solid #e5e7eb;
@@ -521,7 +530,6 @@ function OSSocialList({ rows, search }: { rows: SiafObraSocialRaw[]; search: str
   return (
     <div className="sal-detail-list sal-detail-scroll">
       {filtered.map((o, i) => {
-        const desc  = Number(o.descuentos  ?? 0);
         const bruto = Number(o.ventas_bruto ?? 0);
         return (
           <div key={`o-${i}`} className="sal-detail-item">
@@ -531,9 +539,6 @@ function OSSocialList({ rows, search }: { rows: SiafObraSocialRaw[]; search: str
                 <span className="label">{o.nombre}</span>
                 {/* TODO: agregar `tickets` por OS al CSV en siaf_to_drive.py */}
               </div>
-              {desc > 0 && (
-                <span className="sub-line">· desc {fmtARS(desc)}</span>
-              )}
             </div>
             <span className="value">{fmtARS(bruto)}</span>
           </div>
@@ -562,9 +567,9 @@ function VendorList({ rows, search }: { rows: SiafVendorRaw[]; search: string })
             <div className="label-line">
               {v.codigo && <span className="cod">[{v.codigo}]</span>}
               <span className="label">{v.nombre}</span>
-              <span className="sub">· {fmtInt(v.tickets)} tk</span>
               {/* TODO: agregar `unidades` por vendedor al CSV en siaf_to_drive.py */}
             </div>
+            <span className="sub-line">Tickets: {fmtInt(v.tickets)}</span>
           </div>
           <span className="value">{fmtARS(Number(v.ventas ?? 0))}</span>
         </div>

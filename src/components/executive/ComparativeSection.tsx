@@ -34,8 +34,8 @@ function monthShortLabel(key: string) {
 
 function varColor(v: number | null) {
   if (v == null) return "#9ca3af";
-  if (v > 0)     return "#059669";
-  if (v < 0)     return "#ef4444";
+  if (v > 0)     return "#16a34a";
+  if (v < 0)     return "#dc2626";
   return "#9ca3af";
 }
 function VarIconOf(v: number | null) {
@@ -70,7 +70,7 @@ const COMP_CSS = `
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .cmp-matrix th.num { text-align: right; }
-.cmp-matrix td { padding: 0.75rem 0.875rem; border-top: 1px solid #f3f4f6; vertical-align: middle; }
+.cmp-matrix td { padding: 0.625rem 0.875rem; border-top: 1px solid #f3f4f6; vertical-align: middle; }
 .cmp-matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cmp-matrix td.metric-label { font-weight: 700; color: #1E2D5A; font-size: 12px; letter-spacing: 0.03em; }
 .cmp-matrix td.value-current { color: #1E2D5A; font-weight: 700; font-size: 15px; }
@@ -103,7 +103,7 @@ const COMP_CSS = `
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .cmp-table th.num { text-align: right; }
-.cmp-table td { padding: 0.5rem 0.5rem; border-top: 1px solid #f3f4f6; }
+.cmp-table td { padding: 0.625rem 0.5rem; border-top: 1px solid #f3f4f6; }
 .cmp-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cmp-table tr:hover td { background: #fafafa; }
 .cmp-var-inline { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; }

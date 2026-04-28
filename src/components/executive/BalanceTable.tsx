@@ -46,7 +46,12 @@ const BALANCE_CSS = `
   padding: 0.375rem 0.5rem; text-align: left; font-size: 10px;
   font-weight: 500; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;
 }
-.bal-table th.num, .bal-table td.num { text-align: right; }
+.bal-table th.num, .bal-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  min-width: 120px;
+  padding-left: 1.25rem;
+}
 .bal-table td {
   padding: 0.5rem; border-top: 1px solid #f3f4f6;
   color: #374151;

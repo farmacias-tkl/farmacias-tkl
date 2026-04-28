@@ -106,13 +106,13 @@ export default async function ExecutivePage({
 
   const alertas: string[] = [];
   if (isStaleBalances && balances.length > 0) {
-    alertas.push(`Saldos: mostrando ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")} (no se cargó el archivo de hoy)`);
+    alertas.push(`Saldos sin actualizar. Último cierre disponible: ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")}.`);
   }
   if (isStaleBalances && balances.length === 0) alertas.push("No hay saldos bancarios disponibles");
   if (isStaleSales && sales.length > 0) {
-    alertas.push(`Ventas: mostrando ${new Date(salesDate).toLocaleDateString("es-AR")} (no se cargó el archivo de hoy)`);
+    alertas.push(`Ventas sin actualizar. Último cierre disponible: ${new Date(salesDate).toLocaleDateString("es-AR")}.`);
   }
-  if (isStaleSales && sales.length === 0) alertas.push("No hay datos de ventas disponibles");
+  if (isStaleSales && sales.length === 0) alertas.push("Sin datos de ventas disponibles.");
 
   const balancesByBranchMap = new Map<string, { branchId: string; branchName: string; total: number; accounts: any[] }>();
   for (const b of balances) {
