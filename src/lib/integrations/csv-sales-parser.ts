@@ -126,7 +126,8 @@ export function parseSalesVendedoresCSV(csvContent: string): ParsedVendorDay[] {
 
 // ============================================================================
 // Parser de {Sucursal}_ossocial.csv
-// Columnas: sucursal, fecha, codigo_os, nombre_os, ventas_bruto, descuentos, ventas_neto
+// Columnas: sucursal, fecha, codigo_os, nombre_os, ventas_bruto, descuentos,
+//           ventas_neto, tickets, unidades
 // Nota: codigo_os puede venir vacío (PARTICULAR).
 // ============================================================================
 export interface ParsedOSocialDay {
@@ -137,12 +138,18 @@ export interface ParsedOSocialDay {
   ventasBruto: number;
   descuentos:  number;
   ventasNeto:  number;
+  tickets:     number;
+  unidades:    number;
 }
 
-const OSSOCIAL_HEADER = [
+// Columnas obligatorias — `tickets` y `unidades` son opcionales para soportar
+// transición: CSVs generados por el script Python anterior no las traen y se
+// completan con 0 hasta que el servidor regenere los CSVs.
+const OSSOCIAL_HEADER_REQUIRED = [
   "sucursal", "fecha", "codigo_os", "nombre_os",
   "ventas_bruto", "descuentos", "ventas_neto",
 ] as const;
+const OSSOCIAL_HEADER_OPTIONAL = ["tickets", "unidades"] as const;
 
 export function parseSalesOSSocialCSV(csvContent: string): ParsedOSocialDay[] {
   const cleaned = csvContent.replace(/^\uFEFF/, "").trim();
@@ -152,19 +159,21 @@ export function parseSalesOSSocialCSV(csvContent: string): ParsedOSocialDay[] {
   if (lines.length < 2) return [];
 
   const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
-  const idx = Object.fromEntries(OSSOCIAL_HEADER.map((k) => [k, header.indexOf(k)]));
+  const allKeys = [...OSSOCIAL_HEADER_REQUIRED, ...OSSOCIAL_HEADER_OPTIONAL];
+  const idx = Object.fromEntries(allKeys.map((k) => [k, header.indexOf(k)]));
 
-  const missing = OSSOCIAL_HEADER.filter((k) => idx[k] < 0);
+  const missing = OSSOCIAL_HEADER_REQUIRED.filter((k) => idx[k] < 0);
   if (missing.length > 0) {
     throw new Error(
       `OS Social CSV header inválido. Faltan columnas: ${missing.join(", ")}. Recibido: ${header.join(",")}`,
     );
   }
 
+  const minCols = OSSOCIAL_HEADER_REQUIRED.length;
   const rows: ParsedOSocialDay[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",").map((c) => c.trim());
-    if (cols.length < OSSOCIAL_HEADER.length) continue;
+    if (cols.length < minCols) continue;
     rows.push({
       sucursal:    cols[idx.sucursal],
       fecha:       cols[idx.fecha],
@@ -173,6 +182,8 @@ export function parseSalesOSSocialCSV(csvContent: string): ParsedOSocialDay[] {
       ventasBruto: toNum(cols[idx.ventas_bruto]),
       descuentos:  toNum(cols[idx.descuentos]),
       ventasNeto:  toNum(cols[idx.ventas_neto]),
+      tickets:     idx.tickets  >= 0 ? toInt(cols[idx.tickets]  ?? "0") : 0,
+      unidades:    idx.unidades >= 0 ? toInt(cols[idx.unidades] ?? "0") : 0,
     });
   }
   return rows;

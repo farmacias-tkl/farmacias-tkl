@@ -154,6 +154,8 @@ export async function syncSales(): Promise<SyncSalesResult> {
             ventas_bruto: o.ventasBruto,
             descuentos:   o.descuentos,
             ventas_neto:  o.ventasNeto,
+            tickets:      o.tickets,
+            unidades:     o.unidades,
           }));
 
         const rawData: Prisma.InputJsonValue = {

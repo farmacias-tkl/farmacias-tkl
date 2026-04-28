@@ -384,20 +384,26 @@ def process_branch(
     if not records_by_date:
         return ([], [], [], set())
 
-    # Mapa (NUMERO, fecha_yyyymmdd) → código de vendedor, construido desde los
-    # CPBTEMI ya filtrados. Sirve para resolver el vendedor de cada línea de
-    # DETMOV (que viene con CPBT='DET'/'NCR' y no trae el vendedor directo).
+    # Mapas (NUMERO, fecha_yyyymmdd) → vendedor / OS, construidos desde los
+    # CPBTEMI ya filtrados. Sirven para resolver vendedor y obra social de
+    # cada línea de DETMOV (que viene con CPBT='DET'/'NCR' y no trae esos
+    # campos directamente).
     cpbt_to_vendor: dict[tuple[str, str], str] = {}
+    cpbt_to_os:     dict[tuple[str, str], str] = {}
     for date_str, recs in records_by_date.items():
         for r in recs:
-            numero = safe_str(r.get("NUMERO"))
-            vcode  = safe_str(r.get("VENDEDOR"))
+            numero  = safe_str(r.get("NUMERO"))
+            vcode   = safe_str(r.get("VENDEDOR"))
+            os_code = safe_str(r.get("OS"))
             if numero and vcode:
                 cpbt_to_vendor[(numero, date_str)] = vcode
+            if numero and os_code:
+                cpbt_to_os[(numero, date_str)] = os_code
 
     # Unidades desde DETMOV.DBF (opcional)
-    detmov_units        = read_detmov_units(folder, sucursal, set(records_by_date.keys()))
+    detmov_units         = read_detmov_units(folder, sucursal, set(records_by_date.keys()))
     vendor_units_by_date = read_detmov_vendor_units(folder, sucursal, set(records_by_date.keys()), cpbt_to_vendor)
+    os_units_by_date     = read_detmov_os_units    (folder, sucursal, set(records_by_date.keys()), cpbt_to_os)
 
     ventas_rows:     list[dict] = []
     vendedores_rows: list[dict] = []
@@ -416,7 +422,7 @@ def process_branch(
         ventas_os       = 0.0
 
         vendor_agg: dict[str, dict] = defaultdict(lambda: {"ventas": 0.0, "tickets": set(), "descuentos": 0.0, "unidades": 0})
-        os_agg:     dict[str, dict] = defaultdict(lambda: {"ventas_bruto": 0.0, "descuentos": 0.0, "tickets": set()})
+        os_agg:     dict[str, dict] = defaultdict(lambda: {"ventas_bruto": 0.0, "descuentos": 0.0, "tickets": set(), "unidades": 0})
 
         for r in recs:
             bruto  = safe_float(r.get("TOTBRUTO"))
@@ -461,6 +467,14 @@ def process_branch(
         # cruce por NUMERO viene de los CPBTEMI filtrados — pero defensivo).
         for vcode_du, units in vendor_units_by_date.get(date_str, {}).items():
             vendor_agg[vcode_du]["unidades"] = units
+
+        # Mergear unidades por OS — guard explícito: solo si la OS ya está en
+        # os_agg (es decir, tiene venta CPBTEMI ese día). Evita filas con
+        # ventas_bruto=0/tickets=0/unidades>0 que serían visualmente confusas
+        # en el dashboard ejecutivo.
+        for os_code_du, units in os_units_by_date.get(date_str, {}).items():
+            if os_code_du in os_agg:
+                os_agg[os_code_du]["unidades"] = units
 
         total_tickets   = len(tickets)
         ticket_promedio = total_bruto / total_tickets if total_tickets > 0 else 0.0
@@ -507,6 +521,7 @@ def process_branch(
                 "descuentos":   round(agg["descuentos"], 2),
                 "ventas_neto":  round(neto_os, 2),
                 "tickets":      len(agg["tickets"]),
+                "unidades":     agg["unidades"],
             })
 
         processed.add(date_str)
@@ -597,6 +612,55 @@ def read_detmov_vendor_units(
         result[fecha_str][vendor] += n
     return {k: dict(v) for k, v in result.items()}
 
+
+def read_detmov_os_units(
+    folder: Path,
+    sucursal: str,
+    date_filter: set[str] | None,
+    cpbt_to_os: dict[tuple[str, str], str],
+) -> dict[str, dict[str, int]]:
+    """Suma CANTIDAD por (fecha, código_obra_social) cruzando DETMOV con
+    cpbt_to_os por (NROCPBT, FECHA).
+
+    Reglas idénticas a read_detmov_units / read_detmov_vendor_units:
+    - Solo CPBT in ('DET','NCR').
+    - NCR: cantidad = -abs(cantidad) para garantizar resta.
+    - Si la clave (NROCPBT, FECHA) no resuelve a una OS, se ignora — eso
+      cubre las ventas particulares (sin OS) y NCR de comprobantes
+      particulares.
+    """
+    path = folder / "DETMOV.DBF"
+    if not path.exists():
+        return {}
+    records = read_dbf_safely(path, sucursal)
+    if records is None:
+        return {}
+    result: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for r in records:
+        fecha_str = normalize_fecha(r.get("FECHA"))
+        if fecha_str is None:
+            continue
+        if date_filter is not None and fecha_str not in date_filter:
+            continue
+        cpbt = safe_str(r.get("CPBT") or r.get("CODIGO")).upper()
+        if cpbt not in ("DET", "NCR"):
+            continue
+        nrocpbt = safe_str(r.get("NROCPBT"))
+        os_code = cpbt_to_os.get((nrocpbt, fecha_str), "")
+        if not os_code:
+            continue
+        cantidad = r.get("CANTIDAD")
+        if cantidad is None:
+            continue
+        try:
+            n = int(safe_float(cantidad))
+        except (ValueError, TypeError):
+            continue
+        if cpbt == "NCR":
+            n = -abs(n)
+        result[fecha_str][os_code] += n
+    return {k: dict(v) for k, v in result.items()}
+
 # =============================================================================
 # CSV MERGE WRITER
 # =============================================================================
@@ -655,7 +719,7 @@ VENDEDORES_FIELDS = [
 ]
 OSSOCIAL_FIELDS = [
     "sucursal", "fecha", "codigo_os", "nombre_os",
-    "ventas_bruto", "descuentos", "ventas_neto", "tickets",
+    "ventas_bruto", "descuentos", "ventas_neto", "tickets", "unidades",
 ]
 
 # =============================================================================

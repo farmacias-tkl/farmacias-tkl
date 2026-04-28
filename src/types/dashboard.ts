@@ -51,6 +51,8 @@ export interface SiafObraSocial {
   ventas_bruto: number;
   descuentos:   number;
   ventas_neto:  number;
+  tickets:      number;
+  unidades:     number;
 }
 
 export interface SiafSalesRawData {
