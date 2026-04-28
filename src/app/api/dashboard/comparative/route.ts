@@ -26,7 +26,9 @@ function getPeriodRanges(period: string, anchorDate: Date): PeriodRanges | null 
   if (/^\d+m$/.test(period)) {
     const months = parseInt(period);
     const currentEnd   = new Date(anchorDate);
-    const currentStart = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - months + 1, 1);
+    const currentStart = new Date(anchorDate);
+    currentStart.setMonth(currentStart.getMonth() - months);
+    currentStart.setDate(currentStart.getDate() + 1);
     const pastEnd      = new Date(currentEnd);   pastEnd.setFullYear(pastEnd.getFullYear() - 1);
     const pastStart    = new Date(currentStart); pastStart.setFullYear(pastStart.getFullYear() - 1);
     return { currentStart, currentEnd, pastStart, pastEnd, isMonthly: true };
@@ -180,8 +182,9 @@ export async function GET(request: NextRequest) {
     }
 
     byMonth = [];
-    const cursor = new Date(ranges.currentStart);
-    while (cursor <= ranges.currentEnd) {
+    const cursor   = new Date(ranges.currentStart.getFullYear(), ranges.currentStart.getMonth(), 1);
+    const endMonth = new Date(ranges.currentEnd.getFullYear(),   ranges.currentEnd.getMonth(),   1);
+    while (cursor <= endMonth) {
       const k = monthKey(cursor);
       byMonth.push({
         month:   k,
