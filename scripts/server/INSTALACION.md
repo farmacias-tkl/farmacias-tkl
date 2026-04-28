@@ -10,12 +10,29 @@ del sistema SIAF hacia la carpeta de red de Farmacias TKL.
 - Windows Server 2016+ o Windows 10+
 - Permisos de administrador en el servidor
 - **Python 3.11.15** instalado con la casilla "Add Python to PATH" marcada
-- **Acceso de escritura** a la carpeta de red:
+- **Acceso de escritura** a las **dos** subcarpetas de red:
   ```
-  \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\
+  \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico\
+  \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario\
   ```
+  Si no existen, crearlas antes de la primera corrida (Explorador de Windows →
+  Nueva carpeta).
 - Carpeta `C:\_Datos\_administracion\temporal_sucursales\` con los DBF
   de SIAF (debe existir y actualizarse diariamente)
+
+**Para qué sirven las dos carpetas:**
+- `historico/` se escribe **una sola vez** durante la carga inicial
+  (`--full-reset` o primera corrida sin control.json). Contiene los CSV
+  acumulativos completos de todo el historial. Lo lee `load-sales-history.ts`.
+- `diario/` se sobrescribe **todas las noches** con SOLO los días procesados
+  en ese run (típicamente 1 fila = ayer). Lo descarga el sync diario en Vercel
+  vía GitHub Actions, sin riesgo de timeout porque son archivos chicos.
+
+**Compartir con el Service Account de Google Drive:** ambas carpetas deben estar
+sincronizadas con Drive (Drive Desktop) y compartidas con el Service Account
+configurado en Vercel (`GOOGLE_SERVICE_ACCOUNT_JSON`). La variable
+`GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID` en Vercel debe apuntar a la carpeta `diario/`
+de Drive (no a `historico/` ni a la carpeta padre).
 
 **NOTA sobre la carpeta de saldos:** La administración sube el Excel de saldos
 bancarios a `\\192.168.0.250\TKL_sync_IA\TKL-Saldos\`. **Este script NO toca
@@ -89,10 +106,11 @@ Abrí `siaf_to_drive.py` con el Bloc de notas o Notepad++ y confirmá que las
 constantes al inicio coinciden con el servidor real:
 
 ```python
-BASE_PATH    = Path(r"C:\_Datos\_administracion\temporal_sucursales")
-OUTPUT_DIR   = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV")
-CONTROL_FILE = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
-LOG_PATH     = Path(r"C:\_Datos\_administracion\tkl_sync.log")
+BASE_PATH         = Path(r"C:\_Datos\_administracion\temporal_sucursales")
+DESTINO_HISTORICO = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico")
+DESTINO_DIARIO    = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario")
+CONTROL_FILE      = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
+LOG_PATH          = Path(r"C:\TKL\siaf_sync\tkl_sync.log")
 ```
 
 Si alguna ruta cambió, editá y guardá el archivo.
@@ -102,7 +120,8 @@ Si alguna ruta cambió, editá y guardá el archivo.
 ## 5. Primera ejecución (manual)
 
 La primera vez que corra, el script procesa **todo el historial disponible**
-de cada sucursal. Esto puede tardar varios minutos.
+de cada sucursal y escribe los CSV acumulativos en `historico/`. Esto puede
+tardar varios minutos.
 
 ```
 cd C:\TKL\siaf_sync
@@ -114,6 +133,8 @@ python siaf_to_drive.py
 [2026-04-22 03:00:01] [INFO] ============================================================
 [2026-04-22 03:00:01] [INFO] === Inicio sync TKL SIAF ===
 [2026-04-22 03:00:01] [INFO] ============================================================
+[2026-04-22 03:00:01] [INFO] Modo: HISTÓRICO (acumulativo)
+[2026-04-22 03:00:01] [INFO] Destino: \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico
 [2026-04-22 03:00:02] [INFO] [America] procesando — full-history (primera vez)
 [2026-04-22 03:00:45] [INFO] [America] ✓ 547 día(s) procesados | ventas.csv=547, vendedores.csv=8234, ossocial.csv=6102
 [2026-04-22 03:00:45] [INFO] [Facultad] procesando — full-history (primera vez)
@@ -121,8 +142,17 @@ python siaf_to_drive.py
 [2026-04-22 03:08:22] [INFO] === Fin sync: ✓ 11 OK   ✗ 0 con errores   de 11 sucursales ===
 ```
 
-**Verificá** que en `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\` aparecieron
-33 archivos CSV (3 por sucursal × 11 sucursales).
+**Verificá** que en `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico\`
+aparecieron 33 archivos CSV (3 por sucursal × 11 sucursales).
+
+A partir de la segunda corrida (cuando ya existe `control.json`), el script
+pasa a **modo DIARIO** y escribe en `diario/` con solo el día procesado
+(sobreescribe).
+
+**Carga inicial a la base de datos**: una vez que `historico/` está poblado,
+correr desde la PC de desarrollo `npx tsx scripts/load-sales-history.ts`
+apuntando a la carpeta `historico/` (ver sección dedicada en el repo
+`tkl-etapa3-v2`). Esto inserta todo el historial en Neon de una sola vez.
 
 Si hay errores, mirá la sección **Troubleshooting** al final.
 
@@ -241,19 +271,29 @@ Si alguna sucursal falló:
 ```
 Buscar en el log las líneas `[ERROR]` para ver qué pasó.
 
-### Revisar los CSVs en la carpeta de red
+### Revisar los CSVs en las carpetas de red
 
-Abrí `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\` en el Explorador de Windows.
-Deberían aparecer 33 archivos:
+Hay dos carpetas a revisar:
+
+**`historico/`** — solo se escribe en la primera corrida o con `--full-reset`.
+Después de la carga inicial debería tener 33 archivos con TODO el historial:
 
 ```
-America_ventas.csv
-America_vendedores.csv
-America_ossocial.csv
-Facultad_ventas.csv
-Facultad_vendedores.csv
-Facultad_ossocial.csv
-... (11 sucursales × 3 archivos = 33 archivos)
+\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico\
+  America_ventas.csv     ← ej: 547 filas (1 por día desde el inicio)
+  America_vendedores.csv ← muchas filas (vendedores × días)
+  ...
+```
+
+**`diario/`** — se sobreescribe cada noche. En modo normal típicamente
+contiene 33 archivos chicos con 1 fila de ventas (la de ayer) y N filas
+en vendedores/ossocial:
+
+```
+\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario\
+  America_ventas.csv     ← 1 fila (ayer)
+  America_vendedores.csv ← N filas (vendedores que trabajaron ayer)
+  ...
 ```
 
 Abrí uno con Excel o Notepad — debe tener encabezado + al menos 1 fila.
@@ -263,13 +303,14 @@ Abrí uno con Excel o Notepad — debe tener encabezado + al menos 1 fila.
 ## 9. Troubleshooting
 
 ### "Carpeta destino no disponible"
-El script no pudo acceder a `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\`.
+El script no pudo acceder a `historico/` o `diario/` dentro de
+`\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\`.
 
 **Soluciones:**
 - Verificar que el servidor `192.168.0.250` está prendido y accesible por red
-- Verificar que la carpeta compartida existe y el usuario del servidor tiene
-  permiso de **escritura**
-- Probar abrir la ruta manualmente en el Explorador de Windows
+- Verificar que **ambas** subcarpetas (`historico\` y `diario\`) existen y el
+  usuario del servidor tiene permiso de **escritura** en las dos
+- Probar abrir las rutas manualmente en el Explorador de Windows
 - Si usás credenciales de red: usar `net use \\192.168.0.250\TKL_sync_IA /persistent:yes`
   para mapear el acceso
 

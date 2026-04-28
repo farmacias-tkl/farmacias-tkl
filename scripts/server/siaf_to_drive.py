@@ -16,23 +16,37 @@ Procesa desde la última fecha registrada en control.json hasta AYER.
 
 Uso:
   python siaf_to_drive.py
-    → procesa desde última fecha registrada hasta ayer
+    → modo DIARIO: procesa días pendientes y sobreescribe los CSV de
+      `diario/` con SOLO esos días (típicamente ayer, 1 fila por archivo).
 
   python siaf_to_drive.py --date 2026-04-20
-    → backfill de una fecha específica (NO actualiza control.json)
+    → modo DIARIO (backfill): sobreescribe los CSV de `diario/` con esa
+      fecha. NO actualiza control.json.
 
   python siaf_to_drive.py --full-reset
-    → borra control.json y reprocesa todo el historial
-       (pide confirmación interactiva antes)
+    → modo HISTÓRICO: borra control.json y reprocesa todo el historial.
+      Escribe los CSV acumulativos completos en `historico/`. Pide
+      confirmación interactiva antes.
 
-Salida (33 archivos fijos, acumulativos entre runs):
+Arquitectura de carpetas:
+  \\\\192.168.0.250\\TKL_sync_IA\\TKL-SIAF-CSV\\
+    ├── historico/  → CSV acumulativos completos (carga inicial vía
+    │                 load-sales-history.ts; se escribe en --full-reset
+    │                 y la primera vez sin control.json).
+    └── diario/     → CSV con solo los días procesados en este run
+                      (sobreescribe; lo descarga el sync de Vercel cada
+                      mañana sin riesgo de timeout).
+
+Salida por sucursal (3 archivos):
   {Sucursal}_ventas.csv       — una fila por día (total_ventas = SUM TOTBRUTO)
   {Sucursal}_vendedores.csv   — una fila por vendedor por día
   {Sucursal}_ossocial.csv     — una fila por obra social por día
 
 Requiere:
   - pip install dbfread
-  - Acceso de escritura a: \\\\192.168.0.250\\TKL_sync_IA\\TKL-SIAF-CSV\\
+  - Acceso de escritura a las dos subcarpetas:
+      \\\\192.168.0.250\\TKL_sync_IA\\TKL-SIAF-CSV\\historico\\
+      \\\\192.168.0.250\\TKL_sync_IA\\TKL-SIAF-CSV\\diario\\
 """
 from __future__ import annotations
 
@@ -54,9 +68,13 @@ from dbfread import DBF
 # =============================================================================
 
 BASE_PATH    = Path(r"C:\_Datos\_administracion\temporal_sucursales")
-OUTPUT_DIR   = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV")
-CONTROL_FILE = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
-LOG_PATH     = Path(r"C:\TKL\siaf_sync\tkl_sync.log")
+# Dos carpetas separadas: el sync diario de Vercel descarga solo `diario/`
+# (33 archivos chicos con ayer), evitando el timeout. `historico/` se usa una
+# sola vez para la carga inicial vía load-sales-history.ts.
+DESTINO_HISTORICO = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico")
+DESTINO_DIARIO    = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario")
+CONTROL_FILE      = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
+LOG_PATH          = Path(r"C:\TKL\siaf_sync\tkl_sync.log")
 
 DBF_ENCODING = "cp1252"
 
@@ -74,9 +92,11 @@ FOLDER_MAP: dict[str, str] = {
     "TK": "Tekiel",
 }
 
-# Códigos que NUNCA son ventas
+# Códigos que NUNCA son ventas.
+# NOTA: NCR (notas de crédito) NO se excluyen — tienen TOTBRUTO negativo y deben
+# descontar del total de ventas automáticamente.
 CODIGOS_EXCLUIR: set[str] = {
-    "NCR", "NDB", "REM", "MCC", "MOS", "REC",
+    "NDB", "REM", "MCC", "MOS", "REC",
     "BAJ", "ALT", "PRE", "PED", "COM", "REA",
     "OP",  "OI",  "OTR", "IMD", "IME", "WHA",
 }
@@ -120,10 +140,13 @@ def es_codigo_venta(codigo: str) -> bool:
 
 
 def incluir_registro(codigo: str) -> bool:
-    """True si el registro se incluye como venta (no está en CODIGOS_EXCLUIR)."""
+    """True si el registro se incluye como venta. NCR cuenta porque su TOTBRUTO
+    es negativo y debe descontar del total de ventas (notas de crédito)."""
     c = codigo.strip().upper()
     if c in CODIGOS_EXCLUIR:
         return False
+    if c == "NCR":
+        return True
     return es_codigo_venta(c)
 
 # =============================================================================
@@ -469,7 +492,11 @@ def process_branch(
 
 
 def read_detmov_units(folder: Path, sucursal: str, date_filter: set[str] | None) -> dict[str, int]:
-    """Suma CANTIDAD de DETMOV.DBF por fecha (solo códigos de venta). Opcional."""
+    """Suma CANTIDAD de DETMOV.DBF por fecha. Opcional.
+
+    DETMOV.DBF usa CPBT='DET' para el detalle de TODOS los comprobantes (TKT,
+    FAC, 001, etc.) y CPBT='NCR' para notas de crédito. Filtramos solo esos
+    dos: DET suma unidades vendidas, NCR resta (su CANTIDAD viene negativa)."""
     path = folder / "DETMOV.DBF"
     if not path.exists():
         return {}
@@ -483,8 +510,8 @@ def read_detmov_units(folder: Path, sucursal: str, date_filter: set[str] | None)
             continue
         if date_filter is not None and fecha_str not in date_filter:
             continue
-        codigo = safe_str(r.get("CODIGO") or r.get("CPBT"))
-        if not incluir_registro(codigo):
+        cpbt = safe_str(r.get("CPBT") or r.get("CODIGO"))
+        if cpbt.upper() not in ("DET", "NCR"):
             continue
         cantidad = r.get("CANTIDAD")
         if cantidad is None:
@@ -531,6 +558,17 @@ def merge_and_write_csv(
         writer.writerows(all_rows)
 
     return len(all_rows)
+
+def write_csv_simple(path: Path, rows: list[dict], fieldnames: list[str]) -> int:
+    """Sobreescribe el CSV con solo las rows pasadas (sin merge). Usado en modo
+    diario: cada run reemplaza el contenido por los días procesados en ese run."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({fn: ("" if r.get(fn) is None else str(r[fn])) for fn in fieldnames})
+    return len(rows)
 
 VENTAS_FIELDS = [
     "sucursal", "fecha", "total_ventas", "total_tickets", "ticket_promedio",
@@ -580,11 +618,19 @@ def main() -> None:
     log.info("=== Inicio sync TKL SIAF ===")
     log.info("=" * 60)
 
+    # Determinar destino antes de tocar control.json:
+    # - HISTÓRICO (acumulativo, merge): --full-reset, o primera vez sin control.json.
+    # - DIARIO (sobreescribe, sin merge): modo normal y backfill --date.
+    is_historical_run = (args.full_reset or not CONTROL_FILE.exists()) and not args.date
+    output_dir = DESTINO_HISTORICO if is_historical_run else DESTINO_DIARIO
+    log.info(f"Modo: {'HISTÓRICO (acumulativo)' if is_historical_run else 'DIARIO (sobreescribe)'}")
+    log.info(f"Destino: {output_dir}")
+
     # Validar carpeta destino accesible
     try:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        log.error(f"Carpeta destino no disponible: {OUTPUT_DIR}")
+        log.error(f"Carpeta destino no disponible: {output_dir}")
         log.error(f"Error: {e}")
         log.error("Verificar acceso de red y permisos de escritura.")
         sys.exit(2)
@@ -634,14 +680,22 @@ def main() -> None:
                 ok_count += 1
                 continue
 
-            n_ventas     = merge_and_write_csv(OUTPUT_DIR / f"{sucursal}_ventas.csv",
-                                               ventas_rows, VENTAS_FIELDS, ["fecha"])
-            n_vendedores = merge_and_write_csv(OUTPUT_DIR / f"{sucursal}_vendedores.csv",
-                                               vendedores_rows, VENDEDORES_FIELDS,
-                                               ["fecha", "codigo_vendedor"])
-            n_ossocial   = merge_and_write_csv(OUTPUT_DIR / f"{sucursal}_ossocial.csv",
-                                               ossocial_rows, OSSOCIAL_FIELDS,
-                                               ["fecha", "codigo_os"])
+            if is_historical_run:
+                n_ventas     = merge_and_write_csv(output_dir / f"{sucursal}_ventas.csv",
+                                                   ventas_rows, VENTAS_FIELDS, ["fecha"])
+                n_vendedores = merge_and_write_csv(output_dir / f"{sucursal}_vendedores.csv",
+                                                   vendedores_rows, VENDEDORES_FIELDS,
+                                                   ["fecha", "codigo_vendedor"])
+                n_ossocial   = merge_and_write_csv(output_dir / f"{sucursal}_ossocial.csv",
+                                                   ossocial_rows, OSSOCIAL_FIELDS,
+                                                   ["fecha", "codigo_os"])
+            else:
+                n_ventas     = write_csv_simple(output_dir / f"{sucursal}_ventas.csv",
+                                                ventas_rows, VENTAS_FIELDS)
+                n_vendedores = write_csv_simple(output_dir / f"{sucursal}_vendedores.csv",
+                                                vendedores_rows, VENDEDORES_FIELDS)
+                n_ossocial   = write_csv_simple(output_dir / f"{sucursal}_ossocial.csv",
+                                                ossocial_rows, OSSOCIAL_FIELDS)
 
             log.info(f"[{sucursal}] ✓ {len(processed)} día(s) procesados | "
                      f"ventas.csv={n_ventas}, vendedores.csv={n_vendedores}, ossocial.csv={n_ossocial}")
