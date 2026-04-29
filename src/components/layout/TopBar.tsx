@@ -34,6 +34,7 @@ export function TopBar({ onMenuClick, userRole }: { onMenuClick: () => void; use
         <Link
           href="/executive"
           title="Dashboard Ejecutivo"
+          aria-label="Dashboard Ejecutivo"
           className="inline-flex items-center gap-1.5 rounded-md border border-[#1E2D5A] bg-white px-2.5 py-1 text-xs font-semibold text-[#1E2D5A] hover:bg-[#1E2D5A] hover:text-white transition-colors"
         >
           <LineChart className="w-3.5 h-3.5 shrink-0" />

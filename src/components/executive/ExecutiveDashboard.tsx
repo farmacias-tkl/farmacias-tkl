@@ -112,8 +112,10 @@ const EXEC_STYLES = `
 .exec-btn-icon:hover { border-color: rgba(255,255,255,0.4); color: white; }
 @media (min-width: 768px) { .exec-btn-icon { font-size: 12px; padding: 0.375rem 0.75rem; } }
 
-.exec-operative-link { display: none; }
-@media (min-width: 768px) { .exec-operative-link { display: inline-flex; } }
+/* El botón "Plataforma Operativa" se muestra siempre (mobile + desktop).
+   En mobile queda solo el ícono; el texto interno aparece desde 768px. */
+.exec-operative-link-text { display: none; }
+@media (min-width: 768px) { .exec-operative-link-text { display: inline; } }
 
 /* === FILTRO / META BAR === */
 .exec-filter-row {
@@ -275,9 +277,14 @@ export function ExecutiveDashboard({ data, user, children }: Props) {
             </div>
             <div className="exec-actions">
               {user.role === "OWNER" && (
-                <Link href={operativaUrl} className="exec-btn-icon exec-operative-link">
+                <Link
+                  href={operativaUrl}
+                  className="exec-btn-icon"
+                  title="Plataforma Operativa"
+                  aria-label="Plataforma Operativa"
+                >
                   <LayoutDashboard style={{ width: 14, height: 14 }} />
-                  Plataforma Operativa →
+                  <span className="exec-operative-link-text">Plataforma Operativa →</span>
                 </Link>
               )}
               <button onClick={() => signOut({ callbackUrl: "/login" })} className="exec-btn-icon">
