@@ -1,6 +1,8 @@
 "use client";
-import { Menu, Bell } from "lucide-react";
+import { Menu, Bell, LineChart } from "lucide-react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { UserRole } from "@prisma/client";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard":     "Dashboard",
@@ -16,7 +18,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/admin":         "Administración",
 };
 
-export function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
+export function TopBar({ onMenuClick, userRole }: { onMenuClick: () => void; userRole: UserRole }) {
   const pathname = usePathname();
   const title = Object.entries(PAGE_TITLES)
     .sort((a, b) => b[0].length - a[0].length)
@@ -28,6 +30,16 @@ export function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
         <Menu className="w-5 h-5" />
       </button>
       <h1 className="flex-1 text-sm font-semibold text-gray-800 truncate">{title}</h1>
+      {userRole === "OWNER" && (
+        <Link
+          href="/executive"
+          title="Dashboard Ejecutivo"
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#1E2D5A] bg-white px-2.5 py-1 text-xs font-semibold text-[#1E2D5A] hover:bg-[#1E2D5A] hover:text-white transition-colors"
+        >
+          <LineChart className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden sm:inline">Dashboard Ejecutivo</span>
+        </Link>
+      )}
       <button className="relative p-1.5 text-gray-500 hover:text-gray-800 rounded-lg hover:bg-gray-100">
         <Bell className="w-5 h-5" />
       </button>
