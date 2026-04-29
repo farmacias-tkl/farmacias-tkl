@@ -384,26 +384,38 @@ def process_branch(
     if not records_by_date:
         return ([], [], [], set())
 
-    # Mapas (NUMERO, fecha_yyyymmdd) → vendedor / OS, construidos desde los
-    # CPBTEMI ya filtrados. Sirven para resolver vendedor y obra social de
-    # cada línea de DETMOV (que viene con CPBT='DET'/'NCR' y no trae esos
-    # campos directamente).
-    cpbt_to_vendor: dict[tuple[str, str], str] = {}
-    cpbt_to_os:     dict[tuple[str, str], str] = {}
+    # cpbt_meta: fuente de verdad para resolver cada línea de DETMOV. Construido
+    # desde los CPBTEMI ya filtrados, indexa por (NUMERO, fecha_yyyymmdd) y por
+    # NUMERO solo (fallback). Cada entry trae vendedor, os, sign (-1 si NCR o
+    # TOTBRUTO < 0), y la fecha original del comprobante.
+    #
+    # Por qué dos índices: a veces DETMOV.FECHA difiere de CPBTEMI.FECHA para el
+    # mismo NUMERO (cierres tardíos, líneas registradas al día siguiente). El
+    # match exacto cubre el 99% de los casos; el fallback by_numero rescata el
+    # resto. Si hay colisión de NUMERO entre fechas, la última fecha gana —
+    # aceptable para nuestro uso.
+    cpbt_meta:           dict[tuple[str, str], dict] = {}
+    cpbt_meta_by_numero: dict[str, dict] = {}
     for date_str, recs in records_by_date.items():
         for r in recs:
-            numero  = safe_str(r.get("NUMERO"))
-            vcode   = safe_str(r.get("VENDEDOR"))
-            os_code = safe_str(r.get("OS"))
-            if numero and vcode:
-                cpbt_to_vendor[(numero, date_str)] = vcode
-            if numero and os_code:
-                cpbt_to_os[(numero, date_str)] = os_code
+            numero = safe_str(r.get("NUMERO"))
+            if not numero:
+                continue
+            codigo   = safe_str(r.get("CODIGO")).upper()
+            totbruto = safe_float(r.get("TOTBRUTO"))
+            entry = {
+                "vendedor": safe_str(r.get("VENDEDOR")),
+                "os":       safe_str(r.get("OS")),
+                "sign":     -1 if (codigo == "NCR" or totbruto < 0) else 1,
+                "fecha":    date_str,
+            }
+            cpbt_meta[(numero, date_str)] = entry
+            cpbt_meta_by_numero[numero]   = entry
 
     # Unidades desde DETMOV.DBF (opcional)
-    detmov_units         = read_detmov_units(folder, sucursal, set(records_by_date.keys()))
-    vendor_units_by_date = read_detmov_vendor_units(folder, sucursal, set(records_by_date.keys()), cpbt_to_vendor)
-    os_units_by_date     = read_detmov_os_units    (folder, sucursal, set(records_by_date.keys()), cpbt_to_os)
+    detmov_units         = read_detmov_units       (folder, sucursal, set(records_by_date.keys()), cpbt_meta, cpbt_meta_by_numero)
+    vendor_units_by_date = read_detmov_vendor_units(folder, sucursal, set(records_by_date.keys()), cpbt_meta, cpbt_meta_by_numero)
+    os_units_by_date     = read_detmov_os_units    (folder, sucursal, set(records_by_date.keys()), cpbt_meta, cpbt_meta_by_numero)
 
     ventas_rows:     list[dict] = []
     vendedores_rows: list[dict] = []
@@ -529,40 +541,71 @@ def process_branch(
     return (ventas_rows, vendedores_rows, ossocial_rows, processed)
 
 
-def read_detmov_units(folder: Path, sucursal: str, date_filter: set[str] | None) -> dict[str, int]:
-    """Suma CANTIDAD de DETMOV.DBF por fecha. Opcional.
+def _resolve_meta(
+    nrocpbt: str,
+    fecha_str: str,
+    cpbt_meta: dict[tuple[str, str], dict],
+    cpbt_meta_by_numero: dict[str, dict],
+) -> tuple[dict | None, bool]:
+    """Lookup doble. Devuelve (meta | None, fue_fallback_con_fecha_distinta)."""
+    meta = cpbt_meta.get((nrocpbt, fecha_str))
+    if meta is not None:
+        return meta, False
+    meta = cpbt_meta_by_numero.get(nrocpbt)
+    if meta is None:
+        return None, False
+    return meta, meta["fecha"] != fecha_str
 
-    DETMOV.DBF usa CPBT='DET' para el detalle de TODOS los comprobantes (TKT,
-    FAC, 001, etc.) y CPBT='NCR' para notas de crédito. Filtramos solo esos
-    dos: DET suma unidades vendidas, NCR resta. Para NCR forzamos signo negativo
-    con -abs() — algunas sucursales registran la cantidad como positiva y otras
-    como negativa; este normalizado garantiza que siempre reste."""
+
+def read_detmov_units(
+    folder: Path,
+    sucursal: str,
+    date_filter: set[str] | None,
+    cpbt_meta: dict[tuple[str, str], dict],
+    cpbt_meta_by_numero: dict[str, dict],
+) -> dict[str, int]:
+    """Suma CANTIDAD de DETMOV.DBF por fecha, cruzando con cpbt_meta.
+
+    No filtramos por DETMOV.CPBT — el sistema TKL tiene líneas de detalle
+    asociadas a comprobantes NOV, TKT, FAC, 001-999, PV1-PV25, etc. Filtrar
+    por ('DET','NCR') perdía esas unidades. El sign del movimiento se toma
+    desde CPBTEMI (codigo == NCR o TOTBRUTO < 0 → -1, sino 1)."""
     path = folder / "DETMOV.DBF"
     if not path.exists():
         return {}
     records = read_dbf_safely(path, sucursal)
     if records is None:
         return {}
+
     result: dict[str, int] = defaultdict(int)
+    total = matched = ignored = date_mismatches = 0
+
     for r in records:
         fecha_str = normalize_fecha(r.get("FECHA"))
         if fecha_str is None:
             continue
         if date_filter is not None and fecha_str not in date_filter:
             continue
-        cpbt = safe_str(r.get("CPBT") or r.get("CODIGO")).upper()
-        if cpbt not in ("DET", "NCR"):
+        total += 1
+
+        nrocpbt = safe_str(r.get("NROCPBT"))
+        meta, mismatch = _resolve_meta(nrocpbt, fecha_str, cpbt_meta, cpbt_meta_by_numero)
+        if meta is None:
+            ignored += 1
             continue
-        cantidad = r.get("CANTIDAD")
-        if cantidad is None:
-            continue
-        try:
-            n = int(safe_float(cantidad))
-        except (ValueError, TypeError):
-            continue
-        if cpbt == "NCR":
-            n = -abs(n)
-        result[fecha_str] += n
+        if mismatch:
+            date_mismatches += 1
+
+        cantidad_raw = safe_float(r.get("CANTIDAD")) or 0
+        cantidad = int(abs(cantidad_raw)) * meta["sign"]
+        result[fecha_str] += cantidad
+        matched += 1
+
+    sum_units = sum(result.values())
+    log.info(
+        f"[{sucursal}] DETMOV total: leidas={total} matcheadas={matched} "
+        f"ignoradas={ignored} unidades={sum_units} date_mismatch={date_mismatches}"
+    )
     return dict(result)
 
 
@@ -570,46 +613,52 @@ def read_detmov_vendor_units(
     folder: Path,
     sucursal: str,
     date_filter: set[str] | None,
-    cpbt_to_vendor: dict[tuple[str, str], str],
+    cpbt_meta: dict[tuple[str, str], dict],
+    cpbt_meta_by_numero: dict[str, dict],
 ) -> dict[str, dict[str, int]]:
-    """Suma CANTIDAD por (fecha, código_vendedor) cruzando DETMOV con
-    cpbt_to_vendor por (NROCPBT, FECHA).
-
-    Reglas idénticas a read_detmov_units:
-    - Solo CPBT in ('DET','NCR').
-    - NCR: cantidad = -abs(cantidad) para garantizar resta.
-    - Si la clave (NROCPBT, FECHA) no resuelve a un vendedor, se ignora.
-    """
+    """Suma CANTIDAD por (fecha, código_vendedor). Misma lógica que
+    read_detmov_units pero usa meta["vendedor"]; ignora líneas sin vendedor."""
     path = folder / "DETMOV.DBF"
     if not path.exists():
         return {}
     records = read_dbf_safely(path, sucursal)
     if records is None:
         return {}
+
     result: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    total = matched = ignored = date_mismatches = 0
+
     for r in records:
         fecha_str = normalize_fecha(r.get("FECHA"))
         if fecha_str is None:
             continue
         if date_filter is not None and fecha_str not in date_filter:
             continue
-        cpbt = safe_str(r.get("CPBT") or r.get("CODIGO")).upper()
-        if cpbt not in ("DET", "NCR"):
-            continue
+        total += 1
+
         nrocpbt = safe_str(r.get("NROCPBT"))
-        vendor  = cpbt_to_vendor.get((nrocpbt, fecha_str), "")
+        meta, mismatch = _resolve_meta(nrocpbt, fecha_str, cpbt_meta, cpbt_meta_by_numero)
+        if meta is None:
+            ignored += 1
+            continue
+        if mismatch:
+            date_mismatches += 1
+
+        vendor = meta["vendedor"]
         if not vendor:
+            ignored += 1
             continue
-        cantidad = r.get("CANTIDAD")
-        if cantidad is None:
-            continue
-        try:
-            n = int(safe_float(cantidad))
-        except (ValueError, TypeError):
-            continue
-        if cpbt == "NCR":
-            n = -abs(n)
-        result[fecha_str][vendor] += n
+
+        cantidad_raw = safe_float(r.get("CANTIDAD")) or 0
+        cantidad = int(abs(cantidad_raw)) * meta["sign"]
+        result[fecha_str][vendor] += cantidad
+        matched += 1
+
+    sum_units = sum(sum(v.values()) for v in result.values())
+    log.info(
+        f"[{sucursal}] DETMOV vendor: leidas={total} matcheadas={matched} "
+        f"ignoradas={ignored} unidades={sum_units} date_mismatch={date_mismatches}"
+    )
     return {k: dict(v) for k, v in result.items()}
 
 
@@ -617,48 +666,53 @@ def read_detmov_os_units(
     folder: Path,
     sucursal: str,
     date_filter: set[str] | None,
-    cpbt_to_os: dict[tuple[str, str], str],
+    cpbt_meta: dict[tuple[str, str], dict],
+    cpbt_meta_by_numero: dict[str, dict],
 ) -> dict[str, dict[str, int]]:
-    """Suma CANTIDAD por (fecha, código_obra_social) cruzando DETMOV con
-    cpbt_to_os por (NROCPBT, FECHA).
-
-    Reglas idénticas a read_detmov_units / read_detmov_vendor_units:
-    - Solo CPBT in ('DET','NCR').
-    - NCR: cantidad = -abs(cantidad) para garantizar resta.
-    - Si la clave (NROCPBT, FECHA) no resuelve a una OS, se ignora — eso
-      cubre las ventas particulares (sin OS) y NCR de comprobantes
-      particulares.
-    """
+    """Suma CANTIDAD por (fecha, código_obra_social). Misma lógica que
+    read_detmov_units pero usa meta["os"]; ignora ventas particulares
+    (meta["os"] vacío)."""
     path = folder / "DETMOV.DBF"
     if not path.exists():
         return {}
     records = read_dbf_safely(path, sucursal)
     if records is None:
         return {}
+
     result: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    total = matched = ignored = date_mismatches = 0
+
     for r in records:
         fecha_str = normalize_fecha(r.get("FECHA"))
         if fecha_str is None:
             continue
         if date_filter is not None and fecha_str not in date_filter:
             continue
-        cpbt = safe_str(r.get("CPBT") or r.get("CODIGO")).upper()
-        if cpbt not in ("DET", "NCR"):
-            continue
+        total += 1
+
         nrocpbt = safe_str(r.get("NROCPBT"))
-        os_code = cpbt_to_os.get((nrocpbt, fecha_str), "")
+        meta, mismatch = _resolve_meta(nrocpbt, fecha_str, cpbt_meta, cpbt_meta_by_numero)
+        if meta is None:
+            ignored += 1
+            continue
+        if mismatch:
+            date_mismatches += 1
+
+        os_code = meta["os"]
         if not os_code:
+            ignored += 1
             continue
-        cantidad = r.get("CANTIDAD")
-        if cantidad is None:
-            continue
-        try:
-            n = int(safe_float(cantidad))
-        except (ValueError, TypeError):
-            continue
-        if cpbt == "NCR":
-            n = -abs(n)
-        result[fecha_str][os_code] += n
+
+        cantidad_raw = safe_float(r.get("CANTIDAD")) or 0
+        cantidad = int(abs(cantidad_raw)) * meta["sign"]
+        result[fecha_str][os_code] += cantidad
+        matched += 1
+
+    sum_units = sum(sum(v.values()) for v in result.values())
+    log.info(
+        f"[{sucursal}] DETMOV os: leidas={total} matcheadas={matched} "
+        f"ignoradas={ignored} unidades={sum_units} date_mismatch={date_mismatches}"
+    )
     return {k: dict(v) for k, v in result.items()}
 
 # =============================================================================
