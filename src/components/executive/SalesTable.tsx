@@ -8,8 +8,8 @@ const fmtARS = (n: number) =>
 const fmtInt = (n: number) => new Intl.NumberFormat("es-AR").format(n);
 
 // ─── Tipos para rawData SIAF ────────────────────────────────────
-interface SiafVendorRaw { codigo: string; nombre: string; ventas: number; tickets: number; descuentos: number; }
-interface SiafObraSocialRaw { codigo: string; nombre: string; ventas_bruto: number; descuentos: number; ventas_neto: number; }
+interface SiafVendorRaw { codigo: string; nombre: string; ventas: number; tickets: number; descuentos: number; unidades?: number; }
+interface SiafObraSocialRaw { codigo: string; nombre: string; ventas_bruto: number; descuentos: number; ventas_neto: number; tickets?: number; unidades?: number; }
 interface SiafRawData {
   source?: string;
   efectivo?: number;
@@ -112,43 +112,92 @@ const SALES_CSS = `
 .sal-tab:hover { color: #1E2D5A; }
 .sal-tab--active { color: #1E2D5A; border-bottom-color: #D4632A; }
 
-.sal-detail-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.sal-detail-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  font-size: 13px; gap: 0.5rem;
-}
-.sal-detail-item .label-col { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
-.sal-detail-item .label-line {
-  display: flex; align-items: baseline; gap: 0.375rem; min-width: 0;
-}
-.sal-detail-item .cod {
-  font-size: 10.5px; color: #6b7280;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  flex-shrink: 0;
-}
-.sal-detail-item .label {
-  color: #374151; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sal-detail-item .sub {
-  font-size: 11px; color: #4b5563; font-weight: 400; flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-.sal-detail-item .sub-line {
-  font-size: 11px; color: #4b5563;
-  font-variant-numeric: tabular-nums;
-}
-.sal-detail-item .value {
-  color: #1E2D5A; font-weight: 700;
-  font-variant-numeric: tabular-nums; white-space: nowrap;
-}
+.sal-detail-list { display: flex; flex-direction: column; }
 .sal-detail-placeholder {
   font-size: 12px; color: #9ca3af; font-style: italic;
   padding: 0.5rem 0; text-align: center;
 }
 .sal-detail-scroll { max-height: 260px; overflow-y: auto; padding-right: 0.25rem; }
+
+/* Mini header solo desktop — fijo arriba, no scrollea con la lista */
+.sal-grid-head { display: none; }
+@media (min-width: 640px) {
+  .sal-grid-head {
+    display: grid;
+    grid-template-columns: 48px 1fr 64px 64px 100px;
+    column-gap: 0.5rem;
+    padding: 0.25rem 0 0.375rem 0;
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 0.25rem;
+  }
+  .sal-grid-head span {
+    font-size: 10px; color: #9ca3af; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .sal-grid-head .num { text-align: right; }
+}
+
+/* Item: mobile = 2 columnas + sub-line debajo · desktop = 5 columnas en línea */
+.sal-grid-item {
+  display: grid;
+  align-items: center;
+  font-size: 13px;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f3f4f6;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label value"
+    "sub   sub";
+  column-gap: 0.5rem; row-gap: 2px;
+}
+.sal-grid-item:last-child { border-bottom: none; }
+.sal-grid-item .cell-cod,
+.sal-grid-item .cell-unid,
+.sal-grid-item .cell-tkt { display: none; }
+.sal-grid-item .cell-label {
+  grid-area: label; min-width: 0;
+  display: flex; align-items: baseline; gap: 0.375rem;
+}
+.sal-grid-item .cell-label .cod-inline {
+  font-size: 10.5px; color: #6b7280;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex-shrink: 0;
+}
+.sal-grid-item .cell-label .name {
+  color: #1E2D5A; font-weight: 500; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sal-grid-item .cell-value {
+  grid-area: value; color: #1E2D5A; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right;
+}
+.sal-grid-item .cell-sub {
+  grid-area: sub; font-size: 11px; color: #4b5563;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 640px) {
+  .sal-grid-item {
+    grid-template-columns: 48px 1fr 64px 64px 100px;
+    grid-template-areas: "cod label unid tkt value";
+    row-gap: 0; padding: 0.375rem 0;
+  }
+  .sal-grid-item .cell-cod {
+    display: block; grid-area: cod;
+    font-size: 10.5px; color: #6b7280;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sal-grid-item .cell-label .cod-inline { display: none; }
+  .sal-grid-item .cell-unid,
+  .sal-grid-item .cell-tkt {
+    display: block; text-align: right;
+    color: #4b5563; font-variant-numeric: tabular-nums;
+  }
+  .sal-grid-item .cell-unid { grid-area: unid; }
+  .sal-grid-item .cell-tkt  { grid-area: tkt; }
+  .sal-grid-item .cell-sub  { display: none; }
+}
 
 .sal-search {
   display: flex; align-items: center; gap: 0.375rem;
@@ -516,6 +565,18 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
   );
 }
 
+// Línea secundaria mobile: combina tickets + unidades respetando ceros.
+// - ambos 0           → ""        (no se renderiza la sub-line)
+// - solo tickets > 0  → "Tickets: X"
+// - solo unidades > 0 → "Unidades: Y"
+// - ambos > 0         → "Tickets: X · Unidades: Y"
+function buildSubLine(tickets: number, unidades: number): string {
+  if (tickets <= 0 && unidades <= 0) return "";
+  if (unidades <= 0)                 return `Tickets: ${fmtInt(tickets)}`;
+  if (tickets  <= 0)                 return `Unidades: ${fmtInt(unidades)}`;
+  return `Tickets: ${fmtInt(tickets)} · Unidades: ${fmtInt(unidades)}`;
+}
+
 function OSSocialList({ rows, search }: { rows: SiafObraSocialRaw[]; search: string }) {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -528,22 +589,37 @@ function OSSocialList({ rows, search }: { rows: SiafObraSocialRaw[]; search: str
   if (filtered.length === 0) return <div className="sal-search-empty">Sin coincidencias</div>;
 
   return (
-    <div className="sal-detail-list sal-detail-scroll">
-      {filtered.map((o, i) => {
-        const bruto = Number(o.ventas_bruto ?? 0);
-        return (
-          <div key={`o-${i}`} className="sal-detail-item">
-            <div className="label-col">
-              <div className="label-line">
-                {o.codigo && <span className="cod">[{o.codigo}]</span>}
-                <span className="label">{o.nombre}</span>
-                {/* TODO: agregar `tickets` por OS al CSV en siaf_to_drive.py */}
+    <div>
+      <div className="sal-grid-head">
+        <span>Cod</span>
+        <span>Obra Social</span>
+        <span className="num">Unid.</span>
+        <span className="num">Tickets</span>
+        <span className="num">Venta bruta</span>
+      </div>
+      <div className="sal-detail-scroll">
+        <div className="sal-detail-list">
+          {filtered.map((o, i) => {
+            const bruto    = Number(o.ventas_bruto ?? 0);
+            const tickets  = Number(o.tickets  ?? 0);
+            const unidades = Number(o.unidades ?? 0);
+            const sub      = buildSubLine(tickets, unidades);
+            return (
+              <div key={`o-${i}`} className="sal-grid-item">
+                <span className="cell-cod">{o.codigo ? `[${o.codigo}]` : ""}</span>
+                <span className="cell-label">
+                  {o.codigo && <span className="cod-inline">[{o.codigo}]</span>}
+                  <span className="name">{o.nombre}</span>
+                </span>
+                <span className="cell-unid">{unidades > 0 ? fmtInt(unidades) : "—"}</span>
+                <span className="cell-tkt">{tickets  > 0 ? fmtInt(tickets)  : "—"}</span>
+                <span className="cell-value">{fmtARS(bruto)}</span>
+                {sub && <span className="cell-sub">{sub}</span>}
               </div>
-            </div>
-            <span className="value">{fmtARS(bruto)}</span>
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -560,20 +636,37 @@ function VendorList({ rows, search }: { rows: SiafVendorRaw[]; search: string })
   if (filtered.length === 0) return <div className="sal-search-empty">Sin coincidencias</div>;
 
   return (
-    <div className="sal-detail-list sal-detail-scroll">
-      {filtered.map((v, i) => (
-        <div key={`v-${i}`} className="sal-detail-item">
-          <div className="label-col">
-            <div className="label-line">
-              {v.codigo && <span className="cod">[{v.codigo}]</span>}
-              <span className="label">{v.nombre}</span>
-              {/* TODO: agregar `unidades` por vendedor al CSV en siaf_to_drive.py */}
-            </div>
-            <span className="sub-line">Tickets: {fmtInt(v.tickets)}</span>
-          </div>
-          <span className="value">{fmtARS(Number(v.ventas ?? 0))}</span>
+    <div>
+      <div className="sal-grid-head">
+        <span>Cod</span>
+        <span>Vendedor</span>
+        <span className="num">Unid.</span>
+        <span className="num">Tickets</span>
+        <span className="num">Venta</span>
+      </div>
+      <div className="sal-detail-scroll">
+        <div className="sal-detail-list">
+          {filtered.map((v, i) => {
+            const ventas   = Number(v.ventas ?? 0);
+            const tickets  = Number(v.tickets  ?? 0);
+            const unidades = Number(v.unidades ?? 0);
+            const sub      = buildSubLine(tickets, unidades);
+            return (
+              <div key={`v-${i}`} className="sal-grid-item">
+                <span className="cell-cod">{v.codigo ? `[${v.codigo}]` : ""}</span>
+                <span className="cell-label">
+                  {v.codigo && <span className="cod-inline">[{v.codigo}]</span>}
+                  <span className="name">{v.nombre}</span>
+                </span>
+                <span className="cell-unid">{unidades > 0 ? fmtInt(unidades) : "—"}</span>
+                <span className="cell-tkt">{tickets  > 0 ? fmtInt(tickets)  : "—"}</span>
+                <span className="cell-value">{fmtARS(ventas)}</span>
+                {sub && <span className="cell-sub">{sub}</span>}
+              </div>
+            );
+          })}
         </div>
-      ))}
+      </div>
     </div>
   );
 }
