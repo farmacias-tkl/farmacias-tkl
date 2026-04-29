@@ -595,7 +595,7 @@ function OSSocialList({ rows, search }: { rows: SiafObraSocialRaw[]; search: str
         <span>Obra Social</span>
         <span className="num">Unid.</span>
         <span className="num">Tickets</span>
-        <span className="num">Venta bruta</span>
+        <span className="num">Ventas</span>
       </div>
       <div className="sal-detail-scroll">
         <div className="sal-detail-list">
@@ -642,7 +642,7 @@ function VendorList({ rows, search }: { rows: SiafVendorRaw[]; search: string })
         <span>Vendedor</span>
         <span className="num">Unid.</span>
         <span className="num">Tickets</span>
-        <span className="num">Venta</span>
+        <span className="num">Ventas</span>
       </div>
       <div className="sal-detail-scroll">
         <div className="sal-detail-list">
