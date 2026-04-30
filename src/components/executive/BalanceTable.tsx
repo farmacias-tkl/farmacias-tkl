@@ -40,32 +40,67 @@ const BALANCE_CSS = `
   .bal-detail-desktop { display: block; padding: 0.5rem 1rem 1rem 1rem; background: #fafafa; }
 }
 
-.bal-table { width: 100%; font-size: 12px; border-collapse: collapse; }
-.bal-table thead tr { border-bottom: 1px solid #e5e7eb; }
-.bal-table th {
-  padding: 0.375rem 0.5rem; text-align: left; font-size: 10px;
-  font-weight: 500; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em;
+/* === DESKTOP: grid compartido entre header y filas === */
+.bal-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 1fr 0.8fr 1fr;
+  align-items: center;
+  column-gap: 1rem;
+  padding: 0.5rem 0.5rem;
+  min-width: 0;
 }
-.bal-table th.num, .bal-table td.num {
+.bal-grid > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bal-grid-head {
+  border-bottom: 1px solid #e5e7eb;
+  padding-top: 0.375rem; padding-bottom: 0.375rem;
+}
+.bal-grid-head span {
+  font-size: 10px; color: #6b7280; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.bal-grid-head span.num,
+.bal-grid-row  span.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  min-width: 120px;
-  padding-left: 1.25rem;
 }
-.bal-table td {
-  padding: 0.5rem; border-top: 1px solid #f3f4f6;
+.bal-grid-row {
+  border-top: 1px solid #f3f4f6;
+  font-size: 12px;
   color: #374151;
 }
-.bal-account-row {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid #f3f4f6;
-  font-size: 13px;
+.bal-row-balance   { color: #111827; font-weight: 500; }
+.bal-row-secondary { color: #6b7280; }
+
+/* === MOBILE: cards apiladas === */
+.bal-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.625rem 0.75rem;
+  margin-bottom: 0.5rem;
 }
-.bal-account-row:last-child { border-bottom: none; }
-.bal-account-info { display: flex; flex-direction: column; min-width: 0; }
-.bal-account-bank { color: #111827; font-weight: 500; }
-.bal-account-type { color: #6b7280; font-size: 11px; margin-top: 1px; }
-.bal-account-amount { color: #1E2D5A; font-weight: 600; white-space: nowrap; }
+.bal-card:last-child { margin-bottom: 0; }
+.bal-card-title {
+  font-size: 12px; font-weight: 600; color: #111827;
+  margin-bottom: 0.375rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bal-card-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 0.5rem;
+  font-size: 12px; padding: 2px 0;
+}
+.bal-card-row .label { color: #6b7280; flex-shrink: 0; }
+.bal-card-row .value {
+  color: #374151; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.bal-card-row.primary .label { color: #1E2D5A; font-weight: 600; }
+.bal-card-row.primary .value { color: #1E2D5A; font-weight: 700; font-size: 13px; }
 
 .bal-empty { padding: 2rem 1rem; text-align: center; color: #9ca3af; }
 `;
@@ -141,42 +176,51 @@ export function BalanceTable({ balances }: { balances: BranchBalance[] }) {
                 </div>
                 {open && (
                   <>
-                    {/* Desktop: tabla completa */}
+                    {/* Desktop: grid compartido entre header y filas */}
                     <div className="bal-detail-desktop">
-                      <table className="bal-table">
-                        <thead>
-                          <tr>
-                            <th>Banco</th>
-                            <th>Cuenta</th>
-                            <th className="num">Saldo</th>
-                            <th className="num">Cheques</th>
-                            <th className="num">Saldo ant.</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {b.accounts.map((a, i) => (
-                            <tr key={`${b.branchId}-${i}`}>
-                              <td>{a.bankName}</td>
-                              <td style={{ color: "#6b7280" }}>{a.accountLabel.replace(`${a.bankName} - `, "")}</td>
-                              <td className="num" style={{ fontWeight: 500 }}>{fmtARS(a.balance)}</td>
-                              <td className="num" style={{ color: "#6b7280" }}>{a.checks != null ? fmtARS(a.checks) : "—"}</td>
-                              <td className="num" style={{ color: "#6b7280" }}>{a.prevBalance != null ? fmtARS(a.prevBalance) : "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Mobile: lista vertical, sólo Banco·Cuenta y Saldo */}
-                    <div className="bal-detail-mobile">
-                      {b.accounts.map((a, i) => (
-                        <div key={`${b.branchId}-${i}-m`} className="bal-account-row">
-                          <div className="bal-account-info">
-                            <span className="bal-account-bank">{a.bankName}</span>
-                            <span className="bal-account-type">{a.accountLabel.replace(`${a.bankName} - `, "")}</span>
+                      <div className="bal-grid bal-grid-head">
+                        <span>Banco</span>
+                        <span>Cuenta</span>
+                        <span className="num">Saldo</span>
+                        <span className="num">Cheques</span>
+                        <span className="num">Saldo ant.</span>
+                      </div>
+                      {b.accounts.map((a, i) => {
+                        const cuenta = a.accountLabel.replace(`${a.bankName} - `, "");
+                        return (
+                          <div key={`${b.branchId}-${i}`} className="bal-grid bal-grid-row">
+                            <span title={a.bankName}>{a.bankName}</span>
+                            <span title={cuenta} style={{ color: "#6b7280" }}>{cuenta}</span>
+                            <span className="num bal-row-balance">{fmtARS(a.balance)}</span>
+                            <span className="num bal-row-secondary">{a.checks != null ? fmtARS(a.checks) : "—"}</span>
+                            <span className="num bal-row-secondary">{a.prevBalance != null ? fmtARS(a.prevBalance) : "—"}</span>
                           </div>
-                          <span className="bal-account-amount">{fmtARS(a.balance)}</span>
-                        </div>
-                      ))}
+                        );
+                      })}
+                    </div>
+                    {/* Mobile: una card apilada por cuenta */}
+                    <div className="bal-detail-mobile">
+                      {b.accounts.map((a, i) => {
+                        const cuenta = a.accountLabel.replace(`${a.bankName} - `, "");
+                        const titulo = `${a.bankName} — ${cuenta}`;
+                        return (
+                          <div key={`${b.branchId}-${i}-m`} className="bal-card">
+                            <div className="bal-card-title" title={titulo}>{titulo}</div>
+                            <div className="bal-card-row primary">
+                              <span className="label">Saldo</span>
+                              <span className="value">{fmtARS(a.balance)}</span>
+                            </div>
+                            <div className="bal-card-row">
+                              <span className="label">Cheques</span>
+                              <span className="value">{a.checks != null ? fmtARS(a.checks) : "—"}</span>
+                            </div>
+                            <div className="bal-card-row">
+                              <span className="label">Saldo ant.</span>
+                              <span className="value">{a.prevBalance != null ? fmtARS(a.prevBalance) : "—"}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </>
                 )}
