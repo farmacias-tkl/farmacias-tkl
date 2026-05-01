@@ -83,12 +83,16 @@ export interface ParsedVendorDay {
   ventas:         number;
   tickets:        number;
   descuentos:     number;
+  unidades?:      number;
 }
 
-const VENDORS_HEADER = [
+// Columnas obligatorias — `unidades` es opcional para soportar transición:
+// CSVs generados por el script Python anterior no la traen y se completa con 0.
+const VENDORS_HEADER_REQUIRED = [
   "sucursal", "fecha", "codigo_vendedor", "nombre_vendedor",
   "ventas", "tickets", "descuentos",
 ] as const;
+const VENDORS_HEADER_OPTIONAL = ["unidades"] as const;
 
 export function parseSalesVendedoresCSV(csvContent: string): ParsedVendorDay[] {
   const cleaned = csvContent.replace(/^\uFEFF/, "").trim();
@@ -98,19 +102,21 @@ export function parseSalesVendedoresCSV(csvContent: string): ParsedVendorDay[] {
   if (lines.length < 2) return [];
 
   const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
-  const idx = Object.fromEntries(VENDORS_HEADER.map((k) => [k, header.indexOf(k)]));
+  const allKeys = [...VENDORS_HEADER_REQUIRED, ...VENDORS_HEADER_OPTIONAL];
+  const idx = Object.fromEntries(allKeys.map((k) => [k, header.indexOf(k)]));
 
-  const missing = VENDORS_HEADER.filter((k) => idx[k] < 0);
+  const missing = VENDORS_HEADER_REQUIRED.filter((k) => idx[k] < 0);
   if (missing.length > 0) {
     throw new Error(
       `Vendedores CSV header inválido. Faltan columnas: ${missing.join(", ")}. Recibido: ${header.join(",")}`,
     );
   }
 
+  const minCols = VENDORS_HEADER_REQUIRED.length;
   const rows: ParsedVendorDay[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",").map((c) => c.trim());
-    if (cols.length < VENDORS_HEADER.length) continue;
+    if (cols.length < minCols) continue;
     rows.push({
       sucursal:       cols[idx.sucursal],
       fecha:          cols[idx.fecha],
@@ -119,6 +125,7 @@ export function parseSalesVendedoresCSV(csvContent: string): ParsedVendorDay[] {
       ventas:         toNum(cols[idx.ventas]),
       tickets:        toInt(cols[idx.tickets]),
       descuentos:     toNum(cols[idx.descuentos]),
+      unidades:       idx.unidades >= 0 ? toInt(cols[idx.unidades] ?? "0") : 0,
     });
   }
   return rows;

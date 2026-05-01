@@ -43,6 +43,7 @@ export interface SiafVendor {
   ventas:     number;
   tickets:    number;
   descuentos: number;
+  unidades?:  number;
 }
 
 export interface SiafObraSocial {

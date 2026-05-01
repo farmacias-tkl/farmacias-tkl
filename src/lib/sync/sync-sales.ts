@@ -144,6 +144,7 @@ export async function syncSales(): Promise<SyncSalesResult> {
             ventas:     v.ventas,
             tickets:    v.tickets,
             descuentos: v.descuentos,
+            unidades:   v.unidades ?? 0,
           }));
 
         const obrasSoc = (osByDate.get(row.fecha) ?? [])
