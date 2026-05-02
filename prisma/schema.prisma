@@ -549,14 +549,19 @@ model SyncLog {
 }
 
 model SourceFile {
-  id          String   @id @default(cuid())
-  driveFileId String   @unique
-  filename    String
-  fileDate    DateTime @db.Date
-  processedAt DateTime
-  rowsCount   Int
-  status      String
-  createdAt   DateTime @default(now())
+  id           String    @id @default(cuid())
+  driveFileId  String    @unique
+  filename     String
+  fileDate     DateTime  @db.Date
+  // modifiedTime del Drive file, para idempotencia por versión:
+  // si entre dos runs del mismo día el admin actualiza el Excel, el
+  // modifiedTime cambia y syncBalances reprocesa (vs el comportamiento
+  // viejo que skipeaba por driveFileId+processedAt date).
+  modifiedTime DateTime?
+  processedAt  DateTime
+  rowsCount    Int
+  status       String
+  createdAt    DateTime  @default(now())
 
   @@index([fileDate(sort: Desc)])
 }

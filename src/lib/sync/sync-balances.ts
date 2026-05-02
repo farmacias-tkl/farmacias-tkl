@@ -37,17 +37,35 @@ export async function syncBalances(): Promise<SyncBalancesResult> {
   }
 
   const { buffer, file, isStale } = fileResult;
+
+  // Guard "archivo listo": si el Excel no fue modificado hoy, skipear sin
+  // escribir snapshots. El AlertBanner del frontend ya muestra el último
+  // cierre real disponible — no queremos contaminar la DB con datos viejos.
+  if (isStale) {
+    const result: SyncBalancesResult = {
+      status: "STALE",
+      message: `SKIPPED: "${file.name}" no fue modificado hoy (modifiedTime=${file.modifiedTime}). Esperando actualización del admin.`,
+      rowsProcessed: 0, rowsSkipped: 0, warnings: [],
+      durationMs: Date.now() - startTime, isStale: true, syncDate: today,
+    };
+    await writeSyncLog(result, today);
+    return result;
+  }
+
+  const fileModifiedTime = new Date(file.modifiedTime);
   const alreadyProcessed = await prisma.sourceFile.findUnique({ where: { driveFileId: file.id } });
-  // Idempotency por día: si el mismo archivo ya se procesó HOY, skip.
-  // Si fue procesado en un día anterior (ej: archivo viejo / stale), re-procesar
-  // para dejar snapshot de hoy en la DB.
+  // Idempotencia por modifiedTime del Drive file. Si el archivo no cambió
+  // desde el último procesamiento (mismo modifiedTime), skip. Si el admin lo
+  // actualizó entre runs, reprocesar — el upsert de BankBalanceSnapshot
+  // actualiza los rows existentes del día.
   if (
     alreadyProcessed?.status === "processed" &&
-    alreadyProcessed.processedAt >= today
+    alreadyProcessed.modifiedTime &&
+    alreadyProcessed.modifiedTime.getTime() === fileModifiedTime.getTime()
   ) {
     return {
       status: "SUCCESS",
-      message: `Archivo ${file.name} ya procesado hoy (idempotente)`,
+      message: `Archivo "${file.name}" sin cambios desde ${alreadyProcessed.processedAt.toISOString()} (idempotente)`,
       rowsProcessed: alreadyProcessed.rowsCount, rowsSkipped: 0, warnings: [],
       durationMs: Date.now() - startTime, isStale, syncDate: today,
     };
@@ -124,11 +142,13 @@ export async function syncBalances(): Promise<SyncBalancesResult> {
     update: {
       status: rowsProcessed > 0 ? "processed" : "error",
       rowsCount: rowsProcessed, processedAt: new Date(),
+      modifiedTime: fileModifiedTime,
     },
     create: {
       driveFileId: file.id, filename: file.name, fileDate: snapshotDate,
       processedAt: new Date(), rowsCount: rowsProcessed,
       status: rowsProcessed > 0 ? "processed" : "error",
+      modifiedTime: fileModifiedTime,
     },
   });
 

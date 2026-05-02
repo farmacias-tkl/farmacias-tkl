@@ -2,7 +2,13 @@ name: Daily Sync — Saldos Bancarios
 
 on:
   schedule:
-    - cron: "0 9 * * 1-6"
+    # Tres ejecuciones por día (lun-sab) con idempotencia por modifiedTime:
+    # - el primer run que detecta el archivo actualizado escribe los snapshots
+    # - los siguientes skipean si modifiedTime no cambió, o reprocesan si el
+    #   admin corrigió el Excel entre runs
+    - cron: "0 12 * * 1-6"   # 09:00 ART — primera lectura
+    - cron: "30 12 * * 1-6"  # 09:30 ART — segunda lectura (corrige bancos cargados tarde)
+    - cron: "0 13 * * 1-6"   # 10:00 ART — tercera lectura (margen para admin tardío)
   workflow_dispatch:
     inputs:
       source:
