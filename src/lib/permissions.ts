@@ -32,7 +32,6 @@ export function canAccessOwnerPanel(
 // ---------------------------------------------------------------------------
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
   SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
-  CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
   OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/puestos","/owner","/perfil"],
   BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/perfil"],
   HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/perfil"],
@@ -44,37 +43,37 @@ export const MENU_BY_ROLE: Record<UserRole, string[]> = {
 // Permisos por ruta — usado por middleware
 // ---------------------------------------------------------------------------
 export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
-  "/":              ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/dashboard":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/sucursales":    ["SUPERVISOR","CO_SUPERVISOR","OWNER","ADMIN"],
-  "/empleados":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/ausencias":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/planes-accion": ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
-  "/horas-extras":  ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/vacaciones":    ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/rotativas":     ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
-  "/mantenimiento": ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
-  "/tareas":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","OWNER","ADMIN"],
-  "/whatsapp":      ["SUPERVISOR","CO_SUPERVISOR","ADMIN"],
-  "/alertas":       ["SUPERVISOR","CO_SUPERVISOR","OWNER","ADMIN"],
+  "/":              ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/dashboard":     ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/sucursales":    ["SUPERVISOR","OWNER","ADMIN"],
+  "/empleados":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/ausencias":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/planes-accion": ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  "/horas-extras":  ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/vacaciones":    ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/rotativas":     ["SUPERVISOR","HR","ADMIN"],
+  "/mantenimiento": ["SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
+  "/tareas":        ["SUPERVISOR","BRANCH_MANAGER","OWNER","ADMIN"],
+  "/whatsapp":      ["SUPERVISOR","ADMIN"],
+  "/alertas":       ["SUPERVISOR","OWNER","ADMIN"],
   "/puestos":       ["ADMIN","OWNER"],
   "/admin":         ["ADMIN"],
   "/admin/usuarios":["ADMIN"],
   "/owner":         ["OWNER"],
   "/owner/usuarios":["OWNER"],
-  "/perfil":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/perfil":        ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/executive":     ["OWNER","ADMIN","SUPERVISOR"],
-  "/sin-acceso":    ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/sin-acceso":    ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   // API routes
-  "/api/me":            ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/api/profile":       ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/api/branches":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/api/positions":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/api/employees":     ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/api/absences":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/api/action-plans":  ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
-  "/api/overtime":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
-  "/api/assignments":   ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
+  "/api/me":            ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/api/profile":       ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/api/branches":      ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/api/positions":     ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
+  "/api/employees":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/absences":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/action-plans":  ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
   "/api/owner":         ["OWNER"],
   "/api/dashboard":     ["OWNER","ADMIN","SUPERVISOR"],
@@ -88,51 +87,51 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
     }
   }
   if (pathname.startsWith("/api/")) {
-    return ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"].includes(role);
+    return ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"].includes(role);
   }
   return role === "ADMIN";
 }
 
 export const can = {
   // Sucursales
-  viewAllBranches:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
+  viewAllBranches:  (role: UserRole) => ["SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
   manageBranches:   (role: UserRole) => role === "ADMIN",
 
   // Empleados
-  viewAllEmployees: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
-  manageEmployees:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","ADMIN"].includes(role),
-  reassignEmployee: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"].includes(role),
+  viewAllEmployees: (role: UserRole) => ["SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
+  manageEmployees:  (role: UserRole) => ["SUPERVISOR","HR","BRANCH_MANAGER","ADMIN"].includes(role),
+  reassignEmployee: (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
   // Vacaciones
-  createVacation:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
-  approveVacation: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
-  confirmVacation: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
-  manageCoverage:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"].includes(role),
+  createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
+  approveVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  confirmVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  manageCoverage:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
   // Ausencias
-  createAbsence:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
-  editAbsence:    (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
-  justifyAbsence: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
+  createAbsence:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
+  editAbsence:    (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
+  justifyAbsence: (role: UserRole) => ["SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
 
   // Planes de acción
-  createActionPlan: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  createActionPlan: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
 
   // Horas extras
-  createOvertime:  (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
-  approveOvertime: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
+  createOvertime:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  approveOvertime: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
 
   // Mantenimiento
-  viewAllTickets:     (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","MAINTENANCE","OWNER","ADMIN"].includes(role),
-  createTicket:       (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"].includes(role),
-  assignTicket:       (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
-  updateTicketStatus: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","MAINTENANCE","ADMIN"].includes(role),
+  viewAllTickets:     (role: UserRole) => ["SUPERVISOR","MAINTENANCE","OWNER","ADMIN"].includes(role),
+  createTicket:       (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"].includes(role),
+  assignTicket:       (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  updateTicketStatus: (role: UserRole) => ["SUPERVISOR","MAINTENANCE","ADMIN"].includes(role),
 
   // Tareas
-  createTask:       (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
-  updateTaskStatus: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  createTask:       (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  updateTaskStatus: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
 
   // WhatsApp
-  accessWhatsApp: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
+  accessWhatsApp: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
 
   // Comentarios internos
   viewInternalComments: (role: UserRole) => role !== "OWNER",
@@ -143,7 +142,7 @@ export const can = {
   viewAuditLog:    (role: UserRole) => role === "ADMIN",
 
   // Helpers
-  isFullAccess:           (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
+  isFullAccess:           (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
   isReadOnlyInEmployees:  (role: UserRole) => role === "OWNER",
   isReadOnlyInBranches:   (role: UserRole) => role === "OWNER",
 };
@@ -166,7 +165,6 @@ export function requireAuth(
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   SUPERVISOR:     "Supervisor",
-  CO_SUPERVISOR:  "Co-supervisora",
   BRANCH_MANAGER: "Encargada",
   HR:             "RRHH",
   MAINTENANCE:    "Mantenimiento",
@@ -176,11 +174,9 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export const ROLE_COLORS: Record<UserRole, string> = {
   SUPERVISOR:     "bg-blue-100 text-blue-800",
-  CO_SUPERVISOR:  "bg-violet-100 text-violet-800",
   BRANCH_MANAGER: "bg-amber-100 text-amber-800",
   HR:             "bg-emerald-100 text-emerald-800",
   MAINTENANCE:    "bg-pink-100 text-pink-800",
   OWNER:          "bg-slate-100 text-slate-700",
   ADMIN:          "bg-red-100 text-red-800",
 };
-

@@ -11,7 +11,7 @@ import { ConfirmModal } from "@/components/ConfirmModal";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
-const ROLES: UserRole[] = ["OWNER","ADMIN","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
+const ROLES: UserRole[] = ["OWNER","ADMIN","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
 
 interface UserRow {
   id:                 string;

@@ -8,7 +8,7 @@ import { ROLE_LABELS } from "@/lib/permissions";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import type { UserRole } from "@prisma/client";
 
-const ROLES: UserRole[] = ["OWNER","ADMIN","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
+const ROLES: UserRole[] = ["OWNER","ADMIN","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
 
 export function NuevoUsuarioClient() {
   const router = useRouter();

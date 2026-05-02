@@ -11,7 +11,7 @@ import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
-const ROLES: UserRole[] = ["ADMIN","OWNER","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
+const ROLES: UserRole[] = ["ADMIN","OWNER","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
 
 export default function UsuariosPage() {
   const { data: session, status } = useSession();

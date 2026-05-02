@@ -16,7 +16,7 @@ import bcrypt from "bcryptjs";
 const createSchema = z.object({
   name:       z.string().min(2, "Nombre obligatorio"),
   email:      z.string().email("Email invalido"),
-  role:       z.enum(["OWNER","ADMIN","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]),
+  role:       z.enum(["OWNER","ADMIN","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
   // Si role === OWNER, executiveAccess se setea true automaticamente (canViewExecutive lo cubre).

@@ -64,7 +64,6 @@ const USERS: Array<{ name: string; email: string; role: UserRole; branchName: st
   { name: "Administrador Sistema",  email: "admin@farmaciastkl.com",        role: "ADMIN",          branchName: null },
   { name: "Direccion TKL",          email: "dueno@farmaciastkl.com",        role: "OWNER",          branchName: null },
   { name: "Supervisora TKL",        email: "supervisor@farmaciastkl.com",   role: "SUPERVISOR",     branchName: null },
-  { name: "Co-supervisora TKL",     email: "cosupervisor@farmaciastkl.com", role: "CO_SUPERVISOR",  branchName: null },
   { name: "RRHH TKL",               email: "rrhh@farmaciastkl.com",         role: "HR",             branchName: null },
   { name: "Personal Mantenimiento", email: "mantenimiento@farmaciastkl.com",role: "MAINTENANCE",    branchName: null },
   { name: "Encargada Tekiel",       email: "tekiel@farmaciastkl.com",       role: "BRANCH_MANAGER", branchName: "Tekiel" },

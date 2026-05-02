@@ -10,12 +10,12 @@ import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
-const ROLES: UserRole[] = ["SUPERVISOR","CO_SUPERVISOR","OWNER","BRANCH_MANAGER","HR","MAINTENANCE","ADMIN"];
+const ROLES: UserRole[] = ["SUPERVISOR","OWNER","BRANCH_MANAGER","HR","MAINTENANCE","ADMIN"];
 
 const editSchema = z.object({
   name:       z.string().min(2, "Nombre obligatorio"),
   email:      z.string().email("Email invalido"),
-  role:       z.enum(["ADMIN","OWNER","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"] as const),
+  role:       z.enum(["ADMIN","OWNER","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"] as const),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
 });

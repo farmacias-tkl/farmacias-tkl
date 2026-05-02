@@ -378,22 +378,22 @@ const UPCOMING_MODULES: ModuleDef[] = [
   {
     label: "Vacaciones", icon: CalendarDays, href: "/vacaciones",
     actions: ["Solicitar y aprobar por sucursal","Ver calendario de ausencias","Detectar conflictos antes de aprobar"],
-    roles: ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+    roles: ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   },
   {
     label: "Rotativas y coberturas", icon: RotateCcw, href: "/rotativas",
     actions: ["Ver disponibilidad del plantel","Asignar rotativos a vacantes","Detectar conflictos"],
-    roles: ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
+    roles: ["SUPERVISOR","HR","ADMIN"],
   },
   {
     label: "Mantenimiento", icon: Wrench, href: "/mantenimiento",
     actions: ["Registrar tickets con prioridad","Asignar al personal","Seguimiento hasta resolucion"],
-    roles: ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
+    roles: ["SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
   },
   {
     label: "Tareas", icon: ClipboardList, href: "/tareas",
     actions: ["Crear tareas por sucursal","Ver tareas vencidas","Alertas por incumplimiento"],
-    roles: ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","OWNER","ADMIN"],
+    roles: ["SUPERVISOR","BRANCH_MANAGER","OWNER","ADMIN"],
   },
 ];
 
