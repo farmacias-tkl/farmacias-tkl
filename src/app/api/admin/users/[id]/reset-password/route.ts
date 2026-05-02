@@ -11,30 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireCan, can } from "@/lib/permissions";
+import { generatePassword } from "@/lib/passwords";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
-
-function generatePassword(): string {
-  const upper  = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const lower  = "abcdefghjkmnpqrstuvwxyz";
-  const digits = "23456789";
-  const special= "!@#$";
-  const all    = upper + lower + digits + special;
-
-  const required = [
-    upper[crypto.randomInt(upper.length)],
-    lower[crypto.randomInt(lower.length)],
-    digits[crypto.randomInt(digits.length)],
-    special[crypto.randomInt(special.length)],
-  ];
-  const rest = Array.from({ length: 8 }, () => all[crypto.randomInt(all.length)]);
-  const chars = [...required, ...rest];
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join("");
-}
 
 export async function POST(
   req: NextRequest,

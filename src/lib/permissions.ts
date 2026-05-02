@@ -33,7 +33,7 @@ export function canAccessOwnerPanel(
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
   SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
   CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/owner","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/puestos","/owner","/perfil"],
   BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/perfil"],
   HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/perfil"],
   MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
@@ -57,10 +57,11 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/tareas":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","OWNER","ADMIN"],
   "/whatsapp":      ["SUPERVISOR","CO_SUPERVISOR","ADMIN"],
   "/alertas":       ["SUPERVISOR","CO_SUPERVISOR","OWNER","ADMIN"],
-  "/puestos":       ["ADMIN"],
+  "/puestos":       ["ADMIN","OWNER"],
   "/admin":         ["ADMIN"],
   "/admin/usuarios":["ADMIN"],
   "/owner":         ["OWNER"],
+  "/owner/usuarios":["OWNER"],
   "/perfil":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/executive":     ["OWNER","ADMIN","SUPERVISOR"],
   "/sin-acceso":    ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
@@ -138,7 +139,7 @@ export const can = {
 
   // Admin — gestión de usuarios
   manageUsers:     (role: UserRole) => role === "ADMIN",
-  managePositions: (role: UserRole) => role === "ADMIN",
+  managePositions: (role: UserRole) => role === "ADMIN" || role === "OWNER",
   viewAuditLog:    (role: UserRole) => role === "ADMIN",
 
   // Helpers

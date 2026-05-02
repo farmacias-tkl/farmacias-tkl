@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { canAccessOwnerPanel } from "@/lib/permissions";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Users, Briefcase } from "lucide-react";
 
 const CARDS = [
   {
@@ -11,6 +11,20 @@ const CARDS = [
     title:       "Accesos al Dashboard Ejecutivo",
     description: "Otorgar o revocar acceso al modulo ejecutivo a usuarios del sistema.",
     color:       "bg-amber-50 text-amber-700",
+  },
+  {
+    href:        "/owner/usuarios",
+    icon:        Users,
+    title:       "Gestion de Usuarios",
+    description: "Crear, editar, activar y resetear contrasenas. Incluye OWNER y ADMIN.",
+    color:       "bg-blue-50 text-blue-700",
+  },
+  {
+    href:        "/puestos",
+    icon:        Briefcase,
+    title:       "Puestos",
+    description: "Catalogo de puestos y configuracion de cobertura.",
+    color:       "bg-violet-50 text-violet-700",
   },
 ];
 

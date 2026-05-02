@@ -30,7 +30,8 @@ export default function PuestosPage() {
   const { data: session, status } = useSession();
   const qc   = useQueryClient();
   const role = session?.user?.role as UserRole;
-  const isAdmin = role === "ADMIN";
+  // OWNER y ADMIN pueden gestionar puestos (catálogo compartido).
+  const isAdmin = role === "ADMIN" || role === "OWNER";
 
   const [showForm, setShowForm] = useState(false);
   const [serverErr, setServerErr] = useState("");
