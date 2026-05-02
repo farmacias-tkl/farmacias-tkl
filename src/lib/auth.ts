@@ -18,12 +18,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!credentials?.email || !credentials?.password) return null;
         const user = await prisma.user.findUnique({
           where: { email: credentials.email as string },
-          select: { id: true, name: true, email: true, role: true, branchId: true, mustChangePassword: true, active: true, passwordHash: true },
+          select: { id: true, name: true, email: true, role: true, branchId: true, mustChangePassword: true, active: true, passwordHash: true, executiveAccess: true },
         });
         if (!user || !user.active) return null;
         const ok = await bcrypt.compare(credentials.password as string, user.passwordHash);
         if (!ok) return null;
-        return { id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId, mustChangePassword: user.mustChangePassword };
+        return { id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId, mustChangePassword: user.mustChangePassword, executiveAccess: user.executiveAccess };
       },
     }),
   ],
@@ -34,6 +34,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role               = (user as any).role;
         token.branchId           = (user as any).branchId;
         token.mustChangePassword = (user as any).mustChangePassword;
+        token.executiveAccess    = (user as any).executiveAccess ?? false;
         token.iat                = Math.floor(Date.now() / 1000);
       }
       return token;
@@ -44,6 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.role               = token.role as UserRole;
         session.user.branchId           = token.branchId as string | null;
         session.user.mustChangePassword = token.mustChangePassword as boolean;
+        session.user.executiveAccess    = (token.executiveAccess as boolean | undefined) ?? false;
         (session as any).iat            = token.iat;
       }
       return session;

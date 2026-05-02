@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { canViewExecutive } from "@/lib/permissions";
 
 export const metadata = {
   title: "Dashboard Ejecutivo — Farmacias TKL",
@@ -9,7 +10,7 @@ export const metadata = {
 export default async function ExecutiveLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["OWNER", "ADMIN", "SUPERVISOR"].includes(session.user.role)) redirect("/sin-acceso");
+  if (!canViewExecutive(session.user)) redirect("/sin-acceso");
 
   // No emitimos <html>/<body> — el root layout ya los provee. Aplicamos la identidad TKL con un wrapper.
   return (

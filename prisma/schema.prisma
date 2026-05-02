@@ -366,14 +366,22 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  accounts   Account[]
-  sessions   Session[]
-  auditLogs  AuditLog[]
-  accessLogs AccessLog[]
+  accounts       Account[]
+  sessions       Session[]
+  auditLogs      AuditLog[]
+  accessLogs     AccessLog[]
+  securityEvents SecurityEvent[]
+
+  // Acceso granular al módulo ejecutivo (independiente del rol).
+  // OWNER tiene acceso siempre via canViewExecutive; los demás roles
+  // necesitan este flag = true. Default false: usuarios nuevos no tienen
+  // acceso a menos que OWNER lo otorgue explícitamente.
+  executiveAccess Boolean @default(false)
 
   @@index([email])
   @@index([role])
   @@index([branchId])
+  @@index([executiveAccess])
 }
 
 model Account {
@@ -567,4 +575,28 @@ model AccessLog {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+}
+
+// ============================================================================
+// PANEL OWNER — eventos de seguridad
+// ============================================================================
+
+enum SecurityEventType {
+  EXECUTIVE_ACCESS_GRANTED
+  EXECUTIVE_ACCESS_REVOKED
+}
+
+model SecurityEvent {
+  id        String            @id @default(cuid())
+  userId    String                                 // sujeto del evento
+  user      User              @relation(fields: [userId], references: [id])
+  actorId   String?                                // quién lo hizo
+  type      SecurityEventType
+  detail    Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime          @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
 }

@@ -1,9 +1,8 @@
 import { auth } from "@/lib/auth";
-import { canAccessRoute } from "@/lib/permissions";
+import { canAccessRoute, canViewExecutive } from "@/lib/permissions";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const EXECUTIVE_ROLES = ["OWNER", "ADMIN", "SUPERVISOR"];
 const NON_OWNER_MAX_AGE_SEC = 8 * 60 * 60; // 8h
 
 export default auth((req: NextRequest & { auth: any }) => {
@@ -49,7 +48,7 @@ export default auth((req: NextRequest & { auth: any }) => {
 
   // Host routing ejecutivo — solo en producción (dashboard.*), localhost queda operativo
   if (isDashboardHost) {
-    if (!EXECUTIVE_ROLES.includes(role)) {
+    if (!canViewExecutive(session.user)) {
       return NextResponse.redirect(new URL("/sin-acceso", req.url));
     }
     if (pathname === "/") {

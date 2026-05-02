@@ -13,6 +13,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       email:    session.user.email,
       role:     session.user.role,
       branchId: session.user.branchId,
+      executiveAccess: session.user.executiveAccess ?? false,
     }}>
       {children}
     </DashboardShell>

@@ -2,7 +2,6 @@
 import { Menu, Bell, LineChart } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { UserRole } from "@prisma/client";
 
 const PAGE_TITLES: Record<string, string> = {
   "/dashboard":     "Dashboard",
@@ -18,7 +17,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/admin":         "Administración",
 };
 
-export function TopBar({ onMenuClick, userRole }: { onMenuClick: () => void; userRole: UserRole }) {
+export function TopBar({ onMenuClick, canExecutive }: { onMenuClick: () => void; canExecutive: boolean }) {
   const pathname = usePathname();
   const title = Object.entries(PAGE_TITLES)
     .sort((a, b) => b[0].length - a[0].length)
@@ -30,7 +29,7 @@ export function TopBar({ onMenuClick, userRole }: { onMenuClick: () => void; use
         <Menu className="w-5 h-5" />
       </button>
       <h1 className="flex-1 text-sm font-semibold text-gray-800 truncate">{title}</h1>
-      {userRole === "OWNER" && (
+      {canExecutive && (
         <Link
           href="/executive"
           title="Dashboard Ejecutivo"

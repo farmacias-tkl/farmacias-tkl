@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, Users, Wrench, ClipboardList,
   MessageSquare, BellDot, Settings, LogOut, ChevronRight,
   X, MapPin, UserMinus, RotateCcw, Clock, FileWarning,
-  User, ShieldCheck, Briefcase,
+  User, ShieldCheck, Briefcase, Crown,
 } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 import { MENU_BY_ROLE, ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
@@ -28,6 +28,7 @@ const ROUTE_META: Record<string, { label: string; icon: React.ElementType }> = {
   "/puestos":        { label: "Puestos",           icon: Briefcase       },
   "/admin":          { label: "Administracion",    icon: Settings        },
   "/admin/usuarios": { label: "Usuarios",          icon: ShieldCheck     },
+  "/owner":          { label: "Panel Direccion",   icon: Crown           },
 };
 
 interface SidebarProps {

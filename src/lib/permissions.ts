@@ -1,13 +1,39 @@
 import type { UserRole } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
+// Helpers de acceso ejecutivo / panel OWNER
+// Single source of truth — usar en middleware, layouts y componentes UI.
+// ---------------------------------------------------------------------------
+
+/**
+ * ¿Puede ver el Dashboard Ejecutivo?
+ * Reglas:
+ * - OWNER siempre tiene acceso (hardcoded, no revocable).
+ * - Cualquier otro rol depende del flag executiveAccess (otorgado por OWNER).
+ */
+export function canViewExecutive(
+  u: { role: UserRole; executiveAccess?: boolean | null } | null | undefined,
+): boolean {
+  if (!u) return false;
+  if (u.role === "OWNER") return true;
+  return Boolean(u.executiveAccess);
+}
+
+/** ¿Puede acceder al panel /owner? Solo OWNER. */
+export function canAccessOwnerPanel(
+  u: { role: UserRole } | null | undefined,
+): boolean {
+  return u?.role === "OWNER";
+}
+
+// ---------------------------------------------------------------------------
 // MENU por rol — orden de aparición en el sidebar
 // /perfil aparece en todos los roles (al final, antes de logout)
 // ---------------------------------------------------------------------------
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
   SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
   CO_SUPERVISOR:  ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/owner","/perfil"],
   BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/perfil"],
   HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/perfil"],
   MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
@@ -34,6 +60,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/puestos":       ["ADMIN"],
   "/admin":         ["ADMIN"],
   "/admin/usuarios":["ADMIN"],
+  "/owner":         ["OWNER"],
   "/perfil":        ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/executive":     ["OWNER","ADMIN","SUPERVISOR"],
   "/sin-acceso":    ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
@@ -48,6 +75,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/overtime":      ["SUPERVISOR","CO_SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/assignments":   ["SUPERVISOR","CO_SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
+  "/api/owner":         ["OWNER"],
   "/api/dashboard":     ["OWNER","ADMIN","SUPERVISOR"],
   "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
@@ -115,7 +143,6 @@ export const can = {
 
   // Helpers
   isFullAccess:           (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","ADMIN"].includes(role),
-  viewExecutiveDashboard: (role: UserRole) => ["SUPERVISOR","CO_SUPERVISOR","OWNER","ADMIN"].includes(role),
   isReadOnlyInEmployees:  (role: UserRole) => role === "OWNER",
   isReadOnlyInBranches:   (role: UserRole) => role === "OWNER",
 };
