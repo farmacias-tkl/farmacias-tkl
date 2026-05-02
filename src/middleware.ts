@@ -65,7 +65,21 @@ export default auth((req: NextRequest & { auth: any }) => {
     return res;
   }
 
-  // Host operativo (app.* o localhost) — lógica existente intacta
+  // Host operativo (app.* o localhost)
+  // /executive + /api/dashboard: gate único via canViewExecutive (rol OWNER o
+  // flag executiveAccess). No usar canAccessRoute aquí — esa funcion chequea
+  // solo por rol y no honra el flag, lo que generaba inconsistencia con la
+  // branch dashboardHost (que ya usa canViewExecutive).
+  if (pathname.startsWith("/executive") || pathname.startsWith("/api/dashboard")) {
+    if (!canViewExecutive(session.user)) {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+      }
+      return NextResponse.redirect(new URL("/sin-acceso", req.url));
+    }
+    return NextResponse.next();
+  }
+
   if (!canAccessRoute(role, pathname)) {
     const url = new URL("/dashboard", req.url);
     url.searchParams.set("error", "unauthorized");

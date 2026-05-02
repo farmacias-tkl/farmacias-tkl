@@ -62,7 +62,8 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/owner":         ["OWNER"],
   "/owner/usuarios":["OWNER"],
   "/perfil":        ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
-  "/executive":     ["OWNER","ADMIN","SUPERVISOR"],
+  // Nota: /executive y /api/dashboard NO van aquí. Su gate es canViewExecutive
+  // (chequea rol OWNER + flag executiveAccess) aplicado directo en el middleware.
   "/sin-acceso":    ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   // API routes
   "/api/me":            ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
@@ -76,7 +77,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
   "/api/owner":         ["OWNER"],
-  "/api/dashboard":     ["OWNER","ADMIN","SUPERVISOR"],
+  // /api/dashboard: gate via canViewExecutive en middleware (no por rol).
   "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
 
