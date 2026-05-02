@@ -42,10 +42,12 @@ function generatePassword(): string {
 
 const ROLES_WITH_BRANCH = ["BRANCH_MANAGER"];
 
+// ADMIN solo puede crear usuarios con roles operativos.
+// La gestion de OWNER y otros ADMIN esta reservada al panel /owner (solo OWNER).
 const createSchema = z.object({
   name:       z.string().min(2, "Nombre obligatorio"),
   email:      z.string().email("Email invalido"),
-  role:       z.enum(["ADMIN","OWNER","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]),
+  role:       z.enum(["SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
 });

@@ -10,10 +10,12 @@ import { prisma } from "@/lib/prisma";
 import { requireCan, can } from "@/lib/permissions";
 import { z } from "zod";
 
+// ADMIN solo puede editar usuarios con roles operativos.
+// La edicion de OWNER y otros ADMIN esta reservada al panel /owner (solo OWNER).
 const patchSchema = z.object({
   name:       z.string().min(2).optional(),
   email:      z.string().email().optional(),
-  role:       z.enum(["ADMIN","OWNER","SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]).optional(),
+  role:       z.enum(["SUPERVISOR","CO_SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]).optional(),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
   active:     z.boolean().optional(),
@@ -67,6 +69,15 @@ export async function PATCH(
 
   const user = await prisma.user.findUnique({ where: { id: params.id } });
   if (!user) return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });
+
+  // Guard: ADMIN no puede tocar usuarios OWNER ni otros ADMIN.
+  // La gestion de esos usuarios esta reservada al panel /owner (solo OWNER).
+  if (user.role === "OWNER" || user.role === "ADMIN") {
+    return NextResponse.json(
+      { error: "Solo el OWNER puede gestionar usuarios con rol Direccion o Administrador." },
+      { status: 403 }
+    );
+  }
 
   // No permitir que el ADMIN se desactive a sí mismo
   if (params.id === session!.user.id && req.body) {

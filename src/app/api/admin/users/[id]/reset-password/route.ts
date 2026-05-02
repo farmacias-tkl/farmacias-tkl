@@ -46,9 +46,18 @@ export async function POST(
 
   const user = await prisma.user.findUnique({
     where: { id: params.id },
-    select: { id: true, name: true, email: true, active: true },
+    select: { id: true, name: true, email: true, active: true, role: true },
   });
   if (!user) return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });
+
+  // Guard: ADMIN no puede resetear contrasenas de OWNER ni de otros ADMIN.
+  if (user.role === "OWNER" || user.role === "ADMIN") {
+    return NextResponse.json(
+      { error: "Solo el OWNER puede resetear contrasenas de usuarios Direccion o Administrador." },
+      { status: 403 }
+    );
+  }
+
   if (!user.active) {
     return NextResponse.json(
       { error: "No se puede resetear la contraseña de un usuario inactivo" },
