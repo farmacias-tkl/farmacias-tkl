@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       branchScopes: {
         include: { branch: { select: { id: true, name: true } } },
       },
+      _count: { select: { permissions: true } },
     },
     orderBy: { name: "asc" },
   });

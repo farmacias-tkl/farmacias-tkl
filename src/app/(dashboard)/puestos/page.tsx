@@ -7,10 +7,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   Plus, CheckCircle2, XCircle, AlertTriangle,
-  RotateCcw, MapPin, Briefcase,
+  RotateCcw, MapPin, Briefcase, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
+import { PermissionsModal } from "./permissions-modal";
 
 const createSchema = z.object({
   name:             z.string().min(1, "Nombre obligatorio"),
@@ -35,6 +36,9 @@ export default function PuestosPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [serverErr, setServerErr] = useState("");
+  // Modal de permisos: visible solo para OWNER y ADMIN
+  const canSeePermissions = role === "OWNER" || role === "ADMIN";
+  const [permsModal, setPermsModal] = useState<{ id: string; name: string } | null>(null);
 
   const { data: posRes, isLoading, error } = useQuery({
     queryKey: ["positions", { includeInactive: true }],
@@ -227,6 +231,11 @@ export default function PuestosPage() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">
                     Notas
                   </th>
+                  {canSeePermissions && (
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      Permisos
+                    </th>
+                  )}
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     Estado
                   </th>
@@ -234,10 +243,21 @@ export default function PuestosPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {activos.map((p: any) => (
-                  <PositionRow key={p.id} position={p} />
+                  <PositionRow
+                    key={p.id}
+                    position={p}
+                    canSeePermissions={canSeePermissions}
+                    onOpenPermissions={() => setPermsModal({ id: p.id, name: p.name })}
+                  />
                 ))}
                 {inactivos.map((p: any) => (
-                  <PositionRow key={p.id} position={p} inactive />
+                  <PositionRow
+                    key={p.id}
+                    position={p}
+                    inactive
+                    canSeePermissions={canSeePermissions}
+                    onOpenPermissions={() => setPermsModal({ id: p.id, name: p.name })}
+                  />
                 ))}
               </tbody>
             </table>
@@ -265,14 +285,35 @@ export default function PuestosPage() {
           </li>
         </ul>
       </div>
+
+      {/* Modal de permisos por puesto (solo OWNER y ADMIN) */}
+      {permsModal && canSeePermissions && (
+        <PermissionsModal
+          positionId={permsModal.id}
+          positionName={permsModal.name}
+          canEdit={isAdmin}
+          onClose={() => setPermsModal(null)}
+        />
+      )}
     </div>
   );
 }
 
-function PositionRow({ position: p, inactive }: { position: any; inactive?: boolean }) {
+function PositionRow({
+  position: p,
+  inactive,
+  canSeePermissions,
+  onOpenPermissions,
+}: {
+  position: any;
+  inactive?: boolean;
+  canSeePermissions: boolean;
+  onOpenPermissions: () => void;
+}) {
   const scopeNames = p.branchScopes
     ?.map((s: any) => s.branch?.name ?? s.branchId)
     .join(", ");
+  const permCount = p._count?.permissions ?? 0;
 
   return (
     <tr className={cn("hover:bg-gray-50 transition-colors", inactive && "opacity-50")}>
@@ -308,6 +349,23 @@ function PositionRow({ position: p, inactive }: { position: any; inactive?: bool
       <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-400 max-w-xs truncate">
         {p.notes ?? "—"}
       </td>
+      {canSeePermissions && (
+        <td className="px-4 py-3 text-center">
+          <button
+            onClick={onOpenPermissions}
+            className={cn(
+              "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded transition-colors",
+              permCount > 0
+                ? "text-blue-700 bg-blue-50 hover:bg-blue-100"
+                : "text-gray-500 bg-gray-50 hover:bg-gray-100"
+            )}
+            title="Ver y gestionar permisos del puesto"
+          >
+            <ShieldCheck className="w-3 h-3" />
+            {permCount} {permCount === 1 ? "permiso" : "permisos"}
+          </button>
+        </td>
+      )}
       <td className="px-4 py-3 text-center">
         {p.active
           ? <CheckCircle2 className="w-4 h-4 text-green-500 mx-auto" />

@@ -77,6 +77,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
   "/api/owner":         ["OWNER"],
+  "/api/permissions":   ["OWNER","ADMIN"],
   // /api/dashboard: gate via canViewExecutive en middleware (no por rol).
   "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
@@ -140,6 +141,9 @@ export const can = {
   // Admin — gestión de usuarios
   manageUsers:     (role: UserRole) => role === "ADMIN",
   managePositions: (role: UserRole) => role === "ADMIN" || role === "OWNER",
+  // Asignar/revocar permisos operativos a puestos. OWNER + ADMIN por ahora.
+  // Si Direccion en el futuro pide restringir solo a OWNER, cambiar 1 linea.
+  managePositionPermissions: (role: UserRole) => role === "ADMIN" || role === "OWNER",
   viewAuditLog:    (role: UserRole) => role === "ADMIN",
 
   // Helpers
