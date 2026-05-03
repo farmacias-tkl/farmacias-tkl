@@ -30,6 +30,22 @@ enum PositionScope {
 }
 
 // ---------------------------------------------------------------------------
+// PermissionScope — alcance de un permiso operativo asignado a un puesto.
+//
+// OWN_BRANCH    → el permiso aplica solo a la sucursal donde el empleado
+//                 esta asignado (Employee.currentBranchId).
+// ALL_BRANCHES  → el permiso aplica a cualquier sucursal (uso para roles
+//                 cross-branch como supervisor regional).
+//
+// Conceptualmente DISTINTO de PositionScope (que define a que sucursales
+// aplica el puesto en si). No se solapan funcionalmente.
+// ---------------------------------------------------------------------------
+enum PermissionScope {
+  OWN_BRANCH
+  ALL_BRANCHES
+}
+
+// ---------------------------------------------------------------------------
 // AssignmentType — tipo de asignación de sucursal
 // ---------------------------------------------------------------------------
 enum AssignmentType {
@@ -147,6 +163,7 @@ model Position {
   branchScopes        PositionBranchScope[]
   employees           Employee[]
   branchAssignments   EmployeeBranchAssignment[]  // posición cubierta en asignaciones de rotativos
+  permissions         PositionPermission[]
 
   @@index([active])
   @@index([requiresCoverage])
@@ -608,4 +625,57 @@ model SecurityEvent {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([type, createdAt(sort: Desc)])
+}
+
+// ============================================================================
+// PERMISOS OPERATIVOS POR PUESTO (Fase 1)
+//
+// Universo B — permisos operativos. Define que ACCIONES granulares puede
+// hacer un usuario dentro de la plataforma operativa, segun su puesto.
+//
+// SEPARACION ESTRICTA con Universo A (sistema):
+//   - Permission contiene SOLO permisos operativos (vencidos.*, caja.*, etc.)
+//   - NO contiene permisos de sistema (acceso ejecutivo, panel owner,
+//     gestion de usuarios sensibles). Esos quedan en role + executiveAccess.
+//
+// GOBERNANZA:
+//   - OWNER: bypass total en helpers can()/canInBranch() (siempre true).
+//   - ADMIN: bypass tecnico (TODO: evaluar remover bypass en Fase 3 si
+//     Direccion lo requiere — restringe ADMIN a la gobernanza explicita
+//     de los puestos).
+//   - OWNER y ADMIN pueden gestionar PositionPermission (asignar/revocar).
+//   - Otros roles: deny por default si no hay match en el puesto.
+//
+// Helpers en Fase 3: src/lib/permissions/positions.ts
+//   can(user, key)               -> bypass + lookup por key
+//   canInBranch(user, key, bid)  -> idem + resolucion de scope OWN_BRANCH
+// ============================================================================
+
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique           // ej "vencidos.upload_remito"
+  module      String                     // ej "vencidos"
+  description String                     // texto humano para la UI
+  active      Boolean  @default(true)    // soft-delete
+  createdAt   DateTime @default(now())
+
+  positions   PositionPermission[]
+
+  @@index([module, active])
+}
+
+model PositionPermission {
+  id              String          @id @default(cuid())
+  positionId      String
+  position        Position        @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  permissionId    String
+  permission      Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  scope           PermissionScope @default(OWN_BRANCH)
+  grantedByUserId String?         // audit: quien asigno (OWNER o ADMIN)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([positionId, permissionId])
+  @@index([positionId])
+  @@index([permissionId])
 }
