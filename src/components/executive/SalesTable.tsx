@@ -395,8 +395,9 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
               {sorted.map((s) => {
                 const open = expanded.has(s.branchId);
                 const v = s.vsYesterday;
-                const VarIcon = v == null || v === 0 ? Minus : v > 0 ? TrendingUp : TrendingDown;
-                const varColor = v == null ? "#9ca3af" : v > 0 ? "#059669" : v < 0 ? "#ef4444" : "#9ca3af";
+                const isValidV = v != null && Number.isFinite(v);
+                const VarIcon  = !isValidV || v === 0 ? Minus : v! > 0 ? TrendingUp : TrendingDown;
+                const varColor = !isValidV ? "#9ca3af" : v! > 0 ? "#059669" : v! < 0 ? "#ef4444" : "#9ca3af";
 
                 return (
                   <div key={s.branchId}>
@@ -409,9 +410,13 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                       <span className="sal-extras sal-num-col">{s.units > 0 ? fmtInt(s.units) : "—"}</span>
                       <span className="sal-extras sal-num-col">{s.receipts > 0 ? fmtInt(s.receipts) : "—"}</span>
                       <span className="sal-extras sal-num-col">{s.avgTicket > 0 ? fmtARS(s.avgTicket) : "—"}</span>
-                      <span className="sal-var" style={{ color: varColor }}>
+                      <span
+                        className="sal-var"
+                        style={{ color: varColor }}
+                        title={!isValidV ? "Sin base de comparación (día anterior sin actividad)" : undefined}
+                      >
                         <VarIcon style={{ width: 14, height: 14 }} />
-                        {v != null ? `${v > 0 ? "+" : ""}${v.toFixed(1)}%` : "—"}
+                        {isValidV ? `${v! > 0 ? "+" : ""}${v!.toFixed(1)}%` : "N/A"}
                       </span>
                     </div>
                     {open && <SalesDetail sales={s} />}

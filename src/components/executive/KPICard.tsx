@@ -56,11 +56,14 @@ const KPI_CSS = `
 `;
 
 export function KPICard({ label, value, sublabel, variation }: Props) {
-  const varColor = variation == null ? "#9ca3af"
-    : variation > 0 ? "#059669"
-    : variation < 0 ? "#ef4444" : "#9ca3af";
-  const VarIcon = variation == null || variation === 0 ? Minus : variation > 0 ? TrendingUp : TrendingDown;
-  const showVariation = variation != null;
+  // hasVarProp: el caller envió la prop (incluso null). Determina si renderizar el bloque.
+  // isValidVar: el número es real y finito. Determina si mostrar el % o "N/A".
+  const hasVarProp = variation !== undefined;
+  const isValidVar = variation != null && Number.isFinite(variation);
+  const varColor   = !isValidVar ? "#9ca3af"
+    : variation! > 0 ? "#059669"
+    : variation! < 0 ? "#ef4444" : "#9ca3af";
+  const VarIcon    = !isValidVar || variation === 0 ? Minus : variation! > 0 ? TrendingUp : TrendingDown;
 
   return (
     <>
@@ -68,12 +71,16 @@ export function KPICard({ label, value, sublabel, variation }: Props) {
       <div className="kpi-card">
         <div className="kpi-label">{label}</div>
         <div className={value.length > 10 ? "kpi-value kpi-value--long" : "kpi-value"}>{value}</div>
-        {(showVariation || sublabel) && (
+        {(hasVarProp || sublabel) && (
           <div className="kpi-footer">
-            {showVariation && (
-              <span className="kpi-var" style={{ color: varColor }}>
+            {hasVarProp && (
+              <span
+                className="kpi-var"
+                style={{ color: varColor }}
+                title={!isValidVar ? "Sin base de comparación (día anterior sin actividad)" : undefined}
+              >
                 <VarIcon style={{ width: 14, height: 14 }} />
-                {variation! > 0 ? "+" : ""}{variation!.toFixed(1)}%
+                {isValidVar ? `${variation! > 0 ? "+" : ""}${variation!.toFixed(1)}%` : "N/A"}
               </span>
             )}
             {sublabel && <span className="kpi-sublabel">{sublabel}</span>}
