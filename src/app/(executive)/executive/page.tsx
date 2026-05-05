@@ -6,6 +6,19 @@ import { ComparativeSection } from "@/components/executive/ComparativeSection";
 
 export const revalidate = 300;
 
+// Devuelve "hoy" en TZ Argentina (UTC-3, sin DST), como Date a medianoche
+// UTC del dia ART. Compatible con Prisma @db.Date que devuelve fechas como
+// midnight UTC del dia almacenado.
+//
+// El server de Vercel corre en UTC. Usar new Date() + setHours(0,0,0,0) usa
+// TZ del server (UTC) — incorrecto cuando es 23:00 ART (= 02:00 UTC del dia
+// siguiente): el server ve "manana" pero en Argentina sigue siendo hoy.
+function getArtToday(): Date {
+  const artMs = Date.now() - 3 * 60 * 60 * 1000;
+  const art   = new Date(artMs);
+  return new Date(Date.UTC(art.getUTCFullYear(), art.getUTCMonth(), art.getUTCDate()));
+}
+
 export default async function ExecutivePage({
   searchParams,
 }: {
@@ -15,7 +28,8 @@ export default async function ExecutivePage({
   if (!session?.user) redirect("/login");
 
   const branchId = searchParams.branch ?? "ALL";
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = getArtToday();
+  const yesterdayArt = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
   const balanceWhere = {
     snapshotDate: today,
@@ -80,6 +94,13 @@ export default async function ExecutivePage({
     }
     isStaleSales = true;
   }
+  // Regla de "stale legítimo": si el último snapshot es de AYER (TZ ART) o
+  // posterior, NO consideramos stale — es comportamiento normal (el cierre
+  // del día anterior es lo más reciente posible). Solo marcamos stale cuando
+  // los datos son anteriores a ayer (sync caído, archivo no llegó, etc.).
+  if (isStaleSales && sales.length > 0 && salesDate.getTime() >= yesterdayArt.getTime()) {
+    isStaleSales = false;
+  }
   const yesterday = new Date(salesDate); yesterday.setDate(yesterday.getDate() - 1);
   const yesterdaySales = await prisma.salesSnapshot.findMany({
     where: { snapshotDate: yesterday, ...salesBranchFilter },
@@ -110,7 +131,7 @@ export default async function ExecutivePage({
   }
   if (isStaleBalances && balances.length === 0) alertas.push("No hay saldos bancarios disponibles");
   if (isStaleSales && sales.length > 0) {
-    alertas.push(`Ventas sin actualizar. Último cierre disponible: ${new Date(salesDate).toLocaleDateString("es-AR")}.`);
+    alertas.push(`Ventas desactualizadas. Último cierre disponible: ${new Date(salesDate).toLocaleDateString("es-AR")}`);
   }
   if (isStaleSales && sales.length === 0) alertas.push("Sin datos de ventas disponibles.");
 
