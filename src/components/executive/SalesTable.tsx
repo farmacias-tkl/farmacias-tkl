@@ -68,7 +68,7 @@ const SALES_CSS = `
    Desktop: 7 cols (chevron | sucursal | ventas-full | unid | compr | ticket-prom | vs-ayer). */
 .sal-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto 64px 80px;
+  grid-template-columns: 20px 1fr 68px 52px 64px;
   align-items: center; gap: 0.5rem;
   padding: 0.75rem 1rem;
   cursor: pointer;
@@ -248,7 +248,7 @@ const SALES_CSS = `
 /* Encabezado tabla — visible mobile y desktop con grids distintos. */
 .sal-head {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto 64px 80px;
+  grid-template-columns: 20px 1fr 68px 52px 64px;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
   background: #f9fafb;
