@@ -56,8 +56,9 @@ const SALES_CSS = `
 
 .sal-row {
   display: grid;
-  grid-template-columns: 20px 1fr auto auto;
-  align-items: center; gap: 1rem;
+  /* Mobile: chevron | sucursal | ventas | tickets | unidades. Desktop sobreescribe. */
+  grid-template-columns: 20px minmax(0, 1fr) auto 64px 72px;
+  align-items: center; gap: 0.5rem;
   padding: 0.75rem 1rem;
   cursor: pointer;
   border-bottom: 1px solid #f3f4f6;
@@ -76,7 +77,9 @@ const SALES_CSS = `
   font-variant-numeric: tabular-nums;
 }
 .sal-var {
-  display: inline-flex; align-items: center; gap: 0.25rem;
+  /* Mobile: oculto. Desktop: inline-flex via media query. */
+  display: none;
+  align-items: center; gap: 0.25rem;
   font-size: 11px; font-weight: 600; white-space: nowrap;
   justify-content: flex-end;
   font-variant-numeric: tabular-nums;
@@ -87,9 +90,20 @@ const SALES_CSS = `
   text-align: right; font-size: 12px; color: #6b7280;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+
+/* Mobile: invertir el orden visual de las dos celdas numericas.
+   El DOM las renderiza units -> receipts (porque desktop muestra "Unid."
+   antes que "Compr."), pero mobile pide "Tickets antes de Unidades".
+   Usamos grid order para reubicar visualmente sin tocar el DOM ni desktop. */
+@media (max-width: 639px) {
+  .sal-cell-receipts { order: 1; }
+  .sal-cell-units    { order: 2; }
+}
+
 @media (min-width: 640px) {
   .sal-extras { display: block; }
-  .sal-row { grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr; }
+  .sal-var    { display: inline-flex; }
+  .sal-row    { grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr; gap: 1rem; }
 }
 
 /* Detalle expandido */
@@ -407,8 +421,8 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                         : <ChevronRight style={{ width: 16, height: 16, color: "#9ca3af" }} />}
                       <span className="sal-name">{s.branchName}</span>
                       <span className="sal-total">{fmtARS(s.totalSales)}</span>
-                      <span className="sal-extras sal-num-col">{s.units > 0 ? fmtInt(s.units) : "—"}</span>
-                      <span className="sal-extras sal-num-col">{s.receipts > 0 ? fmtInt(s.receipts) : "—"}</span>
+                      <span className="sal-num-col sal-cell-units">{s.units > 0 ? fmtInt(s.units) : "—"}</span>
+                      <span className="sal-num-col sal-cell-receipts">{s.receipts > 0 ? fmtInt(s.receipts) : "—"}</span>
                       <span className="sal-extras sal-num-col">{s.avgTicket > 0 ? fmtARS(s.avgTicket) : "—"}</span>
                       <span
                         className="sal-var"
