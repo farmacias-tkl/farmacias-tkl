@@ -62,3 +62,6 @@ estructura2.txt
 
 # Vercel
 .vercel
+
+# Claude Code settings (pueden contener credenciales)
+.claude/settings.local.json
