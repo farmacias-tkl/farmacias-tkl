@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const EXECUTIVE_ROLES = ["OWNER", "ADMIN", "SUPERVISOR"];
-const VALID_PERIODS   = ["7d", "14d", "21d", "30d", "3m", "6m", "12m"];
+const VALID_PERIODS   = ["7d", "14d", "21d", "30d", "3m", "6m", "12m", "custom"];
 
 type PeriodRanges = {
   currentStart: Date;
@@ -37,6 +37,47 @@ function getPeriodRanges(period: string, anchorDate: Date): PeriodRanges | null 
   return null;
 }
 
+// Parsea "YYYY-MM-DD" como fecha local a medianoche. Devuelve null si invalido.
+function parseLocalDate(iso: string | null): Date | null {
+  if (!iso) return null;
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  const date = new Date(Number(y), Number(mo) - 1, Number(d));
+  date.setHours(0, 0, 0, 0);
+  if (isNaN(date.getTime())) return null;
+  // Validar que la fecha sea real (ej: rechazar 2026-02-30)
+  if (date.getFullYear() !== Number(y) || date.getMonth() !== Number(mo) - 1 || date.getDate() !== Number(d)) {
+    return null;
+  }
+  return date;
+}
+
+// Construye PeriodRanges desde 4 fechas pasadas explicitamente (period=custom).
+// Devuelve { ranges } si todo OK, o { error } con mensaje descriptivo si no.
+function getCustomRanges(sp: URLSearchParams): { ranges: PeriodRanges } | { error: string } {
+  const cs = parseLocalDate(sp.get("currentStart"));
+  const ce = parseLocalDate(sp.get("currentEnd"));
+  const ps = parseLocalDate(sp.get("pastStart"));
+  const pe = parseLocalDate(sp.get("pastEnd"));
+  if (!cs || !ce || !ps || !pe) {
+    return { error: "Para period=custom se requieren las 4 fechas (currentStart, currentEnd, pastStart, pastEnd) en formato YYYY-MM-DD." };
+  }
+  if (cs.getTime() > ce.getTime()) {
+    return { error: "currentStart debe ser <= currentEnd." };
+  }
+  if (ps.getTime() > pe.getTime()) {
+    return { error: "pastStart debe ser <= pastEnd." };
+  }
+  return {
+    ranges: {
+      currentStart: cs, currentEnd: ce,
+      pastStart:    ps, pastEnd:    pe,
+      isMonthly:    false,
+    },
+  };
+}
+
 function buildMetric(current: number, yearAgo: number) {
   return {
     current,
@@ -63,19 +104,33 @@ export async function GET(request: NextRequest) {
   const branchFilter = branchId !== "ALL" ? { branchId } : {};
   const execVisibility = { branch: { showInExecutive: true, showInOperative: true } };
 
-  // Anchor = última fecha disponible bajo el filtro activo. Si la DB está vacía,
-  // fallback a hoy (los rangos quedarán vacíos pero no rompen).
-  const latestSnapshot = await prisma.salesSnapshot.findFirst({
-    where: { ...branchFilter, ...execVisibility },
-    orderBy: { snapshotDate: "desc" },
-    select: { snapshotDate: true },
-  });
-  const anchorDate = latestSnapshot?.snapshotDate
-    ? new Date(latestSnapshot.snapshotDate)
-    : new Date();
-  anchorDate.setHours(0, 0, 0, 0);
+  // Resolver rangos:
+  // - period=custom -> 4 fechas explicitas en query params (anchor = currentEnd)
+  // - presets       -> calcular desde anchor = MAX(snapshotDate) bajo filtro
+  let ranges: PeriodRanges;
+  let anchorDate: Date;
 
-  const ranges = getPeriodRanges(period, anchorDate)!;
+  if (period === "custom") {
+    const result = getCustomRanges(searchParams);
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    ranges = result.ranges;
+    anchorDate = new Date(ranges.currentEnd);
+  } else {
+    // Anchor = última fecha disponible bajo el filtro activo. Si la DB está vacía,
+    // fallback a hoy (los rangos quedarán vacíos pero no rompen).
+    const latestSnapshot = await prisma.salesSnapshot.findFirst({
+      where: { ...branchFilter, ...execVisibility },
+      orderBy: { snapshotDate: "desc" },
+      select: { snapshotDate: true },
+    });
+    anchorDate = latestSnapshot?.snapshotDate
+      ? new Date(latestSnapshot.snapshotDate)
+      : new Date();
+    anchorDate.setHours(0, 0, 0, 0);
+    ranges = getPeriodRanges(period, anchorDate)!;
+  }
 
   const [currentRows, pastRows, branches] = await Promise.all([
     prisma.salesSnapshot.findMany({
@@ -161,7 +216,8 @@ export async function GET(request: NextRequest) {
       tickets:    buildMetric(e.ticketsCur, e.ticketsPast),
       currentDaysWithData: e.currentDays.size,
     }))
-    .sort((a, b) => (b.sales.variation ?? -Infinity) - (a.sales.variation ?? -Infinity));
+    // Orden por ventas del periodo actual DESC (sentido ejecutivo: priorizar volumen).
+    .sort((a, b) => b.sales.current - a.sales.current);
 
   // Por mes (solo ventas, para el gráfico)
   let byMonth: Array<{ month: string; current: number; yearAgo: number }> | null = null;
