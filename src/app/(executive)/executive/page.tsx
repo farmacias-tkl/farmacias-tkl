@@ -66,6 +66,15 @@ export default async function ExecutivePage({
     }
     isStaleBalances = true;
   }
+  // Misma regla de "stale legítimo" que ventas: si el último snapshot es de
+  // AYER (TZ ART) o posterior, NO es stale (es lo más reciente posible un
+  // domingo o después de feriado). Solo marcar stale si es anterior a ayer.
+  if (isStaleBalances && balances.length > 0) {
+    const lastBalanceDate = balances[0].snapshotDate;
+    if (lastBalanceDate.getTime() >= yesterdayArt.getTime()) {
+      isStaleBalances = false;
+    }
+  }
 
   const salesBranchFilter = {
     ...(branchId !== "ALL" && { branchId }),
@@ -127,7 +136,7 @@ export default async function ExecutivePage({
 
   const alertas: string[] = [];
   if (isStaleBalances && balances.length > 0) {
-    alertas.push(`Saldos sin actualizar. Último cierre disponible: ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")}.`);
+    alertas.push(`Saldos desactualizados. Último cierre disponible: ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")}`);
   }
   if (isStaleBalances && balances.length === 0) alertas.push("No hay saldos bancarios disponibles");
   if (isStaleSales && sales.length > 0) {
