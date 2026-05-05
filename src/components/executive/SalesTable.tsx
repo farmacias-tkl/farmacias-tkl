@@ -7,6 +7,15 @@ const fmtARS = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
 const fmtInt = (n: number) => new Intl.NumberFormat("es-AR").format(n);
 
+// Formato abreviado para mobile: 105.530.538 -> "105.5M", 432.678 -> "433K"
+// Threshold 999_500 evita "1000K" y bumpea a "1.0M" cuando corresponde.
+function fmtAbbrev(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)   return `${Math.round(n / 1_000)}K`;
+  return Math.round(n).toString();
+}
+
 // ─── Tipos para rawData SIAF ────────────────────────────────────
 interface SiafVendorRaw { codigo: string; nombre: string; ventas: number; tickets: number; descuentos: number; unidades?: number; }
 interface SiafObraSocialRaw { codigo: string; nombre: string; ventas_bruto: number; descuentos: number; ventas_neto: number; tickets?: number; unidades?: number; }
@@ -54,54 +63,13 @@ const SALES_CSS = `
   grid-column: 1 / -1; text-align: center; margin-top: 0.125rem;
 }
 
-/* === MOBILE CARD (< 640px) ===
-   Cada sucursal se renderiza como card con:
-   - Header: chevron + nombre (izq) | total ventas (der)
-   - Stats line: "X tickets · Y unidades" (oculta si ambos 0)
-   En desktop, la card queda hidden y se muestra .sal-row. */
-.sal-card {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin: 0 0.75rem 0.5rem 0.75rem;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.sal-card:first-of-type { margin-top: 0.75rem; }
-.sal-card:hover { background: #f9fafb; }
-.sal-card-header {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 0.5rem;
-}
-.sal-card-namewrap {
-  display: flex; align-items: center; gap: 0.375rem;
-  min-width: 0; flex: 1;
-}
-.sal-card-name {
-  font-size: 14px; font-weight: 600; color: #1E2D5A;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.sal-card-total {
-  font-size: 14px; font-weight: 700; color: #1E2D5A;
-  white-space: nowrap; flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-.sal-card-divider {
-  border-top: 1px solid #e5e7eb;
-  margin: 0.375rem 0;
-}
-.sal-card-stats {
-  font-size: 12px; color: #6b7280;
-  font-variant-numeric: tabular-nums;
-  margin: 0;
-}
-
-/* === DESKTOP ROW (>= 640px) ===
-   Hidden por default (mobile usa .sal-card). Override desktop. */
+/* === ROW (mobile + desktop) ===
+   Mobile: 5 cols (chevron | sucursal | ventas-abrev | T | U).
+   Desktop: 7 cols (chevron | sucursal | ventas-full | unid | compr | ticket-prom | vs-ayer). */
 .sal-row {
-  display: none;
-  align-items: center; gap: 1rem;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 64px 80px;
+  align-items: center; gap: 0.5rem;
   padding: 0.75rem 1rem;
   cursor: pointer;
   border-bottom: 1px solid #f3f4f6;
@@ -120,7 +88,7 @@ const SALES_CSS = `
   font-variant-numeric: tabular-nums;
 }
 .sal-var {
-  /* Hidden mobile (no se usa porque mobile tiene .sal-card). Desktop: inline-flex. */
+  /* Hidden mobile, inline-flex desktop. */
   display: none;
   align-items: center; gap: 0.25rem;
   font-size: 11px; font-weight: 600; white-space: nowrap;
@@ -134,11 +102,28 @@ const SALES_CSS = `
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
+/* Mobile: invertir orden visual de tickets/unidades.
+   El DOM las renderiza units -> receipts (porque desktop muestra "Unid."
+   antes que "Compr."), pero mobile pide "T (tickets) antes de U (unidades)". */
+@media (max-width: 639px) {
+  .sal-cell-receipts { order: 1; }
+  .sal-cell-units    { order: 2; }
+}
+
+/* Visibilidad mobile/desktop para celdas de header y total ventas. */
+.sal-head-desktop  { display: none; }
+.sal-head-mobile   { display: block; }
+.sal-total-mobile  { display: inline; }
+.sal-total-desktop { display: none; }
+
 @media (min-width: 640px) {
-  .sal-card   { display: none; }
-  .sal-row    { display: grid; grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr; }
+  .sal-row    { grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr; gap: 1rem; }
   .sal-extras { display: block; }
   .sal-var    { display: inline-flex; }
+  .sal-head-desktop  { display: block; }
+  .sal-head-mobile   { display: none; }
+  .sal-total-mobile  { display: none; }
+  .sal-total-desktop { display: inline; }
 }
 
 /* Detalle expandido */
@@ -260,18 +245,20 @@ const SALES_CSS = `
 }
 .sal-search-empty { font-size: 12px; color: #9ca3af; font-style: italic; padding: 0.375rem 0; text-align: center; }
 
-/* Encabezado tabla solo desktop */
+/* Encabezado tabla — visible mobile y desktop con grids distintos. */
 .sal-head {
-  display: none; gap: 1rem;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 64px 80px;
+  gap: 0.5rem;
   padding: 0.5rem 1rem;
   background: #f9fafb;
   border-bottom: 1px solid #e5e7eb;
+  align-items: center;
 }
 @media (min-width: 640px) {
   .sal-head {
-    display: grid;
     grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr;
-    align-items: center;
+    gap: 1rem;
   }
 }
 .sal-head span {
@@ -435,10 +422,12 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                 <span></span>
                 <span>Sucursal</span>
                 <span className="num">Ventas</span>
-                <span className="num">Unid.</span>
-                <span className="num">Compr.</span>
-                <span className="num">Ticket prom.</span>
-                <span className="num">vs ayer</span>
+                <span className="num sal-head-desktop">Unid.</span>
+                <span className="num sal-head-desktop">Compr.</span>
+                <span className="num sal-head-desktop">Ticket prom.</span>
+                <span className="num sal-head-desktop">vs ayer</span>
+                <span className="num sal-head-mobile">T</span>
+                <span className="num sal-head-mobile">U</span>
               </div>
 
               {sorted.map((s) => {
@@ -447,44 +436,17 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                 const isValidV = v != null && Number.isFinite(v);
                 const VarIcon  = !isValidV || v === 0 ? Minus : v! > 0 ? TrendingUp : TrendingDown;
                 const varColor = !isValidV ? "#9ca3af" : v! > 0 ? "#059669" : v! < 0 ? "#ef4444" : "#9ca3af";
-
-                // Stats line para la card mobile.
-                // - ambos 0  -> null (no se muestra divider ni linea)
-                // - solo uno -> string con esa metrica
-                // - ambos    -> "X tickets · Y unidades"
-                const statsLine: string | null = (() => {
-                  if (s.receipts <= 0 && s.units <= 0) return null;
-                  if (s.receipts <= 0) return `${fmtInt(s.units)} unidades`;
-                  if (s.units    <= 0) return `${fmtInt(s.receipts)} tickets`;
-                  return `${fmtInt(s.receipts)} tickets · ${fmtInt(s.units)} unidades`;
-                })();
-
                 const ChevronIcon = open ? ChevronDown : ChevronRight;
 
                 return (
                   <div key={s.branchId}>
-                    {/* MOBILE — card. Visible <640px, hidden desktop */}
-                    <div className="sal-card" onClick={() => toggle(s.branchId)}>
-                      <div className="sal-card-header">
-                        <div className="sal-card-namewrap">
-                          <ChevronIcon style={{ width: 14, height: 14, color: "#9ca3af", flexShrink: 0 }} />
-                          <span className="sal-card-name">{s.branchName}</span>
-                        </div>
-                        <span className="sal-card-total">{fmtARS(s.totalSales)}</span>
-                      </div>
-                      {statsLine && (
-                        <>
-                          <div className="sal-card-divider" />
-                          <p className="sal-card-stats">{statsLine}</p>
-                        </>
-                      )}
-                    </div>
-
-                    {/* DESKTOP — row tabla. Visible >=640px, hidden mobile */}
                     <div className="sal-row" onClick={() => toggle(s.branchId)}>
                       <ChevronIcon style={{ width: 16, height: 16, color: "#9ca3af" }} />
                       <span className="sal-name">{s.branchName}</span>
-                      <span className="sal-total">{fmtARS(s.totalSales)}</span>
+                      <span className="sal-total" title={fmtARS(s.totalSales)}>
+                        <span className="sal-total-mobile">{fmtAbbrev(s.totalSales)}</span>
+                        <span className="sal-total-desktop">{fmtARS(s.totalSales)}</span>
+                      </span>
                       <span className="sal-num-col sal-cell-units">{s.units > 0 ? fmtInt(s.units) : "—"}</span>
                       <span className="sal-num-col sal-cell-receipts">{s.receipts > 0 ? fmtInt(s.receipts) : "—"}</span>
                       <span className="sal-extras sal-num-col">{s.avgTicket > 0 ? fmtARS(s.avgTicket) : "—"}</span>
@@ -497,7 +459,6 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                         {isValidV ? `${v! > 0 ? "+" : ""}${v!.toFixed(1)}%` : "N/A"}
                       </span>
                     </div>
-
                     {open && <SalesDetail sales={s} />}
                   </div>
                 );
