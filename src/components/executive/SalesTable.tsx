@@ -258,6 +258,8 @@ const SALES_CSS = `
   font-size: 10px; color: #6b7280; font-weight: 500;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
+/* "TICKETS" en columna de 48px es borderline a 10px — reducimos solo header mobile. */
+.sal-head .sal-head-mobile { font-size: 9.5px; }
 .sal-head .num { text-align: right; }
 
 .sal-empty { padding: 2rem 1rem; text-align: center; color: #9ca3af; }
@@ -419,8 +421,8 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                 <span className="num sal-head-desktop">Compr.</span>
                 <span className="num sal-head-desktop">Ticket prom.</span>
                 <span className="num sal-head-desktop">vs ayer</span>
-                <span className="num sal-head-mobile">T</span>
-                <span className="num sal-head-mobile">U</span>
+                <span className="num sal-head-mobile">Tickets</span>
+                <span className="num sal-head-mobile">Unid.</span>
               </div>
 
               {sorted.map((s) => {
