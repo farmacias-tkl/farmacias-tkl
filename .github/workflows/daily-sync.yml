@@ -6,12 +6,11 @@ on:
     # - el primer run que detecta el archivo actualizado escribe los snapshots
     # - los siguientes skipean si modifiedTime no cambió, o reprocesan si el
     #   admin corrigió el Excel entre runs
-    # Domingos: el script Python (03:00) genera CSV con ventas del sábado.
-    # El sync los levanta y carga en Neon. Saldos bancarios quedan STALE
-    # automáticamente (admin no sube Excel) sin escribir en DB.
-    - cron: "0 12 * * *"   # 09:00 ART — primera lectura
-    - cron: "30 12 * * *"  # 09:30 ART — segunda lectura (corrige bancos cargados tarde)
-    - cron: "0 13 * * *"   # 10:00 ART — tercera lectura (margen para admin tardío)
+    # Domingos: saldos bancarios quedan STALE automáticamente (admin no sube
+    # Excel) sin escribir en DB. Ventas del sábado vienen de SIAF (Python).
+    - cron: "0 7 * * *"    # 04:00 ART — ventas del día anterior (CSV SIAF ya subido)
+    - cron: "50 11 * * *"  # 08:50 ART — primera lectura de saldos bancarios
+    - cron: "30 12 * * *"  # 09:30 ART — segunda lectura saldos (margen para admin tardío)
   workflow_dispatch:
     inputs:
       source:
