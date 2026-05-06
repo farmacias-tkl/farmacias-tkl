@@ -7,15 +7,6 @@ const fmtARS = (n: number) =>
   new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
 const fmtInt = (n: number) => new Intl.NumberFormat("es-AR").format(n);
 
-// Formato abreviado para mobile: 105.530.538 -> "105.5M", 432.678 -> "433K"
-// Threshold 999_500 evita "1000K" y bumpea a "1.0M" cuando corresponde.
-function fmtAbbrev(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000)   return `${Math.round(n / 1_000)}K`;
-  return Math.round(n).toString();
-}
-
 // ─── Tipos para rawData SIAF ────────────────────────────────────
 interface SiafVendorRaw { codigo: string; nombre: string; ventas: number; tickets: number; descuentos: number; unidades?: number; }
 interface SiafObraSocialRaw { codigo: string; nombre: string; ventas_bruto: number; descuentos: number; ventas_neto: number; tickets?: number; unidades?: number; }
@@ -68,9 +59,9 @@ const SALES_CSS = `
    Desktop: 7 cols (chevron | sucursal | ventas-full | unid | compr | ticket-prom | vs-ayer). */
 .sal-row {
   display: grid;
-  grid-template-columns: 20px 1fr 68px 52px 64px;
-  align-items: center; gap: 0.5rem;
-  padding: 0.75rem 1rem;
+  grid-template-columns: 20px minmax(0, 1fr) auto 48px 54px;
+  align-items: center; gap: 0.375rem;
+  padding: 0.625rem 0.875rem;
   cursor: pointer;
   border-bottom: 1px solid #f3f4f6;
   transition: background 0.1s;
@@ -79,11 +70,11 @@ const SALES_CSS = `
 .sal-row:hover { background: #f9fafb; }
 .sal-row:last-child { border-bottom: none; }
 .sal-name {
-  font-size: 14px; font-weight: 600; color: #111827;
+  font-size: 13px; font-weight: 600; color: #111827;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
 }
 .sal-total {
-  font-size: 14px; font-weight: 700; color: #1E2D5A;
+  font-size: 13px; font-weight: 700; color: #1E2D5A;
   white-space: nowrap; text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -98,7 +89,7 @@ const SALES_CSS = `
 
 .sal-extras { display: none; }
 .sal-num-col {
-  text-align: right; font-size: 12px; color: #6b7280;
+  text-align: right; font-size: 11px; color: #6b7280;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
@@ -110,20 +101,22 @@ const SALES_CSS = `
   .sal-cell-units    { order: 2; }
 }
 
-/* Visibilidad mobile/desktop para celdas de header y total ventas. */
+/* Visibilidad mobile/desktop para celdas de header. */
 .sal-head-desktop  { display: none; }
 .sal-head-mobile   { display: block; }
-.sal-total-mobile  { display: inline; }
-.sal-total-desktop { display: none; }
 
 @media (min-width: 640px) {
-  .sal-row    { grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr; gap: 1rem; }
-  .sal-extras { display: block; }
-  .sal-var    { display: inline-flex; }
-  .sal-head-desktop  { display: block; }
-  .sal-head-mobile   { display: none; }
-  .sal-total-mobile  { display: none; }
-  .sal-total-desktop { display: inline; }
+  .sal-row {
+    grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr;
+    gap: 1rem; padding: 0.75rem 1rem;
+  }
+  .sal-name    { font-size: 14px; }
+  .sal-total   { font-size: 14px; }
+  .sal-num-col { font-size: 12px; }
+  .sal-extras  { display: block; }
+  .sal-var     { display: inline-flex; }
+  .sal-head-desktop { display: block; }
+  .sal-head-mobile  { display: none; }
 }
 
 /* Detalle expandido */
@@ -248,9 +241,9 @@ const SALES_CSS = `
 /* Encabezado tabla — visible mobile y desktop con grids distintos. */
 .sal-head {
   display: grid;
-  grid-template-columns: 20px 1fr 68px 52px 64px;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  grid-template-columns: 20px minmax(0, 1fr) auto 48px 54px;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
   background: #f9fafb;
   border-bottom: 1px solid #e5e7eb;
   align-items: center;
@@ -258,7 +251,7 @@ const SALES_CSS = `
 @media (min-width: 640px) {
   .sal-head {
     grid-template-columns: 20px 25fr 18fr 12fr 12fr 18fr 15fr;
-    gap: 1rem;
+    gap: 1rem; padding: 0.5rem 1rem;
   }
 }
 .sal-head span {
@@ -443,10 +436,7 @@ export function SalesTable({ sales }: { sales: BranchSales[] }) {
                     <div className="sal-row" onClick={() => toggle(s.branchId)}>
                       <ChevronIcon style={{ width: 16, height: 16, color: "#9ca3af" }} />
                       <span className="sal-name">{s.branchName}</span>
-                      <span className="sal-total" title={fmtARS(s.totalSales)}>
-                        <span className="sal-total-mobile">{fmtAbbrev(s.totalSales)}</span>
-                        <span className="sal-total-desktop">{fmtARS(s.totalSales)}</span>
-                      </span>
+                      <span className="sal-total" title={fmtARS(s.totalSales)}>{fmtARS(s.totalSales)}</span>
                       <span className="sal-num-col sal-cell-units">{s.units > 0 ? fmtInt(s.units) : "—"}</span>
                       <span className="sal-num-col sal-cell-receipts">{s.receipts > 0 ? fmtInt(s.receipts) : "—"}</span>
                       <span className="sal-extras sal-num-col">{s.avgTicket > 0 ? fmtARS(s.avgTicket) : "—"}</span>
