@@ -98,7 +98,7 @@ FOLDER_MAP: dict[str, str] = {
 CODIGOS_EXCLUIR: set[str] = {
     "NDB", "REM", "MCC", "MOS", "REC",
     "BAJ", "ALT", "PRE", "PED", "COM", "REA",
-    "OP",  "OI",  "OTR", "IMD", "IME", "WHA",
+    "OP",  "OI",  "OTR", "IMD", "IME",
 }
 
 # =============================================================================
@@ -124,8 +124,8 @@ log = logging.getLogger("tkl-sync")
 def es_codigo_venta(codigo: str) -> bool:
     """True si el código identifica un comprobante de venta."""
     c = codigo.strip().upper()
-    # Códigos fijos conocidos
-    if c in {"DET", "TKT", "FAC", "MOV", "NOV"}:
+    # Códigos fijos conocidos (WHA = comprobantes de WhatsApp)
+    if c in {"DET", "TKT", "FAC", "MOV", "NOV", "WHA"}:
         return True
     # Punto de venta numérico: 001-999
     if len(c) == 3 and c.isdigit():
@@ -466,8 +466,8 @@ def process_branch(
                     v["tickets"].add(numero)
                 v["descuentos"] += desc
 
-            # Por obra social (vacío = "" → renderea como "PAR")
-            o = os_agg[ocode]
+            # Por obra social (vacío → "PAR" para consistencia con merge DETMOV)
+            o = os_agg[ocode or "PAR"]
             o["ventas_bruto"] += bruto
             o["descuentos"]   += desc
             if numero is not None:
@@ -517,12 +517,8 @@ def process_branch(
             })
 
         for code, agg in os_agg.items():
-            if code:
-                codigo_out = code
-                nombre_out = os_map.get(code, code)
-            else:
-                codigo_out = "PAR"
-                nombre_out = "PARTICULAR"
+            codigo_out = code
+            nombre_out = "PARTICULAR" if code == "PAR" else os_map.get(code, code)
             neto_os = agg["ventas_bruto"] - agg["descuentos"]
             ossocial_rows.append({
                 "sucursal":     sucursal,
@@ -670,8 +666,8 @@ def read_detmov_os_units(
     cpbt_meta_by_numero: dict[str, dict],
 ) -> dict[str, dict[str, int]]:
     """Suma CANTIDAD por (fecha, código_obra_social). Misma lógica que
-    read_detmov_units pero usa meta["os"]; ignora ventas particulares
-    (meta["os"] vacío)."""
+    read_detmov_units pero usa meta["os"]; ventas particulares
+    (meta["os"] vacío) se agrupan bajo "PAR"."""
     path = folder / "DETMOV.DBF"
     if not path.exists():
         return {}
@@ -698,10 +694,7 @@ def read_detmov_os_units(
         if mismatch:
             date_mismatches += 1
 
-        os_code = meta["os"]
-        if not os_code:
-            ignored += 1
-            continue
+        os_code = meta["os"] or "PAR"
 
         cantidad_raw = safe_float(r.get("CANTIDAD")) or 0
         cantidad = int(abs(cantidad_raw)) * meta["sign"]
