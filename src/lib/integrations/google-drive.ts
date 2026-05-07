@@ -21,7 +21,7 @@ function getDriveClient() {
 export async function listExcelFiles(folderId: string): Promise<DriveFile[]> {
   const drive = getDriveClient();
   const response = await drive.files.list({
-    q: `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false`,
+    q: `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and not name contains '~$' and trashed=false`,
     fields: "files(id, name, modifiedTime, size)",
     orderBy: "modifiedTime desc",
     pageSize: 10,
