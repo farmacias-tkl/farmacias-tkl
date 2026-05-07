@@ -54,6 +54,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 import time
 from collections import defaultdict
@@ -62,6 +63,16 @@ from pathlib import Path
 from typing import Any, Callable
 
 from dbfread import DBF
+
+# Lazy import de libs Google Drive: el script sigue funcionando si no estan
+# instaladas (fallback a solo escribir en disco con warning).
+try:
+    from googleapiclient.discovery import build as _drive_build
+    from googleapiclient.http import MediaFileUpload
+    from google.oauth2 import service_account
+    _DRIVE_LIBS_AVAILABLE = True
+except ImportError:
+    _DRIVE_LIBS_AVAILABLE = False
 
 # =============================================================================
 # CONFIGURACIÓN — editar solo si cambian rutas del servidor
@@ -75,6 +86,14 @@ DESTINO_HISTORICO = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico")
 DESTINO_DIARIO    = Path(r"\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario")
 CONTROL_FILE      = Path(r"C:\TKL\siaf_sync\tkl_sync_control.json")
 LOG_PATH          = Path(r"C:\TKL\siaf_sync\tkl_sync.log")
+
+# IDs de carpetas Google Drive — destino del upload directo (sin cliente
+# Drive de escritorio). El script elige una u otra segun is_historical_run.
+DRIVE_FOLDER_ID_HISTORICO = "1_g-SthP24Nb3JfCKWQvQqmnjWwg-akeQ"
+DRIVE_FOLDER_ID_DIARIO    = "12ar34mlgGJlFaOks-7tEgifby4HrAhvC"
+# Scope full drive: necesario para poder pisar archivos creados por humanos
+# en historico/. Con drive.file solo veriamos los que cree esta SA.
+DRIVE_SCOPES              = ["https://www.googleapis.com/auth/drive"]
 
 DBF_ENCODING = "cp1252"
 
@@ -756,6 +775,79 @@ def write_csv_simple(path: Path, rows: list[dict], fieldnames: list[str]) -> int
             writer.writerow({fn: ("" if r.get(fn) is None else str(r[fn])) for fn in fieldnames})
     return len(rows)
 
+# =============================================================================
+# UPLOAD DIRECTO A GOOGLE DRIVE
+# =============================================================================
+# Reemplaza la dependencia del cliente Drive de escritorio en el servidor.
+# Si no hay credenciales o las libs google no estan instaladas, el script
+# sigue funcionando en modo solo-disco (con warning).
+
+def load_drive_credentials():
+    """Lee SA desde env GOOGLE_SERVICE_ACCOUNT_JSON o credentials.json junto
+    al script. Devuelve None si no hay credenciales validas — el caller
+    interpreta None como "Drive deshabilitado" y sigue solo a disco."""
+    if not _DRIVE_LIBS_AVAILABLE:
+        return None
+
+    env_value = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if env_value:
+        try:
+            info = json.loads(env_value)
+            return service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPES)
+        except Exception as e:
+            log.warning(f"GOOGLE_SERVICE_ACCOUNT_JSON invalido: {e}")
+
+    cred_file = Path(__file__).parent / "credentials.json"
+    if cred_file.exists():
+        try:
+            return service_account.Credentials.from_service_account_file(str(cred_file), scopes=DRIVE_SCOPES)
+        except Exception as e:
+            log.warning(f"credentials.json no parseable: {e}")
+
+    return None
+
+
+def build_drive_service():
+    """Construye el cliente Drive v3. Devuelve None si no hay creds o las
+    libs no estan instaladas — modo solo-disco se activa transparente."""
+    creds = load_drive_credentials()
+    if creds is None:
+        return None
+    try:
+        return _drive_build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        log.warning(f"No se pudo construir cliente Drive: {e}")
+        return None
+
+
+def upload_csv_to_drive(service, local_path: Path, folder_id: str) -> bool:
+    """Sube o actualiza un CSV en Drive (match por nombre + parent). Devuelve
+    True si OK, False si falla. Errores no abortan el sync — solo log."""
+    if service is None:
+        return False
+    name = local_path.name
+    try:
+        q = f"name = '{name}' and '{folder_id}' in parents and trashed = false"
+        resp = service.files().list(
+            q=q, fields="files(id, name)", spaces="drive", pageSize=1,
+        ).execute()
+        items = resp.get("files", [])
+        media = MediaFileUpload(str(local_path), mimetype="text/csv", resumable=False)
+        if items:
+            fid = items[0]["id"]
+            service.files().update(fileId=fid, media_body=media).execute()
+            log.info(f"  Drive UPDATE {name} -> {fid}")
+        else:
+            created = service.files().create(
+                body={"name": name, "parents": [folder_id]},
+                media_body=media, fields="id",
+            ).execute()
+            log.info(f"  Drive CREATE {name} -> {created.get('id')}")
+        return True
+    except Exception as e:
+        log.warning(f"  Drive upload fallo para {name}: {e}")
+        return False
+
 VENTAS_FIELDS = [
     "sucursal", "fecha", "total_ventas", "total_tickets", "ticket_promedio",
     "total_unidades", "ventas_efectivo", "ventas_tarjeta", "ventas_obra_social",
@@ -812,6 +904,15 @@ def main() -> None:
     log.info(f"Modo: {'HISTÓRICO (acumulativo)' if is_historical_run else 'DIARIO (sobreescribe)'}")
     log.info(f"Destino: {output_dir}")
 
+    # Drive upload: inicializar una vez. None = modo solo-disco (sin libs o
+    # sin credenciales). Cada CSV se sube despues de escribirlo.
+    drive_folder_id = DRIVE_FOLDER_ID_HISTORICO if is_historical_run else DRIVE_FOLDER_ID_DIARIO
+    drive_service = build_drive_service()
+    if drive_service is None:
+        log.warning("Drive upload DESHABILITADO (libs no instaladas o sin credenciales); CSV solo a disco.")
+    else:
+        log.info(f"Drive upload activo (folder_id={drive_folder_id})")
+
     # Validar carpeta destino accesible
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -866,25 +967,26 @@ def main() -> None:
                 ok_count += 1
                 continue
 
+            ventas_path     = output_dir / f"{sucursal}_ventas.csv"
+            vendedores_path = output_dir / f"{sucursal}_vendedores.csv"
+            ossocial_path   = output_dir / f"{sucursal}_ossocial.csv"
+
             if is_historical_run:
-                n_ventas     = merge_and_write_csv(output_dir / f"{sucursal}_ventas.csv",
-                                                   ventas_rows, VENTAS_FIELDS, ["fecha"])
-                n_vendedores = merge_and_write_csv(output_dir / f"{sucursal}_vendedores.csv",
-                                                   vendedores_rows, VENDEDORES_FIELDS,
-                                                   ["fecha", "codigo_vendedor"])
-                n_ossocial   = merge_and_write_csv(output_dir / f"{sucursal}_ossocial.csv",
-                                                   ossocial_rows, OSSOCIAL_FIELDS,
-                                                   ["fecha", "codigo_os"])
+                n_ventas     = merge_and_write_csv(ventas_path,     ventas_rows,     VENTAS_FIELDS,     ["fecha"])
+                n_vendedores = merge_and_write_csv(vendedores_path, vendedores_rows, VENDEDORES_FIELDS, ["fecha", "codigo_vendedor"])
+                n_ossocial   = merge_and_write_csv(ossocial_path,   ossocial_rows,   OSSOCIAL_FIELDS,   ["fecha", "codigo_os"])
             else:
-                n_ventas     = write_csv_simple(output_dir / f"{sucursal}_ventas.csv",
-                                                ventas_rows, VENTAS_FIELDS)
-                n_vendedores = write_csv_simple(output_dir / f"{sucursal}_vendedores.csv",
-                                                vendedores_rows, VENDEDORES_FIELDS)
-                n_ossocial   = write_csv_simple(output_dir / f"{sucursal}_ossocial.csv",
-                                                ossocial_rows, OSSOCIAL_FIELDS)
+                n_ventas     = write_csv_simple(ventas_path,     ventas_rows,     VENTAS_FIELDS)
+                n_vendedores = write_csv_simple(vendedores_path, vendedores_rows, VENDEDORES_FIELDS)
+                n_ossocial   = write_csv_simple(ossocial_path,   ossocial_rows,   OSSOCIAL_FIELDS)
 
             log.info(f"[{sucursal}] ✓ {len(processed)} día(s) procesados | "
                      f"ventas.csv={n_ventas}, vendedores.csv={n_vendedores}, ossocial.csv={n_ossocial}")
+
+            # Subir los 3 CSV a Drive (no aborta si falla — solo logea por archivo)
+            if drive_service is not None:
+                for p in (ventas_path, vendedores_path, ossocial_path):
+                    upload_csv_to_drive(drive_service, p, drive_folder_id)
 
             if force_date is None:
                 max_yyyymmdd = max(processed)
