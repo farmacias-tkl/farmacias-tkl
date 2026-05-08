@@ -66,15 +66,10 @@ export default async function ExecutivePage({
     }
     isStaleBalances = true;
   }
-  // Misma regla de "stale legítimo" que ventas: si el último snapshot es de
-  // AYER (TZ ART) o posterior, NO es stale (es lo más reciente posible un
-  // domingo o después de feriado). Solo marcar stale si es anterior a ayer.
-  if (isStaleBalances && balances.length > 0) {
-    const lastBalanceDate = balances[0].snapshotDate;
-    if (lastBalanceDate.getTime() >= yesterdayArt.getTime()) {
-      isStaleBalances = false;
-    }
-  }
+  // Saldos: Administración carga manualmente todos los días (incluso fin de
+  // semana). El snapshot solo es "fresco" si es de HOY ART — sin gracia de
+  // ayer. La query inicial filtra por snapshotDate=today, así que basta con
+  // el flag que ya quedó marcado en el fallback.
 
   const salesBranchFilter = {
     ...(branchId !== "ALL" && { branchId }),
