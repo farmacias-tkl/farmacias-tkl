@@ -21,12 +21,16 @@ function getDriveClient() {
 export async function listExcelFiles(folderId: string): Promise<DriveFile[]> {
   const drive = getDriveClient();
   const response = await drive.files.list({
-    q: `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and not name contains '~$' and trashed=false`,
+    q: `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false`,
     fields: "files(id, name, modifiedTime, size)",
     orderBy: "modifiedTime desc",
     pageSize: 10,
   });
-  return (response.data.files ?? []) as DriveFile[];
+  // Filtrado client-side de locks de Excel (~$*.xlsx). No se hace en la query
+  // Drive porque el operador `contains` tokeniza el name y descarta `~` y `$`,
+  // dejando la clausula efectivamente como no-op.
+  const files = (response.data.files ?? []) as DriveFile[];
+  return files.filter((f) => !f.name.startsWith("~$"));
 }
 
 export async function getLatestExcelFile(folderId: string) {
