@@ -2,15 +2,16 @@ name: Daily Sync — Saldos Bancarios
 
 on:
   schedule:
-    # Tres ejecuciones por día (todos los días) con idempotencia por modifiedTime:
-    # - el primer run que detecta el archivo actualizado escribe los snapshots
-    # - los siguientes skipean si modifiedTime no cambió, o reprocesan si el
-    #   admin corrigió el Excel entre runs
+    # Respaldos del Task Scheduler del servidor (que dispara los syncs reales
+    # vía webhook). GitHub Actions corre 30 min después como red de seguridad
+    # por si el server quedó apagado, sin red, o el Task Scheduler falló.
+    # Idempotencia por modifiedTime: si el sync principal ya escribió, el
+    # respaldo skipea (modifiedTime no cambió) o reprocesa si el admin
+    # corrigió el Excel entre runs.
     # Domingos: saldos bancarios quedan STALE automáticamente (admin no sube
     # Excel) sin escribir en DB. Ventas del sábado vienen de SIAF (Python).
-    - cron: "0 7 * * *"    # 04:00 ART — ventas del día anterior (CSV SIAF ya subido)
-    - cron: "50 11 * * *"  # 08:50 ART — primera lectura de saldos bancarios
-    - cron: "30 12 * * *"  # 09:30 ART — segunda lectura saldos (margen para admin tardío)
+    - cron: "30 7 * * *"   # 04:30 ART — respaldo ventas (Task Scheduler principal: 04:00)
+    - cron: "0 12 * * *"   # 09:00 ART — respaldo saldos (Task Scheduler principal: 08:50)
   workflow_dispatch:
     inputs:
       source:
