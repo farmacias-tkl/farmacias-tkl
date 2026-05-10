@@ -336,19 +336,7 @@ export function ExecutiveDashboard({ data, user, children }: Props) {
           </div>
 
           {/* Secciones */}
-          {/* Línea discreta con la fecha del último cierre de saldos cuando NO
-              está stale. Si está stale, el AlertBanner ya muestra el mensaje. */}
           <BalanceTable balances={data.balancesByBranch} />
-          {!data.isStaleBalances && data.lastBalanceDate && (
-            <p style={{ fontSize: 11, color: "#6b7280", margin: "-0.5rem 0 0 0.25rem" }}>
-              Último cierre saldos: {new Date(data.lastBalanceDate).toLocaleDateString("es-AR")}
-            </p>
-          )}
-          {!data.isStaleSales && data.lastSalesDate && (
-            <p style={{ fontSize: 11, color: "#6b7280", margin: "-0.5rem 0 0 0.25rem" }}>
-              Último cierre: {new Date(data.lastSalesDate).toLocaleDateString("es-AR")}
-            </p>
-          )}
           <SalesTable   sales={data.salesByBranch} />
           {children}
         </main>
