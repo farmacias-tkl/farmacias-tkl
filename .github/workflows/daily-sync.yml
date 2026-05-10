@@ -12,6 +12,8 @@ on:
     # Excel) sin escribir en DB. Ventas del sábado vienen de SIAF (Python).
     - cron: "30 7 * * *"   # 04:30 ART — respaldo ventas (Task Scheduler principal: 04:00)
     - cron: "0 12 * * *"   # 09:00 ART — respaldo saldos (Task Scheduler principal: 08:50)
+    - cron: "30 4 * * *"   # prueba — esperado 01:30 ART si UTC, o 04:30 ART si bug
+    - cron: "55 8 * * *"   # prueba — esperado 05:55 ART si UTC, o 08:55 ART si bug
   workflow_dispatch:
     inputs:
       source:
