@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -22,6 +22,8 @@ function ClockIcon(props: any) {
   );
 }
 
+// Catálogo completo de labels. Se usa solo para mostrar registros históricos
+// (incluido LATE_NOTICE que ya no se carga desde la UI nueva).
 const ABSENCE_TYPES = [
   { value: "SICKNESS",        label: "Enfermedad" },
   { value: "PERSONAL_REASON", label: "Razon personal" },
@@ -33,6 +35,12 @@ const ABSENCE_TYPES = [
   { value: "SUSPENSION",      label: "Suspension disciplinaria" },
   { value: "OTHER",           label: "Otro" },
 ];
+
+// Tipos visibles en el formulario de Ausencia / licencia. Se excluye
+// LATE_ARRIVAL (tiene flujo dedicado) y LATE_NOTICE (deprecado en la UI).
+const ABSENCE_FORM_TYPES = ABSENCE_TYPES.filter(
+  t => t.value !== "LATE_NOTICE" && t.value !== "LATE_ARRIVAL"
+);
 
 // Combina una fecha (YYYY-MM-DD) con una hora (HH:mm) en un Date local
 function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
@@ -69,6 +77,7 @@ const baseSchema = {
   notes:               z.string().optional(),
   reasonDetail:        z.string().optional(),
   hasCertificate:      z.boolean().default(false),
+  certificateUntil:    z.string().optional(),
   notifiedAt:          z.string().optional(),
   // Solo completos cuando absenceType === LATE_ARRIVAL
   expectedArrivalTime: z.string().optional(),
@@ -99,6 +108,8 @@ export default function AusenciasPage() {
   const userBranchId = session?.user?.branchId;
 
   const [showForm,    setShowForm]    = useState(false);
+  // Tipo de evento que se está cargando. null = aún no eligió en el chooser.
+  const [flow,        setFlow]        = useState<"absence"|"lateness"|null>(null);
   const [formMode,    setFormMode]    = useState<"fixed"|"rotating">("fixed");
   const [branchFilter,setBranchFilter]= useState("");
   const [statusFilter,setStatusFilter]= useState("");
@@ -269,8 +280,33 @@ export default function AusenciasPage() {
       setFormDate(todayStr);
       setSelectedRotId(""); setSuggestedBranch(null); setOverrideBranch(false);
       setShowForm(false);
+      setFlow(null);
     },
   });
+
+  // Sincroniza valores derivados del flujo elegido para que pasen la validación
+  // de Zod sin que el usuario tenga que tipearlos.
+  //
+  //   lateness → absenceType = LATE_ARRIVAL, endDate = startDate
+  //   absence  → absenceType vacío para que el usuario lo elija
+  //
+  // Cambios posteriores de startDate dentro de lateness ya se sincronizan por
+  // los onChange de los inputs de fecha (handleFormDateChange y el del rotativo).
+  useEffect(() => {
+    if (flow === "lateness") {
+      const fixedStart = fixedForm.getValues("startDate") || todayStr;
+      const rotStart   = rotForm.getValues("startDate")   || todayStr;
+      fixedForm.setValue("absenceType", "LATE_ARRIVAL", { shouldValidate: false });
+      fixedForm.setValue("endDate",     fixedStart,     { shouldValidate: false });
+      rotForm.setValue("absenceType",   "LATE_ARRIVAL", { shouldValidate: false });
+      rotForm.setValue("endDate",       rotStart,       { shouldValidate: false });
+    } else if (flow === "absence") {
+      fixedForm.setValue("absenceType", "", { shouldValidate: false });
+      rotForm.setValue("absenceType",   "", { shouldValidate: false });
+    }
+    // flow === null: no tocar — el panel muestra el chooser
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow]);
 
   const updateStatus = async (id: string, newStatus: string) => {
     await fetch(`/api/absences/${id}`, {
@@ -295,8 +331,16 @@ export default function AusenciasPage() {
           <p className="text-sm text-gray-500 mt-0.5">{total} registros</p>
         </div>
         {canCreate && (
-          <button onClick={() => setShowForm(v => !v)} className="btn-primary">
-            <Plus className="w-4 h-4" />Registrar ausencia
+          <button
+            onClick={() => {
+              setShowForm(v => {
+                const next = !v;
+                if (next) setFlow(null);
+                return next;
+              });
+            }}
+            className="btn-primary">
+            <Plus className="w-4 h-4" />Registrar evento
           </button>
         )}
       </div>
@@ -312,6 +356,69 @@ export default function AusenciasPage() {
       {/* Formulario */}
       {showForm && (
         <div className="card p-5">
+          {/* Paso 1 — Chooser de tipo de evento */}
+          {flow === null && (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">¿Qué necesitás registrar?</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Elegí el tipo de evento.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setFlow("absence")}
+                  className="text-left rounded-xl border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50/40 active:bg-blue-50 transition-colors p-4 group">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="rounded-lg bg-blue-50 group-hover:bg-blue-100 p-2">
+                      <UserMinus className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">Ausencia / licencia</span>
+                  </div>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    El empleado no asistió al turno o estará ausente por un período.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFlow("lateness")}
+                  className="text-left rounded-xl border-2 border-gray-200 hover:border-orange-400 hover:bg-orange-50/40 active:bg-orange-50 transition-colors p-4 group">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="rounded-lg bg-orange-50 group-hover:bg-orange-100 p-2">
+                      <ClockIcon className="w-5 h-5 text-orange-600" />
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">Llegada tarde</span>
+                  </div>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    El empleado asistió, pero llegó después del horario esperado.
+                  </p>
+                </button>
+              </div>
+              <div className="flex justify-end">
+                <button type="button" onClick={() => setShowForm(false)} className="btn-secondary text-sm">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Paso 2 — Header del flujo elegido + tabs fijo/rotativa */}
+          {flow !== null && (
+          <>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setFlow(null)}
+                className="text-xs text-gray-500 hover:text-gray-800 underline"
+                aria-label="Cambiar tipo de evento">
+                ← Cambiar
+              </button>
+              <h3 className="text-sm font-semibold text-gray-900">
+                {flow === "absence" ? "Ausencia / licencia" : "Llegada tarde"}
+              </h3>
+            </div>
+          </div>
+
           {/* Tabs */}
           <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-lg w-fit">
             <button type="button" onClick={() => setFormMode("fixed")}
@@ -328,7 +435,15 @@ export default function AusenciasPage() {
 
           {/* FLUJO FIJO */}
           {formMode === "fixed" && (
-            <form onSubmit={fixedForm.handleSubmit(d => createMut.mutate(d))} className="space-y-4">
+            <form
+              onSubmit={fixedForm.handleSubmit(d => {
+                if (flow === "lateness") {
+                  d.absenceType = "LATE_ARRIVAL";
+                  d.endDate = d.startDate;
+                }
+                createMut.mutate(d);
+              })}
+              className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
                 {/* Sucursal */}
@@ -357,7 +472,9 @@ export default function AusenciasPage() {
 
                 {/* Fecha — determina qué rotativos aparecen */}
                 <div>
-                  <label className="label">Fecha de ausencia *</label>
+                  <label className="label">
+                    {flow === "lateness" ? "Fecha *" : "Fecha de ausencia *"}
+                  </label>
                   <input type="date"
                     value={formDate}
                     onChange={e => handleFormDateChange(e.target.value)}
@@ -424,34 +541,39 @@ export default function AusenciasPage() {
                   )}
                 </div>
 
-                {/* Fecha fin — separada para licencias de múltiples días */}
-                <div>
-                  <label className="label">Fecha fin *</label>
-                  <input type="date" {...fixedForm.register("endDate")}
-                    className={cn("input", fixedForm.formState.errors.endDate && "input-error")} />
-                  <p className="text-xs text-gray-400 mt-0.5">Igual al inicio si es un día. Rango si es licencia.</p>
-                </div>
+                {/* Fecha fin — solo para Ausencia / licencia */}
+                {flow === "absence" && (
+                  <div>
+                    <label className="label">Fecha fin *</label>
+                    <input type="date" {...fixedForm.register("endDate")}
+                      className={cn("input", fixedForm.formState.errors.endDate && "input-error")} />
+                    <p className="text-xs text-gray-400 mt-0.5">Igual al inicio si es un día. Rango si es licencia.</p>
+                  </div>
+                )}
+
+                {/* Selector de tipo — solo para Ausencia / licencia */}
+                {flow === "absence" && (
+                  <div>
+                    <label className="label">Tipo *</label>
+                    <select {...fixedForm.register("absenceType")} className="input">
+                      <option value="">Selecciona tipo</option>
+                      {ABSENCE_FORM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <div>
-                  <label className="label">Tipo *</label>
-                  <select {...fixedForm.register("absenceType")} className="input">
-                    <option value="">Selecciona tipo</option>
-                    {ABSENCE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label">Motivo / detalle</label>
+                  <label className="label">{flow === "lateness" ? "Motivo / observación" : "Motivo / detalle"}</label>
                   <input {...fixedForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
                 </div>
 
-                {/* Campos LATE_ARRIVAL */}
-                {fixedForm.watch("absenceType") === "LATE_ARRIVAL" && (
+                {/* Campos LATE_ARRIVAL — siempre visibles en flujo lateness */}
+                {flow === "lateness" && (
                   <LateArrivalFields form={fixedForm} />
                 )}
 
                 <div>
-                  <label className="label">Hora de aviso</label>
+                  <label className="label">Hora de aviso{flow === "lateness" ? " (opcional)" : ""}</label>
                   <input type="datetime-local" {...fixedForm.register("notifiedAt")} className="input" />
                 </div>
 
@@ -460,10 +582,21 @@ export default function AusenciasPage() {
                   <textarea {...fixedForm.register("notes")} rows={2} className="input resize-none" />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" {...fixedForm.register("hasCertificate")} id="cert-f" className="rounded" />
-                  <label htmlFor="cert-f" className="text-sm text-gray-600 cursor-pointer">Tiene certificado</label>
-                </div>
+                {/* Certificado — atributo opcional de Ausencia / licencia */}
+                {flow === "absence" && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" {...fixedForm.register("hasCertificate")} id="cert-f" className="rounded" />
+                      <label htmlFor="cert-f" className="text-sm text-gray-600 cursor-pointer">Tiene certificado</label>
+                    </div>
+                    {fixedForm.watch("hasCertificate") && (
+                      <div>
+                        <label className="label">Certificado hasta</label>
+                        <input type="date" {...fixedForm.register("certificateUntil")} className="input" />
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {createMut.isError && (
@@ -473,7 +606,7 @@ export default function AusenciasPage() {
               )}
               <div className="flex gap-2 justify-end">
                 <button type="button"
-                  onClick={() => { setShowForm(false); fixedForm.reset({ startDate: todayStr, endDate: todayStr }); setFormBranchId(""); setFormDate(todayStr); }}
+                  onClick={() => { setShowForm(false); setFlow(null); fixedForm.reset({ startDate: todayStr, endDate: todayStr }); setFormBranchId(""); setFormDate(todayStr); }}
                   className="btn-secondary">Cancelar</button>
                 <button type="submit" disabled={createMut.isPending} className="btn-primary">
                   {createMut.isPending ? "Guardando..." : "Registrar"}
@@ -484,7 +617,15 @@ export default function AusenciasPage() {
 
           {/* FLUJO ROTATIVO */}
           {formMode === "rotating" && (
-            <form onSubmit={rotForm.handleSubmit(d => createMut.mutate(d))} className="space-y-4">
+            <form
+              onSubmit={rotForm.handleSubmit(d => {
+                if (flow === "lateness") {
+                  d.absenceType = "LATE_ARRIVAL";
+                  d.endDate = d.startDate;
+                }
+                createMut.mutate(d);
+              })}
+              className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="label">Rotativa *</label>
@@ -505,17 +646,27 @@ export default function AusenciasPage() {
                 </div>
 
                 <div>
-                  <label className="label">Fecha inicio *</label>
+                  <label className="label">{flow === "lateness" ? "Fecha *" : "Fecha inicio *"}</label>
                   <input type="date" value={rotStartDate}
-                    onChange={e => { setRotStartDate(e.target.value); rotForm.setValue("startDate", e.target.value); }}
+                    onChange={e => {
+                      setRotStartDate(e.target.value);
+                      rotForm.setValue("startDate", e.target.value);
+                      // En lateness, sincronizar endDate con startDate
+                      if (flow === "lateness") {
+                        setRotEndDate(e.target.value);
+                        rotForm.setValue("endDate", e.target.value);
+                      }
+                    }}
                     className="input" />
                 </div>
-                <div>
-                  <label className="label">Fecha fin *</label>
-                  <input type="date" value={rotEndDate}
-                    onChange={e => { setRotEndDate(e.target.value); rotForm.setValue("endDate", e.target.value); }}
-                    className="input" />
-                </div>
+                {flow === "absence" && (
+                  <div>
+                    <label className="label">Fecha fin *</label>
+                    <input type="date" value={rotEndDate}
+                      onChange={e => { setRotEndDate(e.target.value); rotForm.setValue("endDate", e.target.value); }}
+                      className="input" />
+                  </div>
+                )}
 
                 {/* Sucursal impactada con detección automática */}
                 <div className="sm:col-span-2">
@@ -581,22 +732,32 @@ export default function AusenciasPage() {
                   )}
                 </div>
 
-                <div>
-                  <label className="label">Tipo *</label>
-                  <select {...rotForm.register("absenceType")} className="input">
-                    <option value="">Selecciona tipo</option>
-                    {ABSENCE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                  </select>
-                </div>
+                {/* Selector de tipo — solo para Ausencia / licencia */}
+                {flow === "absence" && (
+                  <div>
+                    <label className="label">Tipo *</label>
+                    <select {...rotForm.register("absenceType")} className="input">
+                      <option value="">Selecciona tipo</option>
+                      {ABSENCE_FORM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <div>
-                  <label className="label">Motivo</label>
+                  <label className="label">{flow === "lateness" ? "Motivo / observación" : "Motivo"}</label>
                   <input {...rotForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
                 </div>
 
-                {/* Campos LATE_ARRIVAL */}
-                {rotForm.watch("absenceType") === "LATE_ARRIVAL" && (
+                {/* Campos LATE_ARRIVAL — siempre visibles en flujo lateness */}
+                {flow === "lateness" && (
                   <LateArrivalFields form={rotForm} />
+                )}
+
+                {flow === "lateness" && (
+                  <div>
+                    <label className="label">Hora de aviso (opcional)</label>
+                    <input type="datetime-local" {...rotForm.register("notifiedAt")} className="input" />
+                  </div>
                 )}
 
                 <div className="sm:col-span-2">
@@ -604,10 +765,21 @@ export default function AusenciasPage() {
                   <textarea {...rotForm.register("notes")} rows={2} className="input resize-none" />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" {...rotForm.register("hasCertificate")} id="cert-r" className="rounded" />
-                  <label htmlFor="cert-r" className="text-sm text-gray-600 cursor-pointer">Tiene certificado</label>
-                </div>
+                {/* Certificado — atributo opcional de Ausencia / licencia */}
+                {flow === "absence" && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" {...rotForm.register("hasCertificate")} id="cert-r" className="rounded" />
+                      <label htmlFor="cert-r" className="text-sm text-gray-600 cursor-pointer">Tiene certificado</label>
+                    </div>
+                    {rotForm.watch("hasCertificate") && (
+                      <div>
+                        <label className="label">Certificado hasta</label>
+                        <input type="date" {...rotForm.register("certificateUntil")} className="input" />
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {createMut.isError && (
@@ -617,13 +789,15 @@ export default function AusenciasPage() {
               )}
               <div className="flex gap-2 justify-end">
                 <button type="button"
-                  onClick={() => { setShowForm(false); rotForm.reset({ startDate: todayStr, endDate: todayStr }); setSelectedRotId(""); setSuggestedBranch(null); setOverrideBranch(false); }}
+                  onClick={() => { setShowForm(false); setFlow(null); rotForm.reset({ startDate: todayStr, endDate: todayStr }); setSelectedRotId(""); setSuggestedBranch(null); setOverrideBranch(false); }}
                   className="btn-secondary">Cancelar</button>
                 <button type="submit" disabled={createMut.isPending} className="btn-primary">
                   {createMut.isPending ? "Guardando..." : "Registrar"}
                 </button>
               </div>
             </form>
+          )}
+          </>
           )}
         </div>
       )}
