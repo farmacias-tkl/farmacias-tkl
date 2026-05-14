@@ -71,6 +71,7 @@ enum AbsenceType {
   PERSONAL_REASON
   NO_SHOW
   LATE_NOTICE
+  LATE_ARRIVAL
   MEDICAL_LEAVE
   SPECIAL_LEAVE
   SUSPENSION
@@ -277,14 +278,38 @@ model AbsenceRecord {
   notes            String?
   branchDetectedFromAssignment Boolean @default(false)
   whatsappMessageId String?
+
+  // Solo aplican cuando absenceType === LATE_ARRIVAL.
+  // lateMinutes es derivado de los dos timestamps anteriores.
+  actualArrivalTime   DateTime?
+  expectedArrivalTime DateTime?
+  lateMinutes         Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  stateHistory AbsenceStateHistory[]
 
   @@index([employeeId])
   @@index([branchId])
   @@index([startDate, endDate])
   @@index([status])
   @@index([absenceType])
+}
+
+model AbsenceStateHistory {
+  id              String        @id @default(cuid())
+  absenceId       String
+  absence         AbsenceRecord @relation(fields: [absenceId], references: [id])
+  fromStatus      AbsenceStatus
+  toStatus        AbsenceStatus
+  changedByUserId String
+  changedBy       User          @relation(fields: [changedByUserId], references: [id])
+  changedAt       DateTime      @default(now())
+  note            String?
+
+  @@index([absenceId])
+  @@index([changedAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -382,11 +407,12 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  auditLogs      AuditLog[]
-  accessLogs     AccessLog[]
-  securityEvents SecurityEvent[]
+  accounts            Account[]
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  accessLogs          AccessLog[]
+  securityEvents      SecurityEvent[]
+  absenceStateChanges AbsenceStateHistory[]
 
   // Acceso granular al módulo ejecutivo (independiente del rol).
   // OWNER tiene acceso siempre via canViewExecutive; los demás roles

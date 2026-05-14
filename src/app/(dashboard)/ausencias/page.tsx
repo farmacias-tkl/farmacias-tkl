@@ -27,11 +27,30 @@ const ABSENCE_TYPES = [
   { value: "PERSONAL_REASON", label: "Razon personal" },
   { value: "NO_SHOW",         label: "No se presento" },
   { value: "LATE_NOTICE",     label: "Aviso tarde" },
+  { value: "LATE_ARRIVAL",    label: "Llegó tarde" },
   { value: "MEDICAL_LEAVE",   label: "Licencia medica" },
   { value: "SPECIAL_LEAVE",   label: "Licencia especial" },
   { value: "SUSPENSION",      label: "Suspension disciplinaria" },
   { value: "OTHER",           label: "Otro" },
 ];
+
+// Combina una fecha (YYYY-MM-DD) con una hora (HH:mm) en un Date local
+function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
+  if (!dateStr || !timeStr) return null;
+  const [h, m] = timeStr.split(":").map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  const d = new Date(dateStr);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+function diffMinutes(expectedTime: string, actualTime: string): number | null {
+  if (!expectedTime || !actualTime) return null;
+  const [eh, em] = expectedTime.split(":").map(Number);
+  const [ah, am] = actualTime.split(":").map(Number);
+  if (isNaN(eh) || isNaN(em) || isNaN(ah) || isNaN(am)) return null;
+  return (ah * 60 + am) - (eh * 60 + em);
+}
 
 const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
   REPORTED:     { label: "Reportada",     color: "bg-yellow-50 text-yellow-800 border-yellow-200", icon: ClockIcon },
@@ -44,13 +63,16 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
 const todayStr = new Date().toISOString().split("T")[0];
 
 const baseSchema = {
-  startDate:      z.string().min(1, "Obligatoria"),
-  endDate:        z.string().min(1, "Obligatoria"),
-  absenceType:    z.string().min(1, "Obligatorio"),
-  notes:          z.string().optional(),
-  reasonDetail:   z.string().optional(),
-  hasCertificate: z.boolean().default(false),
-  notifiedAt:     z.string().optional(),
+  startDate:           z.string().min(1, "Obligatoria"),
+  endDate:             z.string().min(1, "Obligatoria"),
+  absenceType:         z.string().min(1, "Obligatorio"),
+  notes:               z.string().optional(),
+  reasonDetail:        z.string().optional(),
+  hasCertificate:      z.boolean().default(false),
+  notifiedAt:          z.string().optional(),
+  // Solo completos cuando absenceType === LATE_ARRIVAL
+  expectedArrivalTime: z.string().optional(),
+  actualArrivalTime:   z.string().optional(),
 };
 
 const fixedSchema = z.object({
@@ -211,10 +233,27 @@ export default function AusenciasPage() {
 
   const createMut = useMutation({
     mutationFn: async (data: FixedForm | RotatingForm) => {
+      // Si es LATE_ARRIVAL, combinar startDate + horas en ISO timestamps
+      const payload: any = { ...data };
+      if (data.absenceType === "LATE_ARRIVAL") {
+        const expectedDt = combineDateAndTime(data.startDate, data.expectedArrivalTime ?? "");
+        const actualDt   = combineDateAndTime(data.startDate, data.actualArrivalTime ?? "");
+        if (!expectedDt || !actualDt) {
+          throw new Error("Llegó tarde requiere hora esperada y hora real");
+        }
+        if (actualDt <= expectedDt) {
+          throw new Error("La hora real debe ser posterior a la hora esperada");
+        }
+        payload.expectedArrivalTime = expectedDt.toISOString();
+        payload.actualArrivalTime   = actualDt.toISOString();
+      } else {
+        delete payload.expectedArrivalTime;
+        delete payload.actualArrivalTime;
+      }
       const res = await fetch("/api/absences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error");
@@ -406,6 +445,11 @@ export default function AusenciasPage() {
                   <input {...fixedForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
                 </div>
 
+                {/* Campos LATE_ARRIVAL */}
+                {fixedForm.watch("absenceType") === "LATE_ARRIVAL" && (
+                  <LateArrivalFields form={fixedForm} />
+                )}
+
                 <div>
                   <label className="label">Hora de aviso</label>
                   <input type="datetime-local" {...fixedForm.register("notifiedAt")} className="input" />
@@ -550,6 +594,11 @@ export default function AusenciasPage() {
                   <input {...rotForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
                 </div>
 
+                {/* Campos LATE_ARRIVAL */}
+                {rotForm.watch("absenceType") === "LATE_ARRIVAL" && (
+                  <LateArrivalFields form={rotForm} />
+                )}
+
                 <div className="sm:col-span-2">
                   <label className="label">Observaciones</label>
                   <textarea {...rotForm.register("notes")} rows={2} className="input resize-none" />
@@ -670,6 +719,33 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
 
       {expanded && (
         <div className="px-4 pb-3 border-t border-gray-100 pt-3 bg-gray-50/50">
+          {a.absenceType === "LATE_ARRIVAL" && (a.expectedArrivalTime || a.actualArrivalTime) && (
+            <div className="flex flex-wrap items-center gap-3 mb-3 text-xs">
+              {a.expectedArrivalTime && (
+                <span className="text-gray-600">
+                  Esperada:{" "}
+                  <span className="font-medium text-gray-800">
+                    {new Date(a.expectedArrivalTime).toLocaleTimeString("es-AR",
+                      { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </span>
+              )}
+              {a.actualArrivalTime && (
+                <span className="text-gray-600">
+                  Real:{" "}
+                  <span className="font-medium text-gray-800">
+                    {new Date(a.actualArrivalTime).toLocaleTimeString("es-AR",
+                      { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </span>
+              )}
+              {typeof a.lateMinutes === "number" && (
+                <span className="font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded">
+                  {a.lateMinutes} min de demora
+                </span>
+              )}
+            </div>
+          )}
           {a.reasonDetail && <p className="text-xs text-gray-600 mb-1">Motivo: {a.reasonDetail}</p>}
           {a.notes && <p className="text-xs text-gray-600 italic mb-3">{a.notes}</p>}
           {canJustify && a.status !== "CLOSED" && (
@@ -697,5 +773,50 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
         </div>
       )}
     </div>
+  );
+}
+
+function LateArrivalFields({ form }: { form: any }) {
+  const expected = form.watch("expectedArrivalTime") ?? "";
+  const actual   = form.watch("actualArrivalTime") ?? "";
+  const minutes  = diffMinutes(expected, actual);
+  const valid    = minutes !== null && minutes > 0;
+  const invalid  = expected && actual && minutes !== null && minutes <= 0;
+
+  return (
+    <>
+      <div>
+        <label className="label">Hora esperada *</label>
+        <input
+          type="time"
+          {...form.register("expectedArrivalTime")}
+          className={cn("input", invalid && "input-error")}
+        />
+      </div>
+      <div>
+        <label className="label">Hora real de llegada *</label>
+        <input
+          type="time"
+          {...form.register("actualArrivalTime")}
+          className={cn("input", invalid && "input-error")}
+        />
+      </div>
+      <div className="sm:col-span-2">
+        {valid && (
+          <div className="inline-flex items-center gap-2 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
+            <ClockIcon className="w-4 h-4 text-orange-600" />
+            <span className="text-sm font-semibold text-orange-800">
+              {minutes} {minutes === 1 ? "minuto" : "minutos"} de demora
+            </span>
+          </div>
+        )}
+        {invalid && (
+          <p className="error-msg">La hora real debe ser posterior a la hora esperada.</p>
+        )}
+        {!expected && !actual && (
+          <p className="text-xs text-gray-400">Cargá ambas horas para calcular la demora.</p>
+        )}
+      </div>
+    </>
   );
 }

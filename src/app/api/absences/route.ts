@@ -11,7 +11,7 @@ import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
 
 const ABSENCE_TYPES = ["SICKNESS","PERSONAL_REASON","NO_SHOW","LATE_NOTICE",
-  "MEDICAL_LEAVE","SPECIAL_LEAVE","SUSPENSION","OTHER"] as const;
+  "LATE_ARRIVAL","MEDICAL_LEAVE","SPECIAL_LEAVE","SUSPENSION","OTHER"] as const;
 
 const createSchema = z.object({
   employeeId:                   z.string().min(1),
@@ -25,6 +25,10 @@ const createSchema = z.object({
   certificateUntil:             z.string().optional().nullable().transform(d => d ? new Date(d) : null),
   notifiedAt:                   z.string().optional().nullable().transform(d => d ? new Date(d) : null),
   branchDetectedFromAssignment: z.boolean().default(false),
+  // Solo aplican cuando absenceType === LATE_ARRIVAL
+  expectedArrivalTime:          z.string().optional().nullable().transform(d => d ? new Date(d) : null),
+  actualArrivalTime:            z.string().optional().nullable().transform(d => d ? new Date(d) : null),
+  lateMinutes:                  z.number().int().optional().nullable(),
 });
 
 function enrichAbsence(a: any) {
@@ -124,6 +128,28 @@ export async function POST(req: NextRequest) {
       { error: "La fecha fin no puede ser anterior al inicio" },
       { status: 400 }
     );
+  }
+
+  // Validación específica para LATE_ARRIVAL
+  if (data.absenceType === "LATE_ARRIVAL") {
+    if (!data.expectedArrivalTime || !data.actualArrivalTime) {
+      return NextResponse.json(
+        { error: "Llegó tarde requiere hora esperada y hora real de llegada" },
+        { status: 400 }
+      );
+    }
+    if (data.actualArrivalTime <= data.expectedArrivalTime) {
+      return NextResponse.json(
+        { error: "La hora real debe ser posterior a la hora esperada" },
+        { status: 400 }
+      );
+    }
+    // Calcular lateMinutes si no vino explícito
+    if (data.lateMinutes == null) {
+      data.lateMinutes = Math.round(
+        (data.actualArrivalTime.getTime() - data.expectedArrivalTime.getTime()) / 60000
+      );
+    }
   }
 
   // BRANCH_MANAGER solo puede registrar en su sucursal
