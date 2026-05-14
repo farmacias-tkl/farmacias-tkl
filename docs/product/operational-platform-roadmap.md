@@ -725,6 +725,7 @@ Dashboard → Botón flotante → /api/ai/query → Consulta Neon → Claude API
 | **Drive como buffer intermedio** | SIAF no está expuesto a internet. Drive desacopla el servidor interno de Vercel. | Abril 2026 |
 | **Idempotencia por `modifiedTime`** | Permite reprocesar si el admin corrige el archivo. Idempotencia por fecha de procesamiento perdería correcciones. | Abril 2026 |
 | **Simplicidad sobre microservicios** | Velocidad de desarrollo y operación real. Escalar cuando el problema lo justifique, no antes. | Abril 2026 |
+| **Eliminación de roles requiere migración previa de usuarios** | En producción, antes de remover un valor del enum `UserRole` (u otro enum con datos), se debe primero migrar todos los usuarios afectados a un rol válido. `prisma db push --accept-data-loss` solo permite cambios destructivos al schema, no migra filas existentes. En entornos local/dev se puede limpiar manualmente; en producción nunca. | Mayo 2026 |
 
 ---
 
@@ -881,6 +882,7 @@ Registro de cambios relevantes en infraestructura, arquitectura y decisiones té
 
 | Fecha | Cambio | Impacto |
 |---|---|---|
+| Mayo 2026 | Drift local resuelto: enum `UserRole` ya no incluía `CO_SUPERVISOR` en el schema, pero la DB local sí. Existía un único usuario dummy con ese rol; se eliminó para sincronizar la DB local con el schema actual. Acción aplicada solo en entorno local/dev. | El rol `CO_SUPERVISOR` ya estaba removido del modelo funcional. Se establece regla en ADR: en producción, cualquier eliminación de rol del enum requiere migrar previamente los usuarios afectados a un rol válido. |
 | Mayo 2026 | Task Scheduler reemplaza GitHub Actions como disparador principal de sync | Mejora confiabilidad horaria. GitHub Actions queda como respaldo. |
 | Mayo 2026 | `SYNC_WEBHOOK_SECRET` rotado | Seguridad. Actualizar en Vercel y GitHub Actions en simultáneo. |
 | Mayo 2026 | Lógica stale de saldos cambiada: sin gracia de "ayer es OK" | Saldos ahora requieren datos de hoy. Banner aparece fines de semana. |
