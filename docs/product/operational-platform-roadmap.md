@@ -107,7 +107,7 @@ El sistema opera en farmacias reales, con personal en el piso, móviles de gama 
 | `Permission` | Permiso granular del Universo B | ✅ Implementado |
 | `PositionPermission` | Asignación de permiso a puesto con scope | ✅ Implementado |
 | `EmployeeBranchAssignment` | Asignación de empleado a sucursal (fija o rotativa) | ✅ Implementado |
-| `AbsenceRecord` | Registro de ausencia o suspensión | ✅ Implementado (parcial) |
+| `AbsenceRecord` | Registro de ausencia o suspensión | ✅ Implementado |
 | `ActionPlan` | Plan de acción disciplinario | ✅ Implementado |
 | `OvertimeRecord` | Registro de horas extras | ✅ Implementado |
 | `VacationRequest` | Solicitud de vacaciones | 🚧 Pendiente |
@@ -370,7 +370,7 @@ Los encargados operan desde el piso de la farmacia con conexión móvil variable
 
 | Módulo | Estado funcional | Estado técnico |
 |---|---|---|
-| Ausencias | ⚠️ Parcial (faltan tipos y flujos) | ⚠️ Schema parcial, UI parcial |
+| Ausencias | ✅ En uso productivo | ✅ Schema, UI y APIs completos. Faltan adjuntos de certificados y aprobación formal |
 | Planes de acción | ✅ En uso productivo | ✅ Backend, UI, PDF completos |
 | Horas extras | ✅ En uso productivo | ✅ Backend, UI, API completos |
 | Rotativas | ✅ En uso productivo | ✅ Backend, UI, API completos |
@@ -593,23 +593,51 @@ Digitalizar vacaciones garantizando cobertura de sucursal y respetando reglas op
 ### Módulo 4 — Ausencias y presentismo
 
 #### Objetivo de negocio
-Registro digital de ausencias, llegadas tarde y suspensiones. Trazabilidad para RRHH ante conflictos laborales.
+Registro digital de ausencias, licencias y suspensiones. Trazabilidad para RRHH ante conflictos laborales.
 
 #### Estado actual
-Parcialmente implementado. Falta: llegadas tarde, historial de presentismo, flujo completo de certificados.
+MVP en producción. Schema completo, dos flujos de carga (fijo y rotativo), filtros y cambio de estado funcionando. Detección automática de sucursal impactada para rotativas vía `EmployeeBranchAssignment`.
 
-#### Tipos de ausencia
+#### Tipos de ausencia (enum `AbsenceType`)
 
-| Tipo | Estado |
+| Tipo | Label UI | Estado |
+|---|---|---|
+| `SICKNESS` | Enfermedad | ✅ Implementado |
+| `PERSONAL_REASON` | Razón personal | ✅ Implementado |
+| `NO_SHOW` | No se presentó | ✅ Implementado |
+| `LATE_NOTICE` | Aviso tarde (avisó tarde) | ✅ Implementado |
+| `MEDICAL_LEAVE` | Licencia médica | ✅ Implementado |
+| `SPECIAL_LEAVE` | Licencia especial | ✅ Implementado |
+| `SUSPENSION` | Suspensión disciplinaria | ✅ Implementado |
+| `OTHER` | Otro | ✅ Implementado |
+
+#### Estados (enum `AbsenceStatus`)
+
+| Estado | Descripción | Implementado |
+|---|---|---|
+| `REPORTED` | Reportada — estado inicial | ✅ |
+| `JUSTIFIED` | Justificada por RRHH/Supervisor | ✅ |
+| `UNJUSTIFIED` | Injustificada | ✅ |
+| `UNDER_REVIEW` | En revisión | ✅ |
+| `CLOSED` | Cerrada | ✅ |
+
+#### Gaps reales pendientes
+
+| Gap | Detalle |
 |---|---|
-| `FALTA_INJUSTIFICADA` | 🚧 Pendiente |
-| `FALTA_JUSTIFICADA` | 🚧 Pendiente |
-| `CERTIFICADO_MEDICO` | 🚧 Pendiente |
-| `LLEGADA_TARDE` | 🚧 Pendiente |
-| `SUSPENSION` | ✅ Implementado |
+| **Adjuntos de certificados** | Hay `hasCertificate` (bool) y `certificateUntil` (fecha), pero no se puede subir el PDF/foto. Depende de definir storage provider. |
+| **Llegada tarde como concepto distinto** | `LATE_NOTICE` significa "avisó tarde", no "llegó tarde a su turno". No hay tipo `TARDY` con hora esperada vs hora real. A confirmar si se requiere. |
+| **Ingesta WhatsApp** | El campo `whatsappMessageId` existe en el schema pero no hay lógica de ingesta. |
+| **Flujo de aprobación formal** | No hay `approvedBy`/`approvedAt`. El cambio de estado es libre para quien tenga `justifyAbsence`. A definir si RRHH/Supervisor requiere doble validación. |
+| **Auditoría en `PATCH`** | El `POST` escribe en `AuditLog`, pero los cambios de estado vía `PATCH` no se registran. Inconsistencia con principio de "todo proceso es auditable". |
+| **Historial de transiciones** | No existe tabla `AbsenceStateHistory`. Solo se ve el estado actual. |
+| **Vinculación con planes de acción** | El evento `ABSENCE_THRESHOLD_EXCEEDED` está en el roadmap pero no implementado. |
 
-#### MVP mínimo
-- Registro completo de tipos + certificado médico + vista RRHH + vinculación con planes de acción
+#### Próximos pasos sugeridos
+- Auditar `PATCH` (cierre rápido del gap de auditoría).
+- Definir storage provider y agregar adjuntos de certificados.
+- Decidir si se requiere flujo de aprobación con doble validación.
+- Implementar detección de umbral de ausencias para sugerir plan de acción.
 
 ---
 
@@ -868,11 +896,10 @@ Registro de cambios relevantes en infraestructura, arquitectura y decisiones té
 
 ### Para Daniel (técnico / desarrollador)
 
-- ¿El módulo de ausencias actual cubre llegadas tarde o solo faltas completas?
-- ¿Qué campos del `AbsenceRecord` ya están en el schema vs los que habría que agregar?
 - ¿Hay algún esquema previo de `VacationRequest` en Prisma?
-- ¿El `AuditLog` se está usando actualmente o solo está el modelo creado?
-- ¿Hay un storage provider definido para adjuntos o está pendiente de decisión?
+- ¿Hay un storage provider definido para adjuntos o está pendiente de decisión? (bloquea certificados médicos, fotos de vencidos y mantenimiento)
+- ¿Se quiere instrumentar `AuditLog` en el `PATCH` de ausencias para cerrar el gap de trazabilidad de cambios de estado?
+- ¿Se requiere un tipo `TARDY` (llegada tarde al turno con hora real vs esperada) distinto del actual `LATE_NOTICE` (avisó tarde)?
 
 ### Para los dueños (OWNER)
 
