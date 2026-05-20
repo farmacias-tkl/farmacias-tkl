@@ -29,9 +29,12 @@ export async function GET(req: NextRequest) {
   const employeeId  = sp.get("employeeId");
   const status      = sp.get("status");
   const month       = sp.get("month"); // YYYY-MM
+  const from        = sp.get("from");  // YYYY-MM-DD (inclusive)
+  const to          = sp.get("to");    // YYYY-MM-DD (inclusive)
+  const q           = sp.get("q");     // búsqueda por nombre snapshot
   const pendingOnly = sp.get("pendingOnly") === "true";
   const page        = Math.max(1, parseInt(sp.get("page") ?? "1"));
-  const limit       = Math.min(100, parseInt(sp.get("limit") ?? "50"));
+  const limit       = Math.min(200, parseInt(sp.get("limit") ?? "50"));
 
   const where: Prisma.VacationRequestWhereInput = {};
 
@@ -61,6 +64,21 @@ export async function GET(req: NextRequest) {
       where.startDate = { lte: monthEnd };
       where.endDate   = { gte: monthStart };
     }
+  }
+
+  // Filtro por rango arbitrario [from, to] — usado por la vista calendario
+  // que muestra 6 semanas (puede cruzar mes anterior/siguiente).
+  if (from || to) {
+    const fromD = from ? new Date(from) : new Date("1970-01-01");
+    const toD   = to   ? new Date(to)   : new Date("9999-12-31");
+    // Si pasaste solo to, fromD es muy viejo; si solo from, toD es muy futuro.
+    where.startDate = { ...(where.startDate as object ?? {}), lte: toD };
+    where.endDate   = { ...(where.endDate as object ?? {}),   gte: fromD };
+  }
+
+  // Búsqueda por nombre snapshot — case-insensitive, contains.
+  if (q && q.trim()) {
+    where.employeeNameSnapshot = { contains: q.trim(), mode: "insensitive" };
   }
 
   const [data, total] = await Promise.all([
