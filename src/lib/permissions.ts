@@ -72,6 +72,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/positions":     ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   "/api/employees":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/absences":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/vacations":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/action-plans":  ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
@@ -107,7 +108,9 @@ export const can = {
   // Vacaciones
   createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
   approveVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  confirmVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  // RRHH confirma el paso 2 (después de aprobar el supervisor).
+  confirmVacation: (role: UserRole) => ["HR","SUPERVISOR","ADMIN"].includes(role),
+  cancelVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
   manageCoverage:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
   // Ausencias

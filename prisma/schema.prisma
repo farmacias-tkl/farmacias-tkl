@@ -141,6 +141,7 @@ model Branch {
   overtimeRecords      OvertimeRecord[]
   bankBalanceSnapshots BankBalanceSnapshot[]
   salesSnapshots       SalesSnapshot[]
+  vacationRequests     VacationRequest[]
 
   @@index([active])
   @@index([showInExecutive])
@@ -165,6 +166,7 @@ model Position {
   employees           Employee[]
   branchAssignments   EmployeeBranchAssignment[]  // posición cubierta en asignaciones de rotativos
   permissions         PositionPermission[]
+  vacationRequests    VacationRequest[]
 
   @@index([active])
   @@index([requiresCoverage])
@@ -208,6 +210,7 @@ model Employee {
   absenceRecords    AbsenceRecord[]
   actionPlans       ActionPlan[]
   overtimeRecords   OvertimeRecord[]
+  vacationRequests  VacationRequest[]
 
   @@index([currentBranchId])
   @@index([positionId])
@@ -413,6 +416,10 @@ model User {
   accessLogs          AccessLog[]
   securityEvents      SecurityEvent[]
   absenceStateChanges AbsenceStateHistory[]
+  vacationsRequested        VacationRequest[] @relation("VacationRequestedBy")
+  vacationsSupervisorAction VacationRequest[] @relation("VacationSupervisorAction")
+  vacationsRrhhAction       VacationRequest[] @relation("VacationRrhhAction")
+  vacationStateChanges      VacationStateHistory[] @relation("VacationStateChangedBy")
 
   // Acceso granular al módulo ejecutivo (independiente del rol).
   // OWNER tiene acceso siempre via canViewExecutive; los demás roles
@@ -707,4 +714,106 @@ model PositionPermission {
   @@unique([positionId, permissionId])
   @@index([positionId])
   @@index([permissionId])
+}
+
+// ============================================================================
+// VACACIONES
+//
+// Flujo: Encargado solicita → Supervisor aprueba → RRHH confirma → APPROVED.
+// Rechazos (de supervisor o RRHH) caen a REJECTED — el motivo y el actor
+// quedan en VacationStateHistory + AuditLog.
+//
+// Snapshots: employeeNameSnapshot, branchNameSnapshot, positionNameSnapshot
+// se llenan al crear y NO se actualizan. Sirven para preservar el contexto
+// histórico si el empleado cambia de puesto/sucursal o se desactiva.
+//
+// shiftLabel: preparado para futuro módulo de turnos. Por ahora siempre null
+// (lo que genera WARNING en la regla C "mismo puesto + mismo turno").
+//
+// conflictLevel + conflictReasons: snapshot del resultado de la validación
+// al momento del create/edit. Puede recalcularse, pero NO se actualiza en
+// cascada cuando otras solicitudes cambian — el helper consulta la verdad.
+// ============================================================================
+
+enum VacationStatus {
+  PENDING_SUPERVISOR
+  PENDING_RRHH
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum VacationConflictLevel {
+  NONE
+  WARNING
+  BLOCKING
+}
+
+model VacationRequest {
+  id String @id @default(cuid())
+
+  // Relaciones vivas (la fuente de verdad para queries)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  positionId String
+  position   Position @relation(fields: [positionId], references: [id])
+
+  // Snapshots históricos — se llenan al crear, nunca se actualizan
+  employeeNameSnapshot String
+  branchNameSnapshot   String
+  positionNameSnapshot String
+  shiftLabel           String?
+
+  // Fechas y días
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  daysCount Int
+
+  // Workflow
+  status VacationStatus @default(PENDING_SUPERVISOR)
+
+  requestedByUserId        String
+  requestedBy              User      @relation("VacationRequestedBy", fields: [requestedByUserId], references: [id])
+  supervisorActionByUserId String?
+  supervisorActionBy       User?     @relation("VacationSupervisorAction", fields: [supervisorActionByUserId], references: [id])
+  supervisorActionAt       DateTime?
+  rrhhActionByUserId       String?
+  rrhhActionBy             User?     @relation("VacationRrhhAction", fields: [rrhhActionByUserId], references: [id])
+  rrhhActionAt             DateTime?
+
+  // Observaciones por rol
+  requesterNote  String?
+  supervisorNote String?
+  rrhhNote       String?
+
+  // Conflictos (snapshot del último cálculo)
+  conflictLevel   VacationConflictLevel @default(NONE)
+  conflictReasons Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stateHistory VacationStateHistory[]
+
+  @@index([employeeId])
+  @@index([branchId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model VacationStateHistory {
+  id              String          @id @default(cuid())
+  vacationId      String
+  vacation        VacationRequest @relation(fields: [vacationId], references: [id], onDelete: Cascade)
+  fromStatus      VacationStatus
+  toStatus        VacationStatus
+  changedByUserId String
+  changedBy       User            @relation("VacationStateChangedBy", fields: [changedByUserId], references: [id])
+  changedAt       DateTime        @default(now())
+  note            String?
+
+  @@index([vacationId])
+  @@index([changedAt])
 }
