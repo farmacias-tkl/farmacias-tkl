@@ -96,7 +96,6 @@ export default function VacacionesPage() {
 
   const listData = listRes?.data ?? [];
   const calData  = calRes?.data  ?? [];
-  const total    = viewMode === "list" ? (listRes?.meta?.total ?? 0) : calData.length;
 
   const reload = () => {
     qc.invalidateQueries({ queryKey: ["vacations-list"] });
@@ -113,10 +112,7 @@ export default function VacacionesPage() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Vacaciones</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{total} solicitudes {viewMode === "calendar" ? "en el rango visible" : ""}</p>
-        </div>
+        <h2 className="text-base font-semibold text-gray-900">Vacaciones</h2>
         {canCreate && (
           <button onClick={() => setShowForm(v => !v)} className="btn-primary">
             <Plus className="w-4 h-4" />Solicitar vacaciones
