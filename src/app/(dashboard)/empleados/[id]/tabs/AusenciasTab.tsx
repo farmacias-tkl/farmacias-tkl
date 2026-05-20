@@ -61,7 +61,7 @@ export default function AusenciasTab({ employeeId }: { employeeId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">
-          Ausencias y licencias
+          Asistencia y novedades
           {total > 0 && <span className="ml-1.5 font-normal text-gray-400">({total})</span>}
         </h3>
         <Link href="/ausencias" className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5">

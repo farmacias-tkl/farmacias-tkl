@@ -142,6 +142,7 @@ model Branch {
   bankBalanceSnapshots BankBalanceSnapshot[]
   salesSnapshots       SalesSnapshot[]
   vacationRequests     VacationRequest[]
+  timeEvents           TimeEvent[]
 
   @@index([active])
   @@index([showInExecutive])
@@ -211,6 +212,7 @@ model Employee {
   actionPlans       ActionPlan[]
   overtimeRecords   OvertimeRecord[]
   vacationRequests  VacationRequest[]
+  timeEvents        TimeEvent[]
 
   @@index([currentBranchId])
   @@index([positionId])
@@ -420,6 +422,12 @@ model User {
   vacationsSupervisorAction VacationRequest[] @relation("VacationSupervisorAction")
   vacationsRrhhAction       VacationRequest[] @relation("VacationRrhhAction")
   vacationStateChanges      VacationStateHistory[] @relation("VacationStateChangedBy")
+  timeEventsReported              TimeEvent[]               @relation("TimeEventReportedBy")
+  timeEventsAuthorized            TimeEvent[]               @relation("TimeEventAuthorizedBy")
+  timeEventsResolved              TimeEvent[]               @relation("TimeEventResolvedBy")
+  timeEventCompsRegistered        TimeEventCompensation[]   @relation("TimeEventCompRegisteredBy")
+  timeEventCompsAuthorized        TimeEventCompensation[]   @relation("TimeEventCompAuthorizedBy")
+  timeEventStateChanges           TimeEventStateHistory[]   @relation("TimeEventStateChangedBy")
 
   // Acceso granular al módulo ejecutivo (independiente del rol).
   // OWNER tiene acceso siempre via canViewExecutive; los demás roles
@@ -815,5 +823,139 @@ model VacationStateHistory {
   note            String?
 
   @@index([vacationId])
+  @@index([changedAt])
+}
+
+// ============================================================================
+// TIME EVENTS — llegadas tarde y retiros anticipados
+//
+// Modelo separado de AbsenceRecord. El empleado SÍ trabajó pero fuera del
+// horario esperado. Se llevan minutos adeudados + compensaciones + resolución
+// administrativa.
+//
+// SEPARACIÓN CRÍTICA entre dos conceptos:
+//   - autorización operativa (authorizedBy)    → "te dejo retirarte ahora"
+//   - resolución administrativa (resolvedBy)   → "qué hago con la deuda"
+//
+// LATE_ARRIVAL no requiere autorización (ya pasó). EARLY_DEPARTURE sí: nace
+// en PENDING_AUTHORIZATION y queda esperando que SUPERVISOR/HR/ADMIN/OWNER
+// lo autorice antes de pasar a PENDING_REVIEW.
+//
+// PAYROLL DEDUCTION restringido a estados sin compensaciones cargadas
+// (PENDING_REVIEW, APPROVED_FOR_COMPENSATION). Una vez iniciada la
+// compensación parcial, la resolución debe terminar por esa vía.
+//
+// El legacy de AbsenceRecord con absenceType=LATE_ARRIVAL se mantiene como
+// histórico de solo lectura (no se migra en este sprint).
+// ============================================================================
+
+enum TimeEventType {
+  LATE_ARRIVAL
+  EARLY_DEPARTURE
+}
+
+enum TimeEventStatus {
+  PENDING_AUTHORIZATION       // solo EARLY_DEPARTURE — espera autorización operativa
+  PENDING_REVIEW              // espera resolución administrativa
+  APPROVED_FOR_COMPENSATION   // se aprobó compensar minutos
+  PARTIALLY_COMPENSATED       // hay al menos una compensación pero falta
+  COMPENSATED                 // totalmente saldado
+  SENT_TO_PAYROLL_DEDUCTION   // se descuenta del sueldo
+  WAIVED                      // condonado
+  CANCELLED
+}
+
+model TimeEvent {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id])
+
+  employeeNameSnapshot String
+  branchNameSnapshot   String
+  positionNameSnapshot String
+
+  date         DateTime        @db.Date
+  type         TimeEventType
+  status       TimeEventStatus
+
+  // Tiempos. expectedTime y actualTime son polimórficos:
+  //   LATE_ARRIVAL    → entrada (esperada vs real)
+  //   EARLY_DEPARTURE → salida  (esperada vs real)
+  expectedTime DateTime
+  actualTime   DateTime
+
+  // Saldo cacheado (mantenido atómicamente en cada compensación).
+  //   minutesRemaining = minutesOwed - minutesCompensated
+  // En CANCELLED y WAIVED forzamos minutesRemaining = 0.
+  minutesOwed        Int
+  minutesCompensated Int @default(0)
+  minutesRemaining   Int
+
+  reason       String?     // obligatorio para EARLY_DEPARTURE
+  reporterNote String?
+
+  // Autorización operativa (solo EARLY_DEPARTURE)
+  authorizedByUserId String?
+  authorizedBy       User?    @relation("TimeEventAuthorizedBy", fields: [authorizedByUserId], references: [id])
+  authorizedAt       DateTime?
+  authorizationNote  String?
+
+  // Resolución administrativa
+  resolvedByUserId String?
+  resolvedBy       User?    @relation("TimeEventResolvedBy", fields: [resolvedByUserId], references: [id])
+  resolvedAt       DateTime?
+  resolutionNote   String?
+
+  reportedByUserId String
+  reportedBy       User @relation("TimeEventReportedBy", fields: [reportedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  compensations TimeEventCompensation[]
+  stateHistory  TimeEventStateHistory[]
+
+  @@index([employeeId])
+  @@index([branchId])
+  @@index([date])
+  @@index([status])
+  @@index([type])
+}
+
+model TimeEventCompensation {
+  id                 String    @id @default(cuid())
+  timeEventId        String
+  timeEvent          TimeEvent @relation(fields: [timeEventId], references: [id], onDelete: Cascade)
+  date               DateTime  @db.Date
+  minutesCompensated Int
+
+  registeredByUserId String
+  registeredBy       User      @relation("TimeEventCompRegisteredBy",  fields: [registeredByUserId], references: [id])
+  // Quién autorizó la resolución previa que habilita esta compensación.
+  authorizedByUserId String?
+  authorizedBy       User?     @relation("TimeEventCompAuthorizedBy",  fields: [authorizedByUserId], references: [id])
+
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([timeEventId])
+  @@index([date])
+}
+
+model TimeEventStateHistory {
+  id              String          @id @default(cuid())
+  timeEventId     String
+  timeEvent       TimeEvent       @relation(fields: [timeEventId], references: [id], onDelete: Cascade)
+  fromStatus      TimeEventStatus
+  toStatus        TimeEventStatus
+  changedByUserId String
+  changedBy       User            @relation("TimeEventStateChangedBy", fields: [changedByUserId], references: [id])
+  changedAt       DateTime        @default(now())
+  note            String?
+
+  @@index([timeEventId])
   @@index([changedAt])
 }

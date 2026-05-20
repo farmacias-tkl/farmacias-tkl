@@ -73,6 +73,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/employees":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/absences":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/vacations":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/time-events":   ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/action-plans":  ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
   "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
@@ -117,6 +118,16 @@ export const can = {
   createAbsence:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
   editAbsence:    (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
   justifyAbsence: (role: UserRole) => ["SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
+
+  // Asistencia y novedades (TimeEvent)
+  viewAttendance:    (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
+  createTimeEvent:   (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
+  // Autoriza un retiro anticipado (operativo, PENDING_AUTHORIZATION → PENDING_REVIEW)
+  authorizeTimeEvent:(role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
+  // Decide cómo se resuelve la deuda (compensación, payroll, condonar)
+  resolveTimeEvent:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
+  // Registra una compensación
+  addCompensation:   (role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
 
   // Planes de acción
   createActionPlan: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),

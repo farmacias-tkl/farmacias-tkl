@@ -7,11 +7,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   Plus, UserMinus, AlertTriangle, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, RotateCcw, Users, Info,
+  ChevronDown, ChevronUp, RotateCcw, Users, Info, LogOut, CalendarDays,
 } from "lucide-react";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
+import TimeEventFormPanel from "./TimeEventFormPanel";
+import TimeEventCard from "./TimeEventCard";
+import TimeEventDetailModal from "./TimeEventDetailModal";
+import EmployeeBalanceSection from "./EmployeeBalanceSection";
 
 function ClockIcon(props: any) {
   return (
@@ -116,6 +120,11 @@ export default function AusenciasPage() {
   const [activeOnly,  setActiveOnly]  = useState(false);
   const [alert,       setAlert]       = useState<string | null>(null);
 
+  // Toggle entre las dos vistas principales del módulo
+  const [sectionTab,  setSectionTab]  = useState<"absences"|"time-events">("absences");
+  // Detail modal para TimeEvent
+  const [timeEventDetailId, setTimeEventDetailId] = useState<string | null>(null);
+
   // Estado del formulario fijo
   const [formBranchId,  setFormBranchId]  = useState(role === "BRANCH_MANAGER" ? (userBranchId ?? "") : "");
   const [formDate,      setFormDate]      = useState(todayStr);
@@ -155,6 +164,24 @@ export default function AusenciasPage() {
     queryKey: ["branches"],
     queryFn:  () => fetch("/api/branches").then(r => r.json()),
     enabled:  sessionReady,
+  });
+
+  // Lista de eventos horarios (llegadas tarde / retiros)
+  const { data: timeEventsRes, isLoading: timeEventsLoading } = useQuery({
+    queryKey: ["time-events", { branchFilter, statusFilter, activeOnly }],
+    queryFn: async () => {
+      const p = new URLSearchParams({
+        limit: "50",
+        ...(isBranchManager && userBranchId ? { branchId: userBranchId }
+          : branchFilter ? { branchId: branchFilter } : {}),
+        ...(statusFilter && { status: statusFilter }),
+        ...(activeOnly   && { pendingOnly: "true" }),
+      });
+      const res = await fetch(`/api/time-events?${p}`);
+      if (!res.ok) throw new Error("Error al cargar eventos");
+      return res.json();
+    },
+    enabled: sessionReady && sectionTab === "time-events",
   });
 
   // PLANTEL REAL del día para el formulario fijo
@@ -326,10 +353,7 @@ export default function AusenciasPage() {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Ausencias y licencias</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{total} registros</p>
-        </div>
+        <h2 className="text-base font-semibold text-gray-900">Asistencia y novedades</h2>
         {canCreate && (
           <button
             onClick={() => {
@@ -345,6 +369,28 @@ export default function AusenciasPage() {
         )}
       </div>
 
+      {/* Toggle Ausencias y licencias / Llegadas tarde y retiros */}
+      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit overflow-x-auto">
+        <button
+          onClick={() => setSectionTab("absences")}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
+            sectionTab === "absences" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+          )}
+        >
+          <CalendarDays className="w-3.5 h-3.5" />Ausencias y licencias
+        </button>
+        <button
+          onClick={() => setSectionTab("time-events")}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
+            sectionTab === "time-events" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+          )}
+        >
+          <LogOut className="w-3.5 h-3.5" />Llegadas tarde y retiros
+        </button>
+      </div>
+
       {alert && (
         <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
@@ -354,7 +400,22 @@ export default function AusenciasPage() {
       )}
 
       {/* Formulario */}
-      {showForm && (
+      {showForm && flow === "lateness" ? (
+        // Flow nuevo de Llegadas tarde / retiros → modelo TimeEvent
+        <TimeEventFormPanel
+          branches={branches}
+          isBranchManager={isBranchManager}
+          userBranchId={userBranchId ?? null}
+          onClose={() => { setShowForm(false); setFlow(null); }}
+          onCreated={() => {
+            qc.invalidateQueries({ queryKey: ["time-events"] });
+            qc.invalidateQueries({ queryKey: ["time-events-balance"] });
+            setShowForm(false);
+            setFlow(null);
+            setSectionTab("time-events");
+          }}
+        />
+      ) : showForm && (
         <div className="card p-5">
           {/* Paso 1 — Chooser de tipo de evento */}
           {flow === null && (
@@ -386,10 +447,10 @@ export default function AusenciasPage() {
                     <div className="rounded-lg bg-orange-50 group-hover:bg-orange-100 p-2">
                       <ClockIcon className="w-5 h-5 text-orange-600" />
                     </div>
-                    <span className="text-sm font-semibold text-gray-900">Llegada tarde</span>
+                    <span className="text-sm font-semibold text-gray-900">Llegada tarde / retiro anticipado</span>
                   </div>
                   <p className="text-xs text-gray-500 leading-snug">
-                    El empleado asistió, pero llegó después del horario esperado.
+                    El empleado asistió pero llegó tarde, o se retiró antes del horario.
                   </p>
                 </button>
               </div>
@@ -802,7 +863,7 @@ export default function AusenciasPage() {
         </div>
       )}
 
-      {/* Filtros */}
+      {/* Filtros (compartidos por las dos vistas, ajustando lo aplicable) */}
       <div className="flex flex-wrap gap-2">
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
@@ -810,31 +871,89 @@ export default function AusenciasPage() {
             {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-auto">
-          <option value="">Todos los estados</option>
-          {Object.entries(STATUS_META).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-          <input type="checkbox" checked={activeOnly} onChange={e => setActiveOnly(e.target.checked)} className="rounded" />
-          Solo activas hoy
-        </label>
+        {sectionTab === "absences" ? (
+          <>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-auto">
+              <option value="">Todos los estados</option>
+              {Object.entries(STATUS_META).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={activeOnly} onChange={e => setActiveOnly(e.target.checked)} className="rounded" />
+              Solo activas hoy
+            </label>
+          </>
+        ) : (
+          <>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-auto">
+              <option value="">Todos los estados</option>
+              <option value="PENDING_AUTHORIZATION">Pend. autorización</option>
+              <option value="PENDING_REVIEW">Pend. revisión</option>
+              <option value="APPROVED_FOR_COMPENSATION">A compensar</option>
+              <option value="PARTIALLY_COMPENSATED">Compensación parcial</option>
+              <option value="COMPENSATED">Compensada</option>
+              <option value="SENT_TO_PAYROLL_DEDUCTION">A descuento</option>
+              <option value="WAIVED">Condonada</option>
+              <option value="CANCELLED">Cancelada</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={activeOnly} onChange={e => setActiveOnly(e.target.checked)} className="rounded" />
+              Solo pendientes
+            </label>
+          </>
+        )}
       </div>
 
-      {/* Lista */}
-      {isLoading ? (
-        <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="card p-4 h-16 animate-pulse bg-gray-50" />)}</div>
-      ) : absences.length === 0 ? (
-        <div className="card p-10 text-center">
-          <UserMinus className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm text-gray-400">No hay ausencias con los filtros aplicados.</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {absences.map((a: any) => (
-            <AbsenceCard key={a.id} absence={a} canJustify={canJustify} onUpdate={updateStatus} />
-          ))}
-        </div>
+      {/* === VISTA: AUSENCIAS Y LICENCIAS === */}
+      {sectionTab === "absences" && (
+        isLoading ? (
+          <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="card p-4 h-16 animate-pulse bg-gray-50" />)}</div>
+        ) : absences.length === 0 ? (
+          <div className="card p-10 text-center">
+            <UserMinus className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+            <p className="text-sm text-gray-400">No hay ausencias con los filtros aplicados.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {absences.map((a: any) => (
+              <AbsenceCard key={a.id} absence={a} canJustify={canJustify} onUpdate={updateStatus} />
+            ))}
+          </div>
+        )
       )}
+
+      {/* === VISTA: LLEGADAS TARDE Y RETIROS === */}
+      {sectionTab === "time-events" && (
+        <>
+          <EmployeeBalanceSection branchId={isBranchManager ? userBranchId ?? null : (branchFilter || null)} />
+
+          {timeEventsLoading ? (
+            <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="card p-4 h-16 animate-pulse bg-gray-50" />)}</div>
+          ) : (timeEventsRes?.data ?? []).length === 0 ? (
+            <div className="card p-10 text-center">
+              <LogOut className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+              <p className="text-sm text-gray-400">Sin llegadas tarde ni retiros con los filtros aplicados.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(timeEventsRes?.data ?? []).map((ev: any) => (
+                <TimeEventCard key={ev.id} event={ev} onClick={() => setTimeEventDetailId(ev.id)} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <TimeEventDetailModal
+        open={!!timeEventDetailId}
+        eventId={timeEventDetailId}
+        role={role}
+        onClose={() => setTimeEventDetailId(null)}
+        onChanged={() => {
+          qc.invalidateQueries({ queryKey: ["time-events"] });
+          qc.invalidateQueries({ queryKey: ["time-events-balance"] });
+          qc.invalidateQueries({ queryKey: ["time-event-detail"] });
+        }}
+      />
     </div>
   );
 }

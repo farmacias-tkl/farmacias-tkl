@@ -16,7 +16,7 @@ const ROUTE_META: Record<string, { label: string; icon: React.ElementType }> = {
   "/dashboard":      { label: "Dashboard",        icon: LayoutDashboard },
   "/sucursales":     { label: "Sucursales",        icon: MapPin          },
   "/empleados":      { label: "Empleados",         icon: Users           },
-  "/ausencias":      { label: "Ausencias",         icon: UserMinus       },
+  "/ausencias":      { label: "Asistencia",        icon: UserMinus       },
   "/planes-accion":  { label: "Planes de accion",  icon: FileWarning     },
   "/horas-extras":   { label: "Horas extras",      icon: Clock           },
   "/vacaciones":     { label: "Vacaciones",        icon: CalendarDays    },

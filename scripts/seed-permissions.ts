@@ -55,6 +55,13 @@ const PERMISSIONS: PermissionDef[] = [
   { key: "ausencias.upload_certificate",  module: "ausencias",  description: "Subir certificado medico" },
   { key: "ausencias.delete",              module: "ausencias",  description: "Eliminar ausencia" },
 
+  // === ASISTENCIA (llegadas tarde + retiros anticipados) ===
+  { key: "attendance.view",        module: "attendance",  description: "Ver eventos de asistencia (llegadas tarde y retiros)" },
+  { key: "attendance.create",      module: "attendance",  description: "Registrar evento de asistencia" },
+  { key: "attendance.authorize",   module: "attendance",  description: "Autorizar un retiro anticipado (paso operativo)" },
+  { key: "attendance.compensate",  module: "attendance",  description: "Registrar compensaciones de minutos" },
+  { key: "attendance.manage",      module: "attendance",  description: "Resolver eventos (compensar, payroll, condonar)" },
+
   // === VACACIONES ===
   { key: "vacaciones.view",     module: "vacaciones",  description: "Ver vacaciones" },
   { key: "vacaciones.create",   module: "vacaciones",  description: "Solicitar vacaciones" },
