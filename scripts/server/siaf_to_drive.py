@@ -820,33 +820,60 @@ def build_drive_service():
         return None
 
 
-def upload_csv_to_drive(service, local_path: Path, folder_id: str) -> bool:
-    """Sube o actualiza un CSV en Drive (match por nombre + parent). Devuelve
-    True si OK, False si falla. Errores no abortan el sync — solo log."""
+UPLOAD_MAX_RETRIES   = 3
+UPLOAD_RETRY_WAIT_S  = 10
+
+
+def upload_csv_to_drive(
+    service,
+    local_path: Path,
+    folder_id: str,
+    sucursal: str = "",
+) -> bool:
+    """Sube o actualiza un CSV en Drive (match por nombre + parent).
+
+    Reintenta UPLOAD_MAX_RETRIES veces con UPLOAD_RETRY_WAIT_S segundos entre
+    intentos. Si los 3 fallan, loguea ERROR y devuelve False (el caller
+    continúa con la siguiente sucursal sin abortar el proceso)."""
     if service is None:
         return False
-    name = local_path.name
-    try:
-        q = f"name = '{name}' and '{folder_id}' in parents and trashed = false"
-        resp = service.files().list(
-            q=q, fields="files(id, name)", spaces="drive", pageSize=1,
-        ).execute()
-        items = resp.get("files", [])
-        media = MediaFileUpload(str(local_path), mimetype="text/csv", resumable=False)
-        if items:
-            fid = items[0]["id"]
-            service.files().update(fileId=fid, media_body=media).execute()
-            log.info(f"  Drive UPDATE {name} -> {fid}")
-        else:
-            created = service.files().create(
-                body={"name": name, "parents": [folder_id]},
-                media_body=media, fields="id",
+    name   = local_path.name
+    prefix = f"[{sucursal}] " if sucursal else "  "
+
+    last_err: Exception | None = None
+    for attempt in range(1, UPLOAD_MAX_RETRIES + 1):
+        try:
+            q = f"name = '{name}' and '{folder_id}' in parents and trashed = false"
+            resp = service.files().list(
+                q=q, fields="files(id, name)", spaces="drive", pageSize=1,
             ).execute()
-            log.info(f"  Drive CREATE {name} -> {created.get('id')}")
-        return True
-    except Exception as e:
-        log.warning(f"  Drive upload fallo para {name}: {e}")
-        return False
+            items = resp.get("files", [])
+            media = MediaFileUpload(str(local_path), mimetype="text/csv", resumable=False)
+            if items:
+                fid = items[0]["id"]
+                service.files().update(fileId=fid, media_body=media).execute()
+                log.info(f"{prefix}Drive UPDATE {name} -> {fid}")
+            else:
+                created = service.files().create(
+                    body={"name": name, "parents": [folder_id]},
+                    media_body=media, fields="id",
+                ).execute()
+                log.info(f"{prefix}Drive CREATE {name} -> {created.get('id')}")
+            return True
+        except Exception as e:
+            last_err = e
+            if attempt < UPLOAD_MAX_RETRIES:
+                log.warning(
+                    f"{prefix}Reintento {attempt + 1}/{UPLOAD_MAX_RETRIES} para {name} "
+                    f"(intento previo: {e})"
+                )
+                time.sleep(UPLOAD_RETRY_WAIT_S)
+            else:
+                log.error(
+                    f"{prefix}Drive upload fallo tras {UPLOAD_MAX_RETRIES} intentos "
+                    f"para {name}: {last_err}"
+                )
+    return False
 
 VENTAS_FIELDS = [
     "sucursal", "fecha", "total_ventas", "total_tickets", "ticket_promedio",
@@ -912,6 +939,16 @@ def main() -> None:
         log.warning("Drive upload DESHABILITADO (libs no instaladas o sin credenciales); CSV solo a disco.")
     else:
         log.info(f"Drive upload activo (folder_id={drive_folder_id})")
+        # Warmup: handshake liviano contra Drive antes del loop. Si falla, no
+        # abortamos — los uploads posteriores reintentan; este warmup solo
+        # detecta temprano un Drive caído o credenciales rotas.
+        try:
+            drive_service.files().list(
+                pageSize=1, fields="files(id)", spaces="drive",
+            ).execute()
+            log.info("Drive warmup OK")
+        except Exception as e:
+            log.warning(f"Drive warmup falló: {e} — el sync continúa, los uploads reintentarán.")
 
     # Validar carpeta destino accesible
     try:
@@ -986,7 +1023,7 @@ def main() -> None:
             # Subir los 3 CSV a Drive (no aborta si falla — solo logea por archivo)
             if drive_service is not None:
                 for p in (ventas_path, vendedores_path, ossocial_path):
-                    upload_csv_to_drive(drive_service, p, drive_folder_id)
+                    upload_csv_to_drive(drive_service, p, drive_folder_id, sucursal)
 
             if force_date is None:
                 max_yyyymmdd = max(processed)
