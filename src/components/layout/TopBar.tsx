@@ -7,7 +7,6 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard":     "Dashboard",
   "/sucursales":    "Sucursales",
   "/empleados":     "Empleados",
-  "/ausencias":     "Ausencias",
   "/vacaciones":    "Vacaciones",
   "/rotativas":     "Rotativas",
   "/mantenimiento": "Mantenimiento",
@@ -19,9 +18,11 @@ const PAGE_TITLES: Record<string, string> = {
 
 export function TopBar({ onMenuClick, canExecutive }: { onMenuClick: () => void; canExecutive: boolean }) {
   const pathname = usePathname();
+  // Páginas no listadas (incluyendo /ausencias) muestran la barra sin título
+  // porque el título ya aparece en el contenido de la página.
   const title = Object.entries(PAGE_TITLES)
     .sort((a, b) => b[0].length - a[0].length)
-    .find(([route]) => pathname === route || pathname.startsWith(route + "/"))?.[1] ?? "TKL";
+    .find(([route]) => pathname === route || pathname.startsWith(route + "/"))?.[1] ?? "";
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b border-gray-200 bg-white px-4 lg:px-6">
