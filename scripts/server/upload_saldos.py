@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 # Lazy import: si las libs no estan instaladas, fallamos en main() con
@@ -141,31 +142,51 @@ def build_drive_service():
 # UPLOAD
 # =============================================================================
 
+UPLOAD_MAX_RETRIES  = 3
+UPLOAD_RETRY_WAIT_S = 10
+
+
 def upload_to_drive(service, local_path: Path, folder_id: str) -> bool:
     """Sube/actualiza el Excel en Drive (match por nombre + parent).
-    True si OK, False si falla."""
+
+    Reintenta UPLOAD_MAX_RETRIES veces con UPLOAD_RETRY_WAIT_S segundos entre
+    intentos. True si OK; False si los 3 fallan (loguea ERROR final)."""
     name = local_path.name
-    try:
-        q = f"name = '{name}' and '{folder_id}' in parents and trashed = false"
-        resp = service.files().list(
-            q=q, fields="files(id, name)", spaces="drive", pageSize=1,
-        ).execute()
-        items = resp.get("files", [])
-        media = MediaFileUpload(str(local_path), mimetype=XLSX_MIMETYPE, resumable=False)
-        if items:
-            fid = items[0]["id"]
-            service.files().update(fileId=fid, media_body=media).execute()
-            log.info(f"Drive UPDATE {name} -> {fid}")
-        else:
-            created = service.files().create(
-                body={"name": name, "parents": [folder_id]},
-                media_body=media, fields="id",
+    last_err: Exception | None = None
+
+    for attempt in range(1, UPLOAD_MAX_RETRIES + 1):
+        try:
+            q = f"name = '{name}' and '{folder_id}' in parents and trashed = false"
+            resp = service.files().list(
+                q=q, fields="files(id, name)", spaces="drive", pageSize=1,
             ).execute()
-            log.info(f"Drive CREATE {name} -> {created.get('id')}")
-        return True
-    except Exception as e:
-        log.error(f"Drive upload fallo para {name}: {e}")
-        return False
+            items = resp.get("files", [])
+            media = MediaFileUpload(str(local_path), mimetype=XLSX_MIMETYPE, resumable=False)
+            if items:
+                fid = items[0]["id"]
+                service.files().update(fileId=fid, media_body=media).execute()
+                log.info(f"Drive UPDATE {name} -> {fid}")
+            else:
+                created = service.files().create(
+                    body={"name": name, "parents": [folder_id]},
+                    media_body=media, fields="id",
+                ).execute()
+                log.info(f"Drive CREATE {name} -> {created.get('id')}")
+            return True
+        except Exception as e:
+            last_err = e
+            if attempt < UPLOAD_MAX_RETRIES:
+                log.warning(
+                    f"Reintento {attempt + 1}/{UPLOAD_MAX_RETRIES} para {name} "
+                    f"(intento previo: {e})"
+                )
+                time.sleep(UPLOAD_RETRY_WAIT_S)
+            else:
+                log.error(
+                    f"Drive upload fallo tras {UPLOAD_MAX_RETRIES} intentos "
+                    f"para {name}: {last_err}"
+                )
+    return False
 
 # =============================================================================
 # MAIN
@@ -192,6 +213,17 @@ def main() -> None:
     if service is None:
         log.error("[upload_saldos] ERROR: sin credenciales Drive validas (env GOOGLE_SERVICE_ACCOUNT_JSON o credentials.json)")
         sys.exit(3)
+
+    # Warmup: handshake liviano contra Drive antes del upload. Si falla, no
+    # abortamos — el upload posterior reintenta; el warmup solo detecta
+    # temprano un Drive caido o credenciales rotas.
+    try:
+        service.files().list(
+            pageSize=1, fields="files(id)", spaces="drive",
+        ).execute()
+        log.info("Drive warmup OK")
+    except Exception as e:
+        log.warning(f"Drive warmup fallo: {e} - el upload posterior reintentara.")
 
     ok = upload_to_drive(service, excel, DRIVE_FOLDER_ID)
     if not ok:
