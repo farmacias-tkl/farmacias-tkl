@@ -1,5 +1,5 @@
 "use client";
-import { CalendarSearch, Info } from "lucide-react";
+import { Info } from "lucide-react";
 
 interface Props {
   /** Fecha pedida explícitamente. null = modo default, no se renderiza nada. */
@@ -22,12 +22,14 @@ function fmtAR(d: Date | string): string {
  * problema operativo.
  *
  *   - requestedDate=null         → no renderiza nada
- *   - requestedDate + hasData    → banner azul/neutral
- *   - requestedDate + sin datos  → banner gris/neutral
+ *   - requestedDate + hasData    → banner azul. La fecha NO se repite acá:
+ *                                  el header del dashboard ya la muestra.
+ *   - requestedDate + sin datos  → banner gris CON la fecha (el header puede
+ *                                  estar mostrando un día vacío y queremos
+ *                                  ser explícitos).
  */
 export function DateContextBanner({ requestedDate, hasData }: Props) {
   if (!requestedDate) return null;
-  const dateStr = fmtAR(requestedDate);
 
   if (hasData) {
     return (
@@ -36,16 +38,14 @@ export function DateContextBanner({ requestedDate, hasData }: Props) {
         role="status"
         aria-live="polite"
       >
-        <div className="flex items-start gap-3">
-          <CalendarSearch className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-sm text-blue-900">
-            Consultando datos del <span className="font-semibold">{dateStr}</span>
-          </p>
-        </div>
+        <p className="text-sm text-blue-900">
+          📅 Consultando datos históricos
+        </p>
       </div>
     );
   }
 
+  const dateStr = fmtAR(requestedDate);
   return (
     <div
       className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"
