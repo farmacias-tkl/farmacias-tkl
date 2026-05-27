@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getArtToday, parseArtDate, isFutureArtDate } from "@/lib/dates/executive";
 
 const EXECUTIVE_ROLES = ["OWNER", "ADMIN", "SUPERVISOR"];
 
@@ -13,11 +14,27 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const branchId = searchParams.get("branchId") ?? "ALL";
-  const targetDate = new Date();
-  targetDate.setHours(0, 0, 0, 0);
+  const dateParam = searchParams.get("date");
 
+  // Resolución de la fecha. Si dateParam viene pero es inválida/futura → 400
+  // (la API es estricta; el SSR es permisivo y la ignora).
+  const today = getArtToday();
+  let requestedDate: Date | null = null;
+  if (dateParam !== null) {
+    const parsed = parseArtDate(dateParam);
+    if (!parsed) {
+      return NextResponse.json({ error: "Parámetro date inválido (esperado YYYY-MM-DD)" }, { status: 400 });
+    }
+    if (isFutureArtDate(parsed)) {
+      return NextResponse.json({ error: "La fecha no puede ser futura" }, { status: 400 });
+    }
+    requestedDate = parsed;
+  }
+  const anchor = requestedDate ?? today;
+
+  // --- SALDOS ---
   const balanceWhere = {
-    snapshotDate: targetDate,
+    snapshotDate: anchor,
     ...(branchId !== "ALL" && { branchId }),
     branch: { showInExecutive: true },
   };
@@ -27,8 +44,9 @@ export async function GET(request: NextRequest) {
     orderBy: [{ branch: { name: "asc" } }, { bankName: "asc" }],
   });
   let isStale = false;
-  if (balances.length === 0) {
-    // Buscar el último snapshotDate con data y traer SOLO las rows de esa fecha.
+  // Fallback al último disponible SOLO en modo default. Con date explícita
+  // devolvemos vacío para no confundir al consumer.
+  if (balances.length === 0 && requestedDate === null) {
     const latestBalance = await prisma.bankBalanceSnapshot.findFirst({
       where: branchId !== "ALL"
         ? { branchId }
@@ -51,18 +69,19 @@ export async function GET(request: NextRequest) {
     isStale = true;
   }
 
+  // --- VENTAS ---
   const salesBranchFilter = {
     ...(branchId !== "ALL" && { branchId }),
     branch: { showInExecutive: true, showInOperative: true },
   };
   let sales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: targetDate, ...salesBranchFilter },
+    where: { snapshotDate: anchor, ...salesBranchFilter },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
   let isStaleSales = false;
-  let salesDate = targetDate;
-  if (sales.length === 0) {
+  let salesDate = anchor;
+  if (sales.length === 0 && requestedDate === null) {
     const latestSales = await prisma.salesSnapshot.findFirst({
       where: salesBranchFilter,
       orderBy: { snapshotDate: "desc" },
@@ -94,6 +113,11 @@ export async function GET(request: NextRequest) {
   const totalYesterday   = yesterdaySales.reduce((s, v) => s + Number(v.totalSales), 0);
 
   return NextResponse.json({
+    requestedDate: requestedDate ? requestedDate.toISOString() : null,
+    anchorDate:    anchor.toISOString(),
+    hasDataForRequestedDate: requestedDate !== null
+      ? (balances.length > 0 || sales.length > 0)
+      : true,
     kpis: {
       totalBankBalance, totalSales, totalUnits, totalReceipts, avgTicket,
       salesVariation: totalYesterday > 0 ? ((totalSales - totalYesterday) / totalYesterday) * 100 : null,

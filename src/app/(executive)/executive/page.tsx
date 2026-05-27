@@ -3,36 +3,35 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ExecutiveDashboard } from "@/components/executive/ExecutiveDashboard";
 import { ComparativeSection } from "@/components/executive/ComparativeSection";
+import { getArtToday, parseArtDate, isFutureArtDate } from "@/lib/dates/executive";
 
 export const revalidate = 300;
-
-// Devuelve "hoy" en TZ Argentina (UTC-3, sin DST), como Date a medianoche
-// UTC del dia ART. Compatible con Prisma @db.Date que devuelve fechas como
-// midnight UTC del dia almacenado.
-//
-// El server de Vercel corre en UTC. Usar new Date() + setHours(0,0,0,0) usa
-// TZ del server (UTC) — incorrecto cuando es 23:00 ART (= 02:00 UTC del dia
-// siguiente): el server ve "manana" pero en Argentina sigue siendo hoy.
-function getArtToday(): Date {
-  const artMs = Date.now() - 3 * 60 * 60 * 1000;
-  const art   = new Date(artMs);
-  return new Date(Date.UTC(art.getUTCFullYear(), art.getUTCMonth(), art.getUTCDate()));
-}
 
 export default async function ExecutivePage({
   searchParams,
 }: {
-  searchParams: { branch?: string };
+  searchParams: { branch?: string; date?: string };
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
   const branchId = searchParams.branch ?? "ALL";
+
+  // Resolución de la fecha de consulta:
+  //   - Si ?date= es válida y no futura → modo consulta histórica.
+  //   - Si ?date= es inválida o futura → ignoramos (volvemos al default "hoy").
+  //   - Si no hay ?date= → modo default, fallback al último disponible.
   const today = getArtToday();
+  const parsedRequested = parseArtDate(searchParams.date);
+  const requestedDate = parsedRequested && !isFutureArtDate(parsedRequested)
+    ? parsedRequested
+    : null;
+  const anchor = requestedDate ?? today;
   const yesterdayArt = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
+  // --- SALDOS ---
   const balanceWhere = {
-    snapshotDate: today,
+    snapshotDate: anchor,
     ...(branchId !== "ALL" && { branchId }),
     branch: { showInExecutive: true },
   };
@@ -42,9 +41,11 @@ export default async function ExecutivePage({
     orderBy: [{ branch: { name: "asc" } }, { bankName: "asc" }],
   });
   let isStaleBalances = false;
-  if (balances.length === 0) {
-    // Buscar el último snapshotDate con data y traer SOLO las rows de esa fecha.
-    // (Antes un "take 200" mezclaba múltiples fechas → cuentas "duplicadas" en UI.)
+
+  // Fallback al último disponible SOLO en modo default (sin ?date= explícita).
+  // Si el usuario pidió una fecha concreta, mostramos vacío en vez de
+  // confundirlo con datos de otro día.
+  if (balances.length === 0 && requestedDate === null) {
     const latestBalance = await prisma.bankBalanceSnapshot.findFirst({
       where: branchId !== "ALL"
         ? { branchId }
@@ -66,23 +67,20 @@ export default async function ExecutivePage({
     }
     isStaleBalances = true;
   }
-  // Saldos: Administración carga manualmente todos los días (incluso fin de
-  // semana). El snapshot solo es "fresco" si es de HOY ART — sin gracia de
-  // ayer. La query inicial filtra por snapshotDate=today, así que basta con
-  // el flag que ya quedó marcado en el fallback.
 
+  // --- VENTAS ---
   const salesBranchFilter = {
     ...(branchId !== "ALL" && { branchId }),
     branch: { showInExecutive: true, showInOperative: true },
   };
   let sales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: today, ...salesBranchFilter },
+    where: { snapshotDate: anchor, ...salesBranchFilter },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
   let isStaleSales = false;
-  let salesDate = today;
-  if (sales.length === 0) {
+  let salesDate = anchor;
+  if (sales.length === 0 && requestedDate === null) {
     const latestSales = await prisma.salesSnapshot.findFirst({
       where: salesBranchFilter,
       orderBy: { snapshotDate: "desc" },
@@ -98,10 +96,8 @@ export default async function ExecutivePage({
     }
     isStaleSales = true;
   }
-  // Regla de "stale legítimo": si el último snapshot es de AYER (TZ ART) o
-  // posterior, NO consideramos stale — es comportamiento normal (el cierre
-  // del día anterior es lo más reciente posible). Solo marcamos stale cuando
-  // los datos son anteriores a ayer (sync caído, archivo no llegó, etc.).
+  // Stale "legítimo" SOLO en modo default. Si la última fecha es de ayer
+  // (cierre normal del día anterior), no es stale. Solo si es anterior.
   if (isStaleSales && sales.length > 0 && salesDate.getTime() >= yesterdayArt.getTime()) {
     isStaleSales = false;
   }
@@ -129,15 +125,24 @@ export default async function ExecutivePage({
   const avgTicket        = totalReceipts > 0 ? totalSales / totalReceipts : 0;
   const totalYesterday   = yesterdaySales.reduce((s, v) => s + Number(v.totalSales), 0);
 
+  // Alertas amber (stale) — SOLO en modo default. En consulta histórica los
+  // estados de "no data" / "data parcial" se comunican vía DateContextBanner
+  // y no se mezclan con stale.
   const alertas: string[] = [];
-  if (isStaleBalances && balances.length > 0) {
-    alertas.push(`Saldos desactualizados. Último cierre disponible: ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")}`);
+  if (requestedDate === null) {
+    if (isStaleBalances && balances.length > 0) {
+      alertas.push(`Saldos desactualizados. Último cierre disponible: ${new Date(balances[0].snapshotDate).toLocaleDateString("es-AR")}`);
+    }
+    if (isStaleBalances && balances.length === 0) {
+      alertas.push("No hay saldos bancarios disponibles");
+    }
+    if (isStaleSales && sales.length > 0) {
+      alertas.push(`Ventas desactualizadas. Último cierre disponible: ${new Date(salesDate).toLocaleDateString("es-AR")}`);
+    }
+    if (isStaleSales && sales.length === 0) {
+      alertas.push("Sin datos de ventas disponibles.");
+    }
   }
-  if (isStaleBalances && balances.length === 0) alertas.push("No hay saldos bancarios disponibles");
-  if (isStaleSales && sales.length > 0) {
-    alertas.push(`Ventas desactualizadas. Último cierre disponible: ${new Date(salesDate).toLocaleDateString("es-AR")}`);
-  }
-  if (isStaleSales && sales.length === 0) alertas.push("Sin datos de ventas disponibles.");
 
   const balancesByBranchMap = new Map<string, { branchId: string; branchName: string; total: number; accounts: any[] }>();
   for (const b of balances) {
@@ -155,9 +160,15 @@ export default async function ExecutivePage({
     });
   }
 
+  const hasDataForRequestedDate = requestedDate !== null
+    ? (balances.length > 0 || sales.length > 0)
+    : true;
+
   const data = {
-    date: today,
-    isToday: true,
+    date: anchor,
+    isToday: anchor.getTime() === today.getTime(),
+    requestedDate,
+    hasDataForRequestedDate,
     branchFilter: branchId,
     kpis: {
       totalBankBalance, totalSales, totalUnits, totalReceipts, avgTicket,

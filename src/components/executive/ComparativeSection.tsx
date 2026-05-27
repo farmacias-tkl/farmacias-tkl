@@ -215,6 +215,10 @@ const COMP_CSS = `
 export function ComparativeSection() {
   const searchParams = useSearchParams();
   const branchId = searchParams.get("branch") ?? "ALL";
+  // Si la URL trae ?date=, el comparativo lo usa como anchor de los presets
+  // (en vez del MAX(snapshotDate) por defecto). En custom, las 4 fechas
+  // explícitas siguen mandando — date no aplica ahí.
+  const dateAnchor = searchParams.get("date") ?? "";
   const [period, setPeriod] = useState<Period>("30d");
 
   // Custom: draft = lo que el user esta editando; applied = lo aplicado al fetch.
@@ -236,11 +240,12 @@ export function ComparativeSection() {
 
   const { data, isLoading, error } = useQuery<ComparativeResponse>({
     // Cache key:
-    //  - preset: ["comparative", period, branchId]
+    //  - preset: ["comparative", period, branchId, dateAnchor]
     //  - custom aplicado: ["comparative", "custom", customApplied, branchId]
+    //    (custom no usa dateAnchor)
     queryKey: isCustom
       ? ["comparative", "custom", customApplied, branchId]
-      : ["comparative", period, branchId],
+      : ["comparative", period, branchId, dateAnchor],
     queryFn:  async () => {
       const url = new URL("/api/dashboard/comparative", window.location.origin);
       url.searchParams.set("branchId", branchId);
@@ -252,6 +257,7 @@ export function ComparativeSection() {
         url.searchParams.set("pastEnd",      customApplied.pastEnd);
       } else {
         url.searchParams.set("period", period);
+        if (dateAnchor) url.searchParams.set("date", dateAnchor);
       }
       const res = await fetch(url.toString());
       if (!res.ok) {

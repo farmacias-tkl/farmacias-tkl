@@ -2,12 +2,14 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LogOut, LayoutDashboard } from "lucide-react";
+import { LogOut, LayoutDashboard, RotateCcw } from "lucide-react";
 import { KPICard } from "./KPICard";
 import { BalanceTable } from "./BalanceTable";
 import { SalesTable } from "./SalesTable";
 import { AlertBanner } from "./AlertBanner";
+import { DateContextBanner } from "./DateContextBanner";
 import type { DashboardSummary } from "@/types/dashboard";
+import { getArtToday, toArtIsoDate } from "@/lib/dates/executive";
 
 // =============================================================================
 // Formatters deterministas (SSR-safe, sin toLocale*)
@@ -151,6 +153,47 @@ const EXEC_STYLES = `
 .exec-branch-select select:focus { border-color: #1E2D5A; }
 @media (min-width: 768px) { .exec-branch-select select { min-width: 180px; flex: none; } }
 
+/* === DATE PICKER === */
+.exec-date-row {
+  display: flex; flex-direction: column; gap: 0.625rem;
+}
+@media (min-width: 768px) { .exec-date-row { flex-direction: row; align-items: center; gap: 0.75rem; } }
+.exec-date-controls {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%;
+}
+@media (min-width: 768px) { .exec-date-controls { width: auto; } }
+.exec-date-controls label { font-size: 11px; color: #6b7280; white-space: nowrap; }
+.exec-date-controls input[type="date"] {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 8px;
+  padding: 0.5rem 0.625rem;
+  font-size: 14px;
+  color: #111827;
+  outline: none;
+  font-family: inherit;
+}
+.exec-date-controls input[type="date"]:focus { border-color: #1E2D5A; }
+@media (min-width: 768px) { .exec-date-controls input[type="date"] { min-width: 160px; flex: none; } }
+.exec-date-today-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 8px;
+  padding: 0.5rem 0.625rem;
+  font-size: 12px;
+  color: #1E2D5A;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.exec-date-today-btn:hover  { background: #F4F5F7; }
+.exec-date-today-btn:disabled {
+  opacity: 0.4; cursor: default; background: white;
+}
+
 /* === KPI GRID === */
 .exec-kpi-grid {
   display: grid;
@@ -247,10 +290,32 @@ export function ExecutiveDashboard({ data, user, children }: Props) {
   const currentBranch = searchParams.get("branch") ?? "ALL";
   const operativaUrl  = process.env.NEXT_PUBLIC_OPERATIONAL_URL || "/dashboard";
 
-  const onBranchChange = (id: string) => {
+  // Fecha: si hay ?date= en la URL, el SSR la valida y la refleja en
+  // data.requestedDate. Para el input usamos la URL como source of truth.
+  const urlDate = searchParams.get("date") ?? "";
+  const todayIso = toArtIsoDate(getArtToday());
+
+  const pushParams = (mutate: (p: URLSearchParams) => void) => {
     const p = new URLSearchParams(searchParams.toString());
-    if (id === "ALL") p.delete("branch"); else p.set("branch", id);
+    mutate(p);
     router.push(`/executive${p.toString() ? "?" + p.toString() : ""}`);
+  };
+
+  const onBranchChange = (id: string) => {
+    pushParams((p) => {
+      if (id === "ALL") p.delete("branch"); else p.set("branch", id);
+    });
+  };
+
+  const onDateChange = (iso: string) => {
+    pushParams((p) => {
+      // Si el usuario elige hoy, removemos el param (vuelve al modo default).
+      if (!iso || iso === todayIso) p.delete("date"); else p.set("date", iso);
+    });
+  };
+
+  const onTodayClick = () => {
+    pushParams((p) => p.delete("date"));
   };
 
   const lastSyncFmt = data.lastSync
@@ -303,17 +368,47 @@ export function ExecutiveDashboard({ data, user, children }: Props) {
               <h2 className="exec-date-title">{fmtLongDate(data.date)}</h2>
               <p className="exec-meta-line">Última sync: {lastSyncFmt}</p>
             </div>
-            <div className="exec-branch-select">
-              <label>Sucursal:</label>
-              <select value={currentBranch} onChange={(e) => onBranchChange(e.target.value)}>
-                <option value="ALL">Todas</option>
-                {data.branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
+            <div className="exec-date-row">
+              <div className="exec-date-controls">
+                <label htmlFor="exec-date-input">Fecha:</label>
+                <input
+                  id="exec-date-input"
+                  type="date"
+                  value={urlDate}
+                  max={todayIso}
+                  onChange={(e) => onDateChange(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="exec-date-today-btn"
+                  onClick={onTodayClick}
+                  disabled={!urlDate}
+                  title="Volver a la fecha de hoy"
+                >
+                  <RotateCcw style={{ width: 12, height: 12 }} />
+                  Hoy
+                </button>
+              </div>
+              <div className="exec-branch-select">
+                <label>Sucursal:</label>
+                <select value={currentBranch} onChange={(e) => onBranchChange(e.target.value)}>
+                  <option value="ALL">Todas</option>
+                  {data.branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
+          {/* Banner contextual de consulta histórica (azul/gris, NUNCA amber) */}
+          <DateContextBanner
+            requestedDate={data.requestedDate}
+            hasData={data.hasDataForRequestedDate}
+          />
+
+          {/* Banner amber: SOLO problemas operativos (sync atrasado / stale).
+              En modo consulta histórica el SSR no manda alertas acá. */}
           <AlertBanner alertas={data.alertas} />
 
           {/* KPIs — orden: Ventas → Ticket prom → Unidades → Tickets → Saldo */}

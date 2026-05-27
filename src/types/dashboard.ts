@@ -99,6 +99,17 @@ export interface ComparativeResponse {
 export interface DashboardSummary {
   date: Date;
   isToday: boolean;
+  /**
+   * Fecha explícita que pidió el usuario en ?date=. Null si no hay query param
+   * (modo "hoy" estándar). Cuando está presente, el dashboard está en modo
+   * consulta histórica y la UI debe mostrar DateContextBanner.
+   */
+  requestedDate: Date | null;
+  /**
+   * Solo aplica cuando requestedDate != null. Indica si hay snapshots
+   * (saldos o ventas) para esa fecha exacta.
+   */
+  hasDataForRequestedDate: boolean;
   branchFilter: string;
   kpis: DashboardKPIs;
   balancesByBranch: BranchBalance[];

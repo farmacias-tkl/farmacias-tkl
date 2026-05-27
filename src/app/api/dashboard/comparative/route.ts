@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parseArtDate, isFutureArtDate } from "@/lib/dates/executive";
 
 const EXECUTIVE_ROLES = ["OWNER", "ADMIN", "SUPERVISOR"];
 const VALID_PERIODS   = ["7d", "14d", "21d", "30d", "3m", "6m", "12m", "custom"];
@@ -118,17 +119,35 @@ export async function GET(request: NextRequest) {
     ranges = result.ranges;
     anchorDate = new Date(ranges.currentEnd);
   } else {
-    // Anchor = última fecha disponible bajo el filtro activo. Si la DB está vacía,
-    // fallback a hoy (los rangos quedarán vacíos pero no rompen).
-    const latestSnapshot = await prisma.salesSnapshot.findFirst({
-      where: { ...branchFilter, ...execVisibility },
-      orderBy: { snapshotDate: "desc" },
-      select: { snapshotDate: true },
-    });
-    anchorDate = latestSnapshot?.snapshotDate
-      ? new Date(latestSnapshot.snapshotDate)
-      : new Date();
-    anchorDate.setHours(0, 0, 0, 0);
+    // Anchor resolution priority:
+    //   1) ?date=YYYY-MM-DD válida y no futura → la usa
+    //   2) última snapshotDate disponible bajo el filtro
+    //   3) hoy (DB vacía)
+    const dateParam = searchParams.get("date");
+    let explicitAnchor: Date | null = null;
+    if (dateParam !== null) {
+      const parsed = parseArtDate(dateParam);
+      if (!parsed) {
+        return NextResponse.json({ error: "Parámetro date inválido (esperado YYYY-MM-DD)" }, { status: 400 });
+      }
+      if (isFutureArtDate(parsed)) {
+        return NextResponse.json({ error: "La fecha no puede ser futura" }, { status: 400 });
+      }
+      explicitAnchor = parsed;
+    }
+    if (explicitAnchor) {
+      anchorDate = explicitAnchor;
+    } else {
+      const latestSnapshot = await prisma.salesSnapshot.findFirst({
+        where: { ...branchFilter, ...execVisibility },
+        orderBy: { snapshotDate: "desc" },
+        select: { snapshotDate: true },
+      });
+      anchorDate = latestSnapshot?.snapshotDate
+        ? new Date(latestSnapshot.snapshotDate)
+        : new Date();
+      anchorDate.setHours(0, 0, 0, 0);
+    }
     ranges = getPeriodRanges(period, anchorDate)!;
   }
 
