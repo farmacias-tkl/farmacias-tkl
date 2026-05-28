@@ -32,6 +32,14 @@ export async function GET(request: NextRequest) {
   }
   const anchor = requestedDate ?? today;
 
+  // Convención del negocio (idéntica al SSR /executive): las VENTAS reflejan
+  // el cierre del DÍA ANTERIOR al anchor. Saldos van contra anchor directo.
+  // En modo default la query inicial puede quedar vacía y caer al fallback;
+  // en modo histórico vamos directo a anchor-1 sin fallback.
+  const salesQueryDate = requestedDate !== null
+    ? new Date(anchor.getTime() - 24 * 60 * 60 * 1000)
+    : anchor;
+
   // --- SALDOS ---
   const balanceWhere = {
     snapshotDate: anchor,
@@ -75,12 +83,12 @@ export async function GET(request: NextRequest) {
     branch: { showInExecutive: true, showInOperative: true },
   };
   let sales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: anchor, ...salesBranchFilter },
+    where: { snapshotDate: salesQueryDate, ...salesBranchFilter },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
   let isStaleSales = false;
-  let salesDate = anchor;
+  let salesDate = salesQueryDate;
   if (sales.length === 0 && requestedDate === null) {
     const latestSales = await prisma.salesSnapshot.findFirst({
       where: salesBranchFilter,

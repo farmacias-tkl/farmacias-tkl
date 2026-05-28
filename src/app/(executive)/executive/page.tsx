@@ -29,6 +29,19 @@ export default async function ExecutivePage({
   const anchor = requestedDate ?? today;
   const yesterdayArt = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
+  // Convención del negocio: las VENTAS del dashboard reflejan el cierre del
+  // DÍA ANTERIOR al anchor.
+  //   - Modo default (anchor=today): la query inicial contra today queda
+  //     vacía y cae al fallback "latestSales" que típicamente devuelve ayer.
+  //   - Modo histórico (anchor=?date=): el fallback está deshabilitado por
+  //     diseño. Hay que ir contra anchor-1 explícitamente para no traer las
+  //     ventas del propio día del anchor (= snapshot recién cargado por la
+  //     mañana, no es lo que el negocio quiere ver).
+  // Los SALDOS sí van contra anchor directo — son el snapshot de esa mañana.
+  const salesQueryDate = requestedDate !== null
+    ? new Date(anchor.getTime() - 24 * 60 * 60 * 1000)
+    : anchor;
+
   // --- SALDOS ---
   const balanceWhere = {
     snapshotDate: anchor,
@@ -74,12 +87,12 @@ export default async function ExecutivePage({
     branch: { showInExecutive: true, showInOperative: true },
   };
   let sales = await prisma.salesSnapshot.findMany({
-    where: { snapshotDate: anchor, ...salesBranchFilter },
+    where: { snapshotDate: salesQueryDate, ...salesBranchFilter },
     include: { branch: { select: { id: true, name: true } } },
     orderBy: { branch: { name: "asc" } },
   });
   let isStaleSales = false;
-  let salesDate = anchor;
+  let salesDate = salesQueryDate;
   if (sales.length === 0 && requestedDate === null) {
     const latestSales = await prisma.salesSnapshot.findFirst({
       where: salesBranchFilter,
