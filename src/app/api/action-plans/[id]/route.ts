@@ -75,27 +75,31 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const { status } = parsed.data;
   const isTerminal = TERMINAL.includes(status as Terminal);
 
-  const updated = await prisma.actionPlan.update({
-    where: { id: params.id },
-    data: {
-      status,
-      closedAt: isTerminal && !plan.closedAt ? new Date() : plan.closedAt,
-    },
-    include: {
-      employee: { select: { id: true, firstName: true, lastName: true } },
-      branch:   { select: { id: true, name: true } },
-    },
-  });
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.actionPlan.update({
+      where: { id: params.id },
+      data: {
+        status,
+        closedAt: isTerminal && !plan.closedAt ? new Date() : plan.closedAt,
+      },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        branch:   { select: { id: true, name: true } },
+      },
+    });
 
-  await prisma.auditLog.create({
-    data: {
-      userId:   session!.user.id,
-      action:   "UPDATE",
-      entity:   "ActionPlan",
-      entityId: plan.id,
-      detail:   { from: plan.status, to: status },
-    },
-  }).catch(() => {});
+    await tx.auditLog.create({
+      data: {
+        userId:   session!.user.id,
+        action:   "UPDATE",
+        entity:   "ActionPlan",
+        entityId: plan.id,
+        detail:   { from: plan.status, to: status },
+      },
+    });
+
+    return u;
+  });
 
   return NextResponse.json({ data: updated });
 }

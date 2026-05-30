@@ -124,23 +124,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const plan = await prisma.actionPlan.create({
-    data: { ...data, createdByUserId: session!.user.id, status: "OPEN" },
-    include: {
-      employee: { select: { id: true, firstName: true, lastName: true } },
-      branch:   { select: { id: true, name: true } },
-    },
-  });
+  const plan = await prisma.$transaction(async (tx) => {
+    const created = await tx.actionPlan.create({
+      data: { ...data, createdByUserId: session!.user.id, status: "OPEN" },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        branch:   { select: { id: true, name: true } },
+      },
+    });
 
-  await prisma.auditLog.create({
-    data: {
-      userId:   session!.user.id,
-      action:   "CREATE",
-      entity:   "ActionPlan",
-      entityId: plan.id,
-      detail:   { employee: `${employee.firstName} ${employee.lastName}`, reason: data.reason },
-    },
-  }).catch(() => {});
+    await tx.auditLog.create({
+      data: {
+        userId:   session!.user.id,
+        action:   "CREATE",
+        entity:   "ActionPlan",
+        entityId: created.id,
+        detail:   { employee: `${employee.firstName} ${employee.lastName}`, reason: data.reason },
+      },
+    });
+
+    return created;
+  });
 
   return NextResponse.json({ data: plan }, { status: 201 });
 }

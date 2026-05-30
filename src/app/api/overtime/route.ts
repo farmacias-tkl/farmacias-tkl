@@ -133,23 +133,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const record = await prisma.overtimeRecord.create({
-    data: { ...data, reportedByUserId: session!.user.id, status: "REPORTED" },
-    include: {
-      employee: { select: { id: true, firstName: true, lastName: true } },
-      branch:   { select: { id: true, name: true } },
-    },
-  });
+  const record = await prisma.$transaction(async (tx) => {
+    const created = await tx.overtimeRecord.create({
+      data: { ...data, reportedByUserId: session!.user.id, status: "REPORTED" },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        branch:   { select: { id: true, name: true } },
+      },
+    });
 
-  await prisma.auditLog.create({
-    data: {
-      userId:   session!.user.id,
-      action:   "CREATE",
-      entity:   "OvertimeRecord",
-      entityId: record.id,
-      detail:   { employee: `${employee.firstName} ${employee.lastName}`, hours: data.hours, date: data.date },
-    },
-  }).catch(() => {});
+    await tx.auditLog.create({
+      data: {
+        userId:   session!.user.id,
+        action:   "CREATE",
+        entity:   "OvertimeRecord",
+        entityId: created.id,
+        detail:   { employee: `${employee.firstName} ${employee.lastName}`, hours: data.hours, date: data.date },
+      },
+    });
+
+    return created;
+  });
 
   return NextResponse.json({ data: record }, { status: 201 });
 }

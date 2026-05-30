@@ -95,22 +95,22 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    await tx.auditLog.create({
+      data: {
+        userId:   session!.user.id,
+        action:   "CREATE",
+        entity:   "ActionPlan",
+        entityId: plan.id,
+        detail: {
+          employee: `${employee.firstName} ${employee.lastName}`,
+          reason:   data.reason,
+          hasForm:  true,
+        },
+      },
+    });
+
     return { plan, form };
   });
-
-  await prisma.auditLog.create({
-    data: {
-      userId:   session!.user.id,
-      action:   "CREATE",
-      entity:   "ActionPlan",
-      entityId: result.plan.id,
-      detail: {
-        employee: `${employee.firstName} ${employee.lastName}`,
-        reason:   data.reason,
-        hasForm:  true,
-      },
-    },
-  }).catch(() => {});
 
   return NextResponse.json({ data: result }, { status: 201 });
 }
