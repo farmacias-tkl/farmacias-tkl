@@ -1,12 +1,9 @@
 "use client";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, ClipboardList, AlertTriangle, CheckCircle2,
+  ClipboardList, AlertTriangle, CheckCircle2,
   ChevronDown, ChevronUp, Clock, XCircle,
 } from "lucide-react";
 import { can } from "@/lib/permissions";
@@ -21,31 +18,14 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   CANCELLED:   { label: "Cancelado",     color: "bg-gray-50 text-gray-400 border-gray-200",     icon: XCircle },
 };
 
-const today = new Date().toISOString().split("T")[0];
-
-const createSchema = z.object({
-  employeeId:      z.string().min(1, "Empleado obligatorio"),
-  branchId:        z.string().min(1, "Sucursal obligatoria"),
-  date:            z.string().min(1, "Fecha obligatoria"),
-  reason:          z.string().min(1, "Motivo obligatorio"),
-  requiredActions: z.string().min(1, "Acciones requeridas obligatorias"),
-  deadline:        z.string().min(1, "Plazo obligatorio"),
-  notes:           z.string().optional(),
-});
-type CreateForm = z.infer<typeof createSchema>;
-
 export default function PlanesAccionPage() {
   const { data: session, status } = useSession();
   const qc   = useQueryClient();
   const role = session?.user?.role as UserRole;
   const userBranchId = session?.user?.branchId;
 
-  const [showForm,    setShowForm]    = useState(false);
   const [branchFilter,setBranchFilter]= useState("");
   const [statusFilter,setStatusFilter]= useState("");
-  const [formBranchId,setFormBranchId]= useState(
-    role === "BRANCH_MANAGER" ? (userBranchId ?? "") : ""
-  );
 
   const sessionReady    = status === "authenticated";
   const isBranchManager = role === "BRANCH_MANAGER";
@@ -73,44 +53,9 @@ export default function PlanesAccionPage() {
     enabled: sessionReady,
   });
 
-  const { data: empRes, isLoading: empLoading } = useQuery({
-    queryKey: ["employees-for-plan", formBranchId],
-    queryFn: async () => {
-      if (!formBranchId) return { data: [] };
-      const p = new URLSearchParams({ limit: "200", branchId: formBranchId });
-      return fetch(`/api/employees?${p}`).then(r => r.json());
-    },
-    enabled: sessionReady && !!formBranchId,
-  });
-
   const branches  = branchRes?.data  ?? [];
-  const employees = empRes?.data     ?? [];
   const plans     = plansData?.data  ?? [];
   const total     = plansData?.meta?.total ?? 0;
-
-  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateForm>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { date: today, branchId: isBranchManager ? (userBranchId ?? "") : "" },
-  });
-
-  const createMut = useMutation({
-    mutationFn: async (data: CreateForm) => {
-      const res = await fetch("/api/action-plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Error");
-      return json;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["action-plans"] });
-      reset({ date: today, branchId: isBranchManager ? (userBranchId ?? "") : "" });
-      setFormBranchId(isBranchManager ? (userBranchId ?? "") : "");
-      setShowForm(false);
-    },
-  });
 
   const updateStatus = async (id: string, newStatus: string) => {
     await fetch(`/api/action-plans/${id}`, {
@@ -141,100 +86,7 @@ export default function PlanesAccionPage() {
             )}
           </p>
         </div>
-        {canCreate && (
-          <button onClick={() => setShowForm(v => !v)} className="btn-primary">
-            <Plus className="w-4 h-4" />Nuevo plan
-          </button>
-        )}
       </div>
-
-      {showForm && canCreate && (
-        <div className="card p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Nuevo plan de accion</h3>
-          <form onSubmit={handleSubmit(d => createMut.mutate(d))} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {!isBranchManager ? (
-                <div>
-                  <label className="label">Sucursal *</label>
-                  <select
-                    className={cn("input", errors.branchId && "input-error")}
-                    value={formBranchId}
-                    onChange={e => { setFormBranchId(e.target.value); setValue("branchId", e.target.value); setValue("employeeId", ""); }}>
-                    <option value="">Selecciona sucursal</option>
-                    {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                  {errors.branchId && <p className="error-msg">{errors.branchId.message}</p>}
-                </div>
-              ) : (
-                <div>
-                  <label className="label">Sucursal</label>
-                  <input className="input bg-gray-50 text-gray-500" disabled
-                    value={branches.find((b: any) => b.id === userBranchId)?.name ?? "Tu sucursal"} />
-                  <input type="hidden" {...register("branchId")} />
-                </div>
-              )}
-
-              <div>
-                <label className="label">Empleado *{empLoading && <span className="ml-1 text-xs text-gray-400">(cargando...)</span>}</label>
-                <select {...register("employeeId")}
-                  className={cn("input", errors.employeeId && "input-error")}
-                  disabled={!formBranchId || empLoading}>
-                  <option value="">{!formBranchId ? "Primero selecciona sucursal" : "Selecciona empleado"}</option>
-                  {employees.map((e: any) => (
-                    <option key={e.id} value={e.id}>{e.firstName} {e.lastName} — {e.position?.name}</option>
-                  ))}
-                </select>
-                {errors.employeeId && <p className="error-msg">{errors.employeeId.message}</p>}
-              </div>
-
-              <div>
-                <label className="label">Fecha del incidente *</label>
-                <input type="date" {...register("date")} className={cn("input", errors.date && "input-error")} />
-                {errors.date && <p className="error-msg">{errors.date.message}</p>}
-              </div>
-
-              <div>
-                <label className="label">Plazo de cumplimiento *</label>
-                <input type="date" {...register("deadline")} className={cn("input", errors.deadline && "input-error")} />
-                {errors.deadline && <p className="error-msg">{errors.deadline.message}</p>}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">Motivo / incumplimiento *</label>
-                <input {...register("reason")} className={cn("input", errors.reason && "input-error")}
-                  placeholder="Descripcion del incumplimiento o motivo del plan" />
-                {errors.reason && <p className="error-msg">{errors.reason.message}</p>}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">Acciones requeridas *</label>
-                <textarea {...register("requiredActions")} rows={3} className={cn("input resize-none", errors.requiredActions && "input-error")}
-                  placeholder="Detalla las acciones que debe cumplir el empleado" />
-                {errors.requiredActions && <p className="error-msg">{errors.requiredActions.message}</p>}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">Observaciones</label>
-                <textarea {...register("notes")} rows={2} className="input resize-none" />
-              </div>
-            </div>
-
-            {createMut.isError && (
-              <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
-                {(createMut.error as Error).message}
-              </p>
-            )}
-
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => { setShowForm(false); reset({ date: today }); setFormBranchId(""); }}
-                className="btn-secondary">Cancelar</button>
-              <button type="submit" disabled={createMut.isPending} className="btn-primary">
-                {createMut.isPending ? "Guardando..." : "Crear plan"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">

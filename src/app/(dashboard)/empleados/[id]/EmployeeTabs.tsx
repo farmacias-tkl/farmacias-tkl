@@ -39,8 +39,6 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
     router.push(`${pathname}?${p.toString()}`);
   };
 
-  const employeeName = `${employee.firstName} ${employee.lastName}`;
-
   return (
     <div className="space-y-4">
 
@@ -78,9 +76,6 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
       {activeTab === "planes" && (
         <ActionPlansTab
           employeeId={employee.id}
-          employeeName={employeeName}
-          branchId={employee.currentBranchId}
-          branchName={employee.currentBranch?.name ?? null}
           canCreate={canCreate}
         />
       )}

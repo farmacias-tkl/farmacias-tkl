@@ -1,24 +1,13 @@
 /**
- * GET  /api/action-plans
- * POST /api/action-plans
+ * GET /api/action-plans
  *
- * BRANCH_MANAGER: GET forzado a su sucursal. POST verifica que branchId coincide.
+ * BRANCH_MANAGER: GET forzado a su sucursal.
+ * La creación de planes se hace exclusivamente vía POST /api/action-plan-forms/complete.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { can, requireAuth, requireCan } from "@/lib/permissions";
-import { z } from "zod";
-
-const createSchema = z.object({
-  employeeId:      z.string().min(1),
-  branchId:        z.string().min(1),
-  date:            z.string().transform(d => new Date(d)),
-  reason:          z.string().min(1, "El motivo es obligatorio"),
-  requiredActions: z.string().min(1, "Las acciones requeridas son obligatorias"),
-  deadline:        z.string().transform(d => new Date(d)),
-  notes:           z.string().optional().nullable(),
-});
+import { requireAuth } from "@/lib/permissions";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -73,78 +62,4 @@ export async function GET(req: NextRequest) {
     data: enriched,
     meta: { total, page, limit, pages: Math.ceil(total / limit) },
   });
-}
-
-export async function POST(req: NextRequest) {
-  const session = await auth();
-  const permErr = requireCan(can.createActionPlan, session);
-  if (permErr) return NextResponse.json({ error: permErr.error }, { status: permErr.status });
-
-  const body = await req.json();
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Datos invalidos", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { data } = parsed;
-
-  // BRANCH_MANAGER solo puede crear planes en su sucursal
-  if (
-    session!.user.role === "BRANCH_MANAGER" &&
-    data.branchId !== session!.user.branchId
-  ) {
-    return NextResponse.json(
-      { error: "Solo podes crear planes de accion en tu sucursal" },
-      { status: 403 }
-    );
-  }
-
-  if (data.deadline < data.date) {
-    return NextResponse.json(
-      { error: "El plazo no puede ser anterior a la fecha del plan" },
-      { status: 400 }
-    );
-  }
-
-  const [employee, branch] = await Promise.all([
-    prisma.employee.findUnique({ where: { id: data.employeeId } }),
-    prisma.branch.findUnique({ where: { id: data.branchId } }),
-  ]);
-  if (!employee) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
-  if (!branch)   return NextResponse.json({ error: "Sucursal no encontrada" }, { status: 404 });
-
-  // Verificar que el empleado pertenece a la sucursal indicada
-  if (employee.currentBranchId && employee.currentBranchId !== data.branchId) {
-    return NextResponse.json(
-      { error: "El empleado no pertenece a la sucursal indicada" },
-      { status: 400 }
-    );
-  }
-
-  const plan = await prisma.$transaction(async (tx) => {
-    const created = await tx.actionPlan.create({
-      data: { ...data, createdByUserId: session!.user.id, status: "OPEN" },
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true } },
-        branch:   { select: { id: true, name: true } },
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        userId:   session!.user.id,
-        action:   "CREATE",
-        entity:   "ActionPlan",
-        entityId: created.id,
-        detail:   { employee: `${employee.firstName} ${employee.lastName}`, reason: data.reason },
-      },
-    });
-
-    return created;
-  });
-
-  return NextResponse.json({ data: plan }, { status: 201 });
 }

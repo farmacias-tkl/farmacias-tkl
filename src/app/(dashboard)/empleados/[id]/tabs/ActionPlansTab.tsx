@@ -1,12 +1,9 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, ClipboardList, AlertTriangle,
+  ClipboardList, AlertTriangle,
   CheckCircle2, ChevronDown, ChevronUp, Clock, XCircle, FileText, FileDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,70 +16,25 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   CANCELLED:   { label: "Cancelado",  color: "bg-gray-50 text-gray-400 border-gray-200",    icon: XCircle },
 };
 const TERMINAL = ["COMPLETED", "CLOSED", "CANCELLED"];
-const today = new Date().toISOString().split("T")[0];
-
-const createSchema = z.object({
-  branchId:        z.string().min(1, "Sucursal obligatoria"),
-  date:            z.string().min(1, "Fecha obligatoria"),
-  reason:          z.string().min(1, "Motivo obligatorio"),
-  requiredActions: z.string().min(1, "Acciones requeridas obligatorias"),
-  deadline:        z.string().min(1, "Plazo obligatorio"),
-  notes:           z.string().optional(),
-});
-type CreateForm = z.infer<typeof createSchema>;
 
 interface Props {
-  employeeId:   string;
-  employeeName: string;
-  branchId:     string | null;
-  branchName:   string | null;
-  canCreate:    boolean;
+  employeeId: string;
+  canCreate:  boolean;
 }
 
 export default function ActionPlansTab({
-  employeeId, employeeName, branchId, branchName, canCreate,
+  employeeId, canCreate,
 }: Props) {
   const qc = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
 
   const { data: plansData, isLoading } = useQuery({
     queryKey: ["action-plans-tab", employeeId],
     queryFn:  () => fetch(`/api/action-plans?employeeId=${employeeId}&limit=50`).then(r => r.json()),
   });
 
-  const { data: branchRes } = useQuery({
-    queryKey: ["branches"],
-    queryFn:  () => fetch("/api/branches").then(r => r.json()),
-    enabled:  canCreate && !branchId,
-  });
-
   const plans        = plansData?.data       ?? [];
   const total        = plansData?.meta?.total ?? 0;
-  const branches     = branchRes?.data        ?? [];
   const overdueCount = plans.filter((p: any) => p.isOverdue).length;
-
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateForm>({
-    resolver:      zodResolver(createSchema),
-    defaultValues: { date: today, branchId: branchId ?? "" },
-  });
-
-  const createMut = useMutation({
-    mutationFn: async (data: CreateForm) => {
-      const res = await fetch("/api/action-plans", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ ...data, employeeId }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Error al crear plan");
-      return json;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["action-plans-tab", employeeId] });
-      reset({ date: today, branchId: branchId ?? "" });
-      setShowForm(false);
-    },
-  });
 
   const updateStatus = async (id: string, status: string) => {
     await fetch(`/api/action-plans/${id}`, {
@@ -108,97 +60,14 @@ export default function ActionPlansTab({
           )}
         </div>
         {canCreate && (
-          <div className="flex gap-2">
-            <Link
-              href={`/empleados/${employeeId}/planes/nuevo`}
-              className="btn-primary inline-flex items-center gap-1.5"
-            >
-              <FileText className="w-4 h-4" />Plan digital
-            </Link>
-            <button onClick={() => setShowForm(v => !v)} className="btn-secondary">
-              <Plus className="w-4 h-4" />Rápido
-            </button>
-          </div>
+          <Link
+            href={`/empleados/${employeeId}/planes/nuevo`}
+            className="btn-primary inline-flex items-center gap-1.5"
+          >
+            <FileText className="w-4 h-4" />Plan digital
+          </Link>
         )}
       </div>
-
-      {/* Formulario de creación */}
-      {showForm && canCreate && (
-        <div className="card p-4">
-          <h4 className="text-sm font-semibold text-gray-900 mb-4">
-            Nuevo plan — {employeeName}
-          </h4>
-          <form onSubmit={handleSubmit(d => createMut.mutate(d))} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-
-              {branchId ? (
-                <div className="sm:col-span-2">
-                  <label className="label">Sucursal</label>
-                  <p className="text-sm text-gray-700 py-1">{branchName}</p>
-                  <input type="hidden" {...register("branchId")} defaultValue={branchId} />
-                </div>
-              ) : (
-                <div className="sm:col-span-2">
-                  <label className="label">Sucursal *</label>
-                  <select {...register("branchId")} className={cn("input", errors.branchId && "input-error")}>
-                    <option value="">Seleccioná una sucursal</option>
-                    {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                  {errors.branchId && <p className="error-msg">{errors.branchId.message}</p>}
-                </div>
-              )}
-
-              <div>
-                <label className="label">Fecha *</label>
-                <input type="date" {...register("date")}
-                  className={cn("input", errors.date && "input-error")} />
-                {errors.date && <p className="error-msg">{errors.date.message}</p>}
-              </div>
-              <div>
-                <label className="label">Plazo límite *</label>
-                <input type="date" {...register("deadline")}
-                  className={cn("input", errors.deadline && "input-error")} />
-                {errors.deadline && <p className="error-msg">{errors.deadline.message}</p>}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">Motivo / incumplimiento *</label>
-                <textarea {...register("reason")} rows={2}
-                  className={cn("input resize-none", errors.reason && "input-error")}
-                  placeholder="Descripción del incumplimiento o motivo del plan" />
-                {errors.reason && <p className="error-msg">{errors.reason.message}</p>}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">Acciones requeridas *</label>
-                <textarea {...register("requiredActions")} rows={2}
-                  className={cn("input resize-none", errors.requiredActions && "input-error")}
-                  placeholder="Detallá las acciones que debe cumplir el empleado" />
-                {errors.requiredActions && <p className="error-msg">{errors.requiredActions.message}</p>}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="label">Notas adicionales</label>
-                <textarea {...register("notes")} rows={2} className="input resize-none" />
-              </div>
-            </div>
-
-            {createMut.isError && (
-              <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
-                {(createMut.error as Error).message}
-              </p>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => { setShowForm(false); reset(); }} className="btn-secondary">
-                Cancelar
-              </button>
-              <button type="submit" disabled={createMut.isPending} className="btn-primary">
-                {createMut.isPending ? "Guardando..." : "Crear plan"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Lista */}
       {isLoading ? (
