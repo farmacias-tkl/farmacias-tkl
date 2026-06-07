@@ -8,6 +8,29 @@ historial: `git log` en el repo.
 
 ---
 
+## Junio 2026
+
+### feat (action-plans) — Fase 2a: cumplimiento calculado server-side
+
+- `315124b` — `generalScore` y % de cumplimiento se calculan en el server (no se
+  eligen a mano): capa pura `compliance.ts` con polaridad por ítem, `generalScore`
+  derivado por umbrales (<0.81 NECESITA_MEJORAR / [0.81,0.95) BUENO / ≥0.95
+  EXCELENTE), `complianceRatio` persistido en `ActionPlanForm`, picker manual
+  eliminado del formulario, y % visible en el form (en vivo) y en el PDF (desde
+  el valor persistido). Aplicado a Neon + backfill de los 3 forms reales (1
+  corrigió score EXCELENTE→NECESITA_MEJORAR).
+
+### chore (action-plans)
+
+- `31d8842` — script de backfill de `complianceRatio` para `ActionPlanForm`
+  (toma la conexión del `.env`, sin credenciales) + ignore de `__pycache__/`.
+
+> **Pendiente — Fase 2b:** guard en `PATCH /api/action-plans/[id]` que bloquee
+> toda transición de salida de `COMPLETED`, y baja del endpoint huérfano
+> `src/app/api/action-plan-forms/route.ts` (segunda fuente manual de `generalScore`).
+
+---
+
 ## Mayo 2026
 
 ### chore
