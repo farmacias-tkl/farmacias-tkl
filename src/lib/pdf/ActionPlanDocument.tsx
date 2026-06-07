@@ -3,6 +3,7 @@ import {
   Document, Page, View, Text, Image, StyleSheet, Font,
 } from "@react-pdf/renderer";
 import type { TemplateSection } from "@/lib/action-plan-templates";
+import { evaluateForm } from "@/lib/action-plan-templates/compliance";
 
 const NAVY   = "#1e3a8a";
 const ORANGE = "#F59E0B";
@@ -179,6 +180,10 @@ export default function ActionPlanDocument({
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
 
+  const answerById = new Map(
+    evaluateForm(formData, sections).items.map(i => [i.id, i.answer]),
+  );
+
   return (
     <Document>
       <Page size="A4" style={styles.page}>
@@ -234,7 +239,7 @@ export default function ActionPlanDocument({
             </View>
             {section.items.map((item, idx) => {
               const isLast = idx === section.items.length - 1;
-              const value  = formData[item.id] ?? "—";
+              const value  = answerById.get(item.id) ?? "—";
               return (
                 <View key={item.id} style={isLast ? styles.tableRowLast : styles.tableRow}>
                   <Text style={styles.tableCell}>{item.label}</Text>
