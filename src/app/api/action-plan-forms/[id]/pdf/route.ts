@@ -64,6 +64,7 @@ export async function GET(
     sections,
     formData,
     generalScore:    form.generalScore,
+    complianceRatio: form.complianceRatio,
     improvementPlan: form.improvementPlan,
     nextReview:      form.nextReview?.toISOString() ?? null,
   });

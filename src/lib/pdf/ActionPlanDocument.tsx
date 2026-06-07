@@ -158,6 +158,7 @@ interface Props {
   sections: TemplateSection[];
   formData: Record<string, "SI" | "NO">;
   generalScore: string;
+  complianceRatio?: number | null;
   improvementPlan?: string | null;
   nextReview?: string | null;
 }
@@ -174,6 +175,7 @@ export default function ActionPlanDocument({
   sections,
   formData,
   generalScore,
+  complianceRatio,
   improvementPlan,
   nextReview,
 }: Props) {
@@ -254,8 +256,16 @@ export default function ActionPlanDocument({
           </View>
         ))}
 
-        {/* General score */}
+        {/* General score — % y calificación desde los valores persistidos */}
         <View style={styles.scoreRow}>
+          {complianceRatio != null && (
+            <>
+              <Text style={styles.scoreLabel}>Cumplimiento:</Text>
+              <Text style={[styles.scoreBadge, { backgroundColor: LIGHT, color: "#111827" }]}>
+                {Math.round(complianceRatio * 100)}%
+              </Text>
+            </>
+          )}
           <Text style={styles.scoreLabel}>Calificación general:</Text>
           <Text style={[styles.scoreBadge, scoreStyle(generalScore)]}>
             {scoreLabel(generalScore)}

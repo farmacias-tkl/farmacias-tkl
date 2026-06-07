@@ -5,18 +5,24 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { MOSTRADOR_TEMPLATE } from "@/lib/action-plan-templates/mostrador";
 import type { TemplateSection } from "@/lib/action-plan-templates/mostrador";
+import { evaluateForm, type GeneralScore } from "@/lib/action-plan-templates/compliance";
 
 const SECTIONS: TemplateSection[] = MOSTRADOR_TEMPLATE;
 
 type ItemValue = "SI" | "NO" | null;
 type FormData  = Record<string, ItemValue>;
-type Score     = "EXCELENTE" | "BUENO" | "NECESITA_MEJORAR";
 
-const SCORE_OPTIONS: { value: Score; label: string; color: string }[] = [
-  { value: "EXCELENTE",        label: "Excelente",        color: "bg-green-100 text-green-800 border-green-300" },
-  { value: "BUENO",            label: "Bueno",            color: "bg-yellow-100 text-yellow-800 border-yellow-300" },
-  { value: "NECESITA_MEJORAR", label: "Necesita mejorar", color: "bg-red-100 text-red-800 border-red-300" },
-];
+const SCORE_LABEL: Record<GeneralScore, string> = {
+  EXCELENTE:        "Excelente",
+  BUENO:            "Bueno",
+  NECESITA_MEJORAR: "Necesita mejorar",
+};
+
+const SCORE_COLOR: Record<GeneralScore, string> = {
+  EXCELENTE:        "bg-green-100 text-green-800 border-green-300",
+  BUENO:            "bg-yellow-100 text-yellow-800 border-yellow-300",
+  NECESITA_MEJORAR: "bg-red-100 text-red-800 border-red-300",
+};
 
 interface Props {
   employeeId:      string;
@@ -44,7 +50,6 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
   const [selectedBranch,  setSelectedBranch]  = useState(branchId ?? "");
 
   const [formData,        setFormData]        = useState<FormData>(buildInitialFormData);
-  const [generalScore,    setGeneralScore]    = useState<Score | null>(null);
   const [improvementPlan, setImprovementPlan] = useState("");
   const [nextReview,      setNextReview]      = useState("");
 
@@ -65,6 +70,13 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
 
   const allFilled = Object.values(formData).every(v => v !== null);
 
+  // Resultado en vivo: evaluateForm tira con respuestas null, así que solo lo
+  // calculamos cuando están los 23 ítems. El número definitivo lo recalcula el
+  // server en la creación (esto es solo preview para el encargado).
+  const compliance = allFilled
+    ? evaluateForm(formData as Record<string, "SI" | "NO">, SECTIONS)
+    : null;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (saving || submitted) return;
@@ -73,7 +85,6 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
     if (!deadline)               { setError("El plazo es obligatorio"); return; }
     if (!selectedBranch)         { setError("Seleccioná una sucursal"); return; }
     if (!allFilled)              { setError("Completá todos los ítems de evaluación"); return; }
-    if (!generalScore)           { setError("Seleccioná una calificación general"); return; }
 
     setSaving(true);
     setError(null);
@@ -92,7 +103,6 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
           notes:           notes || null,
           templateType:    "MOSTRADOR",
           formData,
-          generalScore,
           improvementPlan: improvementPlan || null,
           nextReview:      nextReview || null,
         }),
@@ -248,26 +258,27 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
         )}
       </div>
 
-      {/* Calificación general */}
+      {/* Calificación general — derivada del cumplimiento (calculada, no manual) */}
       <div className="card p-5 space-y-3">
         <h3 className="text-sm font-semibold text-gray-700">Calificación general</h3>
-        <div className="flex gap-3 flex-wrap">
-          {SCORE_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setGeneralScore(opt.value)}
-              className={cn(
-                "px-4 py-2 rounded-lg border text-sm font-medium transition-all",
-                generalScore === opt.value
-                  ? opt.color + " ring-2 ring-offset-1 ring-current"
-                  : "bg-white border-gray-200 text-gray-600 hover:border-gray-400",
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        {compliance ? (
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm text-gray-700">
+              Cumplimiento: <strong>{Math.round(compliance.ratio * 100)}%</strong>
+              <span className="text-gray-400"> ({compliance.favorableCount}/{compliance.totalItems})</span>
+            </span>
+            <span className={cn(
+              "px-4 py-2 rounded-lg border text-sm font-medium",
+              SCORE_COLOR[compliance.generalScore],
+            )}>
+              {SCORE_LABEL[compliance.generalScore]}
+            </span>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">
+            Completá los {SECTIONS.reduce((n, s) => n + s.items.length, 0)} ítems para ver la calificación.
+          </p>
+        )}
       </div>
 
       {/* Seguimiento */}

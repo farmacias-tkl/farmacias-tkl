@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireCan } from "@/lib/permissions";
+import { getTemplate } from "@/lib/action-plan-templates";
+import { evaluateForm } from "@/lib/action-plan-templates/compliance";
 import { z } from "zod";
 
 const schema = z.object({
@@ -17,7 +19,6 @@ const schema = z.object({
   // ActionPlanForm fields
   templateType:    z.enum(["MOSTRADOR", "CADETE", "CAJERA", "AUDITORIA"]),
   formData:        z.record(z.string(), z.enum(["SI", "NO"])),
-  generalScore:    z.enum(["EXCELENTE", "BUENO", "NECESITA_MEJORAR"]),
   improvementPlan: z.string().optional().nullable(),
   nextReview:      z.string().optional().nullable().transform(v => v ? new Date(v) : null),
 });
@@ -69,6 +70,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Compliance derivado en el server: el ratio y la calificación se calculan acá
+  // (no se eligen a mano). Es puro, así que va antes del $transaction; si el
+  // formData no matchea el template, evaluateForm tira → 400 limpio, sin tocar DB.
+  let compliance;
+  try {
+    const sections = getTemplate(data.templateType);
+    compliance = evaluateForm(data.formData, sections);
+  } catch {
+    return NextResponse.json(
+      { error: "formData inválido para el template" },
+      { status: 400 },
+    );
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const plan = await tx.actionPlan.create({
       data: {
@@ -89,7 +104,8 @@ export async function POST(req: NextRequest) {
         actionPlanId:    plan.id,
         templateType:    data.templateType,
         formData:        data.formData,
-        generalScore:    data.generalScore,
+        generalScore:    compliance.generalScore,
+        complianceRatio: compliance.ratio,
         improvementPlan: data.improvementPlan ?? null,
         nextReview:      data.nextReview,
       },

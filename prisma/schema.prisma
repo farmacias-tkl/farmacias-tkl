@@ -354,7 +354,8 @@ model ActionPlanForm {
   actionPlan     ActionPlan             @relation(fields: [actionPlanId], references: [id], onDelete: Cascade)
   templateType   ActionPlanTemplateType
   formData       Json
-  generalScore   String
+  generalScore    String
+  complianceRatio Float?
   improvementPlan String?
   nextReview     DateTime?
   signedAt       DateTime?
