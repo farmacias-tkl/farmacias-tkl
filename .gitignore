@@ -55,6 +55,10 @@ Desktop.ini
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 
+# Python
+__pycache__/
+*.pyc
+
 # Archivos temporales generados localmente
 estructura.txt
 estructura2.txt
