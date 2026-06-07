@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ClipboardList, AlertTriangle,
-  CheckCircle2, ChevronDown, ChevronUp, Clock, XCircle, FileText, FileDown,
+  CheckCircle2, ChevronRight, Clock, XCircle, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import ActionPlanDetailModal from "@/components/action-plans/ActionPlanDetailModal";
 
 const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
   OPEN:        { label: "Abierto",    color: "bg-blue-50 text-blue-800 border-blue-200",    icon: Clock },
@@ -15,7 +16,6 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   CLOSED:      { label: "Cerrado",    color: "bg-gray-50 text-gray-600 border-gray-200",    icon: CheckCircle2 },
   CANCELLED:   { label: "Cancelado",  color: "bg-gray-50 text-gray-400 border-gray-200",    icon: XCircle },
 };
-const TERMINAL = ["COMPLETED", "CLOSED", "CANCELLED"];
 
 interface Props {
   employeeId: string;
@@ -26,6 +26,7 @@ export default function ActionPlansTab({
   employeeId, canCreate,
 }: Props) {
   const qc = useQueryClient();
+  const [detailPlan, setDetailPlan] = useState<any>(null);
 
   const { data: plansData, isLoading } = useQuery({
     queryKey: ["action-plans-tab", employeeId],
@@ -35,15 +36,6 @@ export default function ActionPlansTab({
   const plans        = plansData?.data       ?? [];
   const total        = plansData?.meta?.total ?? 0;
   const overdueCount = plans.filter((p: any) => p.isOverdue).length;
-
-  const updateStatus = async (id: string, status: string) => {
-    await fetch(`/api/action-plans/${id}`, {
-      method:  "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ status }),
-    });
-    qc.invalidateQueries({ queryKey: ["action-plans-tab", employeeId] });
-  };
 
   return (
     <div className="space-y-4">
@@ -85,28 +77,37 @@ export default function ActionPlansTab({
       ) : (
         <div className="space-y-2">
           {plans.map((p: any) => (
-            <PlanCard key={p.id} plan={p} canManage={canCreate} onUpdateStatus={updateStatus} />
+            <PlanCard key={p.id} plan={p} onOpen={setDetailPlan} />
           ))}
         </div>
       )}
+
+      <ActionPlanDetailModal
+        open={!!detailPlan}
+        plan={detailPlan}
+        canManage={canCreate}
+        onClose={() => setDetailPlan(null)}
+        onChanged={() => qc.invalidateQueries({ queryKey: ["action-plans-tab", employeeId] })}
+      />
     </div>
   );
 }
 
-function PlanCard({ plan: p, canManage, onUpdateStatus }: {
+function PlanCard({ plan: p, onOpen }: {
   plan: any;
-  canManage: boolean;
-  onUpdateStatus: (id: string, status: string) => void;
+  onOpen: (plan: any) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[p.status] ?? STATUS_META.OPEN;
   const SI   = meta.icon;
   const fmt  = (d: string) =>
     new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 
   return (
-    <div className={cn("card overflow-hidden", p.isOverdue && "border-red-200")}>
-      <div className="px-4 py-3 cursor-pointer flex items-start gap-3" onClick={() => setExpanded(v => !v)}>
+    <div
+      className={cn("card overflow-hidden cursor-pointer hover:border-gray-300 transition-colors", p.isOverdue && "border-red-200")}
+      onClick={() => onOpen(p)}
+    >
+      <div className="px-4 py-3 flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
@@ -126,53 +127,8 @@ function PlanCard({ plan: p, canManage, onUpdateStatus }: {
             {p.branch?.name && <><span>·</span><span>{p.branch.name}</span></>}
           </div>
         </div>
-        {expanded
-          ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
-          : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />}
+        <ChevronRight className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" />
       </div>
-
-      {expanded && (
-        <div className="px-4 pb-3 border-t border-gray-100 pt-3 bg-gray-50/50 space-y-2">
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              Acciones requeridas
-            </p>
-            <p className="text-sm text-gray-700 whitespace-pre-wrap">{p.requiredActions}</p>
-          </div>
-          {p.notes && <p className="text-xs text-gray-500 italic">{p.notes}</p>}
-          {p.closedAt && <p className="text-xs text-gray-400">Cerrado: {fmt(p.closedAt)}</p>}
-          <div className="flex flex-wrap gap-2 pt-1">
-            {p.form?.id && (
-              <a
-                href={`/api/action-plan-forms/${p.form.id}/pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary text-xs py-1.5 px-3 text-blue-700 border-blue-300 hover:bg-blue-50 inline-flex items-center gap-1"
-              >
-                <FileDown className="w-3.5 h-3.5" /> Descargar PDF
-              </a>
-            )}
-            {canManage && !TERMINAL.includes(p.status) && (
-              <>
-                {p.status === "OPEN" && (
-                  <button onClick={() => onUpdateStatus(p.id, "IN_PROGRESS")}
-                    className="btn-secondary text-xs py-1.5 px-3 text-amber-700 border-amber-300 hover:bg-amber-50">
-                    Marcar en curso
-                  </button>
-                )}
-                {p.status === "IN_PROGRESS" && (
-                  <button onClick={() => onUpdateStatus(p.id, "COMPLETED")}
-                    className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
-                    Completado
-                  </button>
-                )}
-                <button onClick={() => onUpdateStatus(p.id, "CANCELLED")}
-                  className="btn-secondary text-xs py-1.5 px-3 text-gray-500">Cancelar</button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

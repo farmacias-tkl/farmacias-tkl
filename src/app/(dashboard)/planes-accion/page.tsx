@@ -3,12 +3,12 @@ import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ClipboardList, AlertTriangle, CheckCircle2,
-  ChevronDown, ChevronUp, Clock, XCircle,
+  ClipboardList, CheckCircle2, Clock, XCircle, ChevronRight,
 } from "lucide-react";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
+import ActionPlanDetailModal from "@/components/action-plans/ActionPlanDetailModal";
 
 const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
   OPEN:        { label: "Abierto",       color: "bg-blue-50 text-blue-800 border-blue-200",     icon: Clock },
@@ -26,6 +26,7 @@ export default function PlanesAccionPage() {
 
   const [branchFilter,setBranchFilter]= useState("");
   const [statusFilter,setStatusFilter]= useState("");
+  const [detailPlan,  setDetailPlan]  = useState<any>(null);
 
   const sessionReady    = status === "authenticated";
   const isBranchManager = role === "BRANCH_MANAGER";
@@ -56,15 +57,6 @@ export default function PlanesAccionPage() {
   const branches  = branchRes?.data  ?? [];
   const plans     = plansData?.data  ?? [];
   const total     = plansData?.meta?.total ?? 0;
-
-  const updateStatus = async (id: string, newStatus: string) => {
-    await fetch(`/api/action-plans/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    qc.invalidateQueries({ queryKey: ["action-plans"] });
-  };
 
   if (status === "loading") {
     return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
@@ -113,26 +105,36 @@ export default function PlanesAccionPage() {
       ) : (
         <div className="space-y-2">
           {plans.map((p: any) => (
-            <PlanCard key={p.id} plan={p} canManage={canCreate} onUpdateStatus={updateStatus} />
+            <PlanCard key={p.id} plan={p} onOpen={setDetailPlan} />
           ))}
         </div>
       )}
+
+      <ActionPlanDetailModal
+        open={!!detailPlan}
+        plan={detailPlan}
+        canManage={canCreate}
+        onClose={() => setDetailPlan(null)}
+        onChanged={() => qc.invalidateQueries({ queryKey: ["action-plans"] })}
+      />
     </div>
   );
 }
 
-function PlanCard({ plan: p, canManage, onUpdateStatus }: {
-  plan: any; canManage: boolean;
-  onUpdateStatus: (id: string, status: string) => void;
+function PlanCard({ plan: p, onOpen }: {
+  plan: any;
+  onOpen: (plan: any) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[p.status] ?? STATUS_META.OPEN;
   const SI   = meta.icon;
   const deadline = new Date(p.deadline);
 
   return (
-    <div className={cn("card overflow-hidden", p.isOverdue && "border-red-200")}>
-      <div className="px-4 py-3 cursor-pointer flex items-start gap-3" onClick={() => setExpanded(v => !v)}>
+    <div
+      className={cn("card overflow-hidden cursor-pointer hover:border-gray-300 transition-colors", p.isOverdue && "border-red-200")}
+      onClick={() => onOpen(p)}
+    >
+      <div className="px-4 py-3 flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
@@ -156,41 +158,9 @@ function PlanCard({ plan: p, canManage, onUpdateStatus }: {
           <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
             <SI className="w-3 h-3" />{meta.label}
           </span>
-          {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+          <ChevronRight className="w-4 h-4 text-gray-400" />
         </div>
       </div>
-
-      {expanded && (
-        <div className="px-4 pb-3 border-t border-gray-100 pt-3 bg-gray-50/50 space-y-2">
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Acciones requeridas</p>
-            <p className="text-sm text-gray-700">{p.requiredActions}</p>
-          </div>
-          {p.notes && (
-            <p className="text-xs text-gray-500 italic">{p.notes}</p>
-          )}
-          {canManage && !["COMPLETED","CLOSED","CANCELLED"].includes(p.status) && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {p.status === "OPEN" && (
-                <button onClick={() => onUpdateStatus(p.id, "IN_PROGRESS")}
-                  className="btn-secondary text-xs py-1.5 px-3 text-amber-700 border-amber-300 hover:bg-amber-50">
-                  Marcar en curso
-                </button>
-              )}
-              {p.status === "IN_PROGRESS" && (
-                <button onClick={() => onUpdateStatus(p.id, "COMPLETED")}
-                  className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
-                  Completado
-                </button>
-              )}
-              <button onClick={() => onUpdateStatus(p.id, "CANCELLED")}
-                className="btn-secondary text-xs py-1.5 px-3 text-gray-500">
-                Cancelar
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
