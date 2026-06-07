@@ -154,18 +154,18 @@ function PlanCard({ plan: p, canManage, onUpdateStatus }: {
             )}
             {canManage && !TERMINAL.includes(p.status) && (
               <>
-                {p.status !== "IN_PROGRESS" && (
+                {p.status === "OPEN" && (
                   <button onClick={() => onUpdateStatus(p.id, "IN_PROGRESS")}
                     className="btn-secondary text-xs py-1.5 px-3 text-amber-700 border-amber-300 hover:bg-amber-50">
                     Marcar en curso
                   </button>
                 )}
-                <button onClick={() => onUpdateStatus(p.id, "COMPLETED")}
-                  className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
-                  Completado
-                </button>
-                <button onClick={() => onUpdateStatus(p.id, "CLOSED")}
-                  className="btn-secondary text-xs py-1.5 px-3">Cerrar</button>
+                {p.status === "IN_PROGRESS" && (
+                  <button onClick={() => onUpdateStatus(p.id, "COMPLETED")}
+                    className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
+                    Completado
+                  </button>
+                )}
                 <button onClick={() => onUpdateStatus(p.id, "CANCELLED")}
                   className="btn-secondary text-xs py-1.5 px-3 text-gray-500">Cancelar</button>
               </>

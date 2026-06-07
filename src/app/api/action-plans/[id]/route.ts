@@ -15,6 +15,14 @@ const patchSchema = z.object({
   status: z.enum(["OPEN", "IN_PROGRESS", "COMPLETED", "CLOSED", "CANCELLED"]),
 });
 
+// Matriz blanca de transiciones (origen → destinos permitidos). Cualquier otra
+// transición —incluido todo origen terminal, mismo→mismo, y cualquier →OPEN o
+// →CLOSED— se rechaza con 409. CLOSED ya no se alcanza por esta vía.
+const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  OPEN:        ["IN_PROGRESS", "CANCELLED"],
+  IN_PROGRESS: ["COMPLETED", "CANCELLED"],
+};
+
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   const authErr = requireAuth(session);
@@ -73,6 +81,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const { status } = parsed.data;
+
+  if (!ALLOWED_TRANSITIONS[plan.status]?.includes(status)) {
+    return NextResponse.json(
+      { error: "Transición no permitida", from: plan.status, to: status },
+      { status: 409 },
+    );
+  }
+
   const isTerminal = TERMINAL.includes(status as Terminal);
 
   const updated = await prisma.$transaction(async (tx) => {
