@@ -10,6 +10,29 @@ historial: `git log` en el repo.
 
 ## Junio 2026
 
+### feat (dm-7) — DM-7 COMPLETO: snapshots históricos (1er hallazgo del Technical Audit, resuelto end-to-end)
+
+Corta la corrupción silenciosa de históricos cuando un empleado cambia de puesto,
+de sucursal o es renombrado: `ActionPlan`, `OvertimeRecord` y `AbsenceRecord` ahora
+preservan el contexto (empleado / sucursal / puesto) al momento de crear.
+
+- `ffc0034` — **DM-7A**: captura de snapshots al crear (`employeeNameSnapshot`,
+  `branchNameSnapshot`, `positionNameSnapshot`) en los 3 modelos, dentro del
+  write-path de cada endpoint. +9 columnas nullable en Neon (migración expand:
+  aditiva, backward-compatible — schema en prod antes del deploy del código).
+- `7920745` — **DM-7B1**: display + PDF leen el snapshot con fallback a la relación
+  viva (`snapshot ?? vivo`) en `/planes-accion`, `ActionPlanDetailModal`,
+  `/horas-extras`, `/ausencias` y el PDF de Action Plans.
+- `5efc827` — **DM-7B2**: backfill NULL-only por columna, idempotente, de las filas
+  previas a DM-7A. Aplicado a Neon (ActionPlan 8 / Overtime 1 / Absence 5).
+
+> **Límite del backfill:** Para registros previos a DM-7A, `employeeNameSnapshot` y
+> `positionNameSnapshot` reflejan el valor del empleado al momento del backfill. Es
+> histórico fiel salvo que el empleado haya cambiado de nombre o puesto entre la
+> creación del registro y el backfill — en ese caso el dato previo es irrecuperable
+> por diseño. `branchNameSnapshot` es histórico exacto siempre, porque deriva del
+> `record.branchId` pinneado, no de `employee.currentBranchId`.
+
 ### feat (action-plans) — Fase 2a: cumplimiento calculado server-side
 
 - `315124b` — `generalScore` y % de cumplimiento se calculan en el server (no se

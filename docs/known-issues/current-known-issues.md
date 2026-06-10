@@ -18,6 +18,35 @@ limitaciones inherentes a la arquitectura, y workarounds en uso.
 
 ---
 
+## Technical Audit — seguimiento
+
+Estado de los hallazgos del audit técnico.
+
+### ✅ DM-7 — Corrupción silenciosa de históricos (snapshots) — COMPLETO
+
+Primer hallazgo del Technical Audit, resuelto **end-to-end** (ver CHANGELOG, Junio
+2026). `ActionPlan` / `OvertimeRecord` / `AbsenceRecord` capturan empleado, sucursal
+y puesto al crear, y display + PDF leen el snapshot con fallback a la relación viva.
+Sub-hitos: DM-7A captura (`ffc0034`), DM-7B1 display+PDF (`7920745`), DM-7B2 backfill
+de filas previas (`5efc827`).
+
+### Deuda pendiente (en orden de prioridad)
+
+1. 🐛 **Overtime loop 404** — único bug vivo en producción.
+2. **DC-1** — pendiente.
+3. **DC-3** — pendiente.
+4. ⚠️ **OWNER absoluto** — pendiente.
+
+### ⚠️ DC-4 (parcial) — `POST /api/absences` audita fuera de transacción
+
+DC-4 movió el `auditLog` dentro del `$transaction` en `ActionPlan` y `OvertimeRecord`,
+pero **nunca cubrió `AbsenceRecord`**: `POST /api/absences` crea el registro y luego
+escribe el `auditLog` con `.catch(() => {})` **fuera** de un `$transaction`. Si el
+audit falla, el registro de ausencia queda sin rastro de auditoría. Deuda separada,
+identificada, **no resuelta** (DM-7 no la tocó, por diseño — una concern por commit).
+
+---
+
 ## Infraestructura
 
 ### ⚠️ Neon idle wakeup (5-10s en primer query)
