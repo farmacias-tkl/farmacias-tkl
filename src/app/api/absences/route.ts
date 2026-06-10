@@ -163,16 +163,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: data.employeeId },
-    include: { position: { select: { name: true, requiresCoverage: true } } },
-  });
+  const [employee, branchRow] = await Promise.all([
+    prisma.employee.findUnique({
+      where: { id: data.employeeId },
+      include: { position: { select: { name: true, requiresCoverage: true } } },
+    }),
+    prisma.branch.findUnique({ where: { id: data.branchId }, select: { name: true } }),
+  ]);
   if (!employee) {
     return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
   }
+  if (!branchRow) {
+    return NextResponse.json({ error: "Sucursal no encontrada" }, { status: 404 });
+  }
 
   const absence = await prisma.absenceRecord.create({
-    data: { ...data, reportedByUserId: session!.user.id, status: "REPORTED" },
+    data: {
+      ...data,
+      reportedByUserId: session!.user.id,
+      status: "REPORTED",
+      employeeNameSnapshot: `${employee.firstName} ${employee.lastName}`,
+      branchNameSnapshot:   branchRow.name,
+      positionNameSnapshot: employee.position.name,
+    },
     include: {
       employee: {
         select: {

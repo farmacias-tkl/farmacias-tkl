@@ -271,6 +271,11 @@ model AbsenceRecord {
   employee         Employee @relation(fields: [employeeId], references: [id])
   branchId         String
   branch           Branch   @relation(fields: [branchId], references: [id])
+  // Snapshots históricos (DM-7) — se llenan al crear, nunca se actualizan.
+  // Nullable porque el modelo ya tiene filas; display cae a la relación viva si null.
+  employeeNameSnapshot String?
+  branchNameSnapshot   String?
+  positionNameSnapshot String?
   reportedByUserId String
   startDate        DateTime
   endDate          DateTime
@@ -326,6 +331,11 @@ model ActionPlan {
   employee        Employee @relation(fields: [employeeId], references: [id])
   branchId        String
   branch          Branch   @relation(fields: [branchId], references: [id])
+  // Snapshots históricos (DM-7) — se llenan al crear, nunca se actualizan.
+  // Nullable porque el modelo ya tiene filas; display cae a la relación viva si null.
+  employeeNameSnapshot String?
+  branchNameSnapshot   String?
+  positionNameSnapshot String?
   createdByUserId String
   date            DateTime
   reason          String
@@ -375,6 +385,11 @@ model OvertimeRecord {
   employee         Employee @relation(fields: [employeeId], references: [id])
   branchId         String
   branch           Branch   @relation(fields: [branchId], references: [id])
+  // Snapshots históricos (DM-7) — se llenan al crear, nunca se actualizan.
+  // Nullable porque el modelo ya tiene filas; display cae a la relación viva si null.
+  employeeNameSnapshot String?
+  branchNameSnapshot   String?
+  positionNameSnapshot String?
   reportedByUserId String
   approvedByUserId String?
   approvedAt       DateTime?

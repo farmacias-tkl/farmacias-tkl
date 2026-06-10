@@ -57,7 +57,10 @@ export async function POST(req: NextRequest) {
   }
 
   const [employee, branch] = await Promise.all([
-    prisma.employee.findUnique({ where: { id: data.employeeId } }),
+    prisma.employee.findUnique({
+      where: { id: data.employeeId },
+      include: { position: { select: { name: true } } },
+    }),
     prisma.branch.findUnique({ where: { id: data.branchId } }),
   ]);
   if (!employee) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
@@ -89,6 +92,9 @@ export async function POST(req: NextRequest) {
       data: {
         employeeId:      data.employeeId,
         branchId:        data.branchId,
+        employeeNameSnapshot: `${employee.firstName} ${employee.lastName}`,
+        branchNameSnapshot:   branch.name,
+        positionNameSnapshot: employee.position.name,
         createdByUserId: session!.user.id,
         date:            data.date,
         reason:          data.reason,

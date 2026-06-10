@@ -108,11 +108,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: data.employeeId },
-    select: { id: true, firstName: true, lastName: true, currentBranchId: true },
-  });
+  const [employee, branch] = await Promise.all([
+    prisma.employee.findUnique({
+      where: { id: data.employeeId },
+      select: {
+        id: true, firstName: true, lastName: true, currentBranchId: true,
+        position: { select: { name: true } },
+      },
+    }),
+    prisma.branch.findUnique({ where: { id: data.branchId }, select: { name: true } }),
+  ]);
   if (!employee) return NextResponse.json({ error: "Empleado no encontrado" }, { status: 404 });
+  if (!branch)   return NextResponse.json({ error: "Sucursal no encontrada" }, { status: 404 });
 
   // Verificar que el empleado pertenece a la sucursal indicada
   if (employee.currentBranchId && employee.currentBranchId !== data.branchId) {
@@ -135,7 +142,14 @@ export async function POST(req: NextRequest) {
 
   const record = await prisma.$transaction(async (tx) => {
     const created = await tx.overtimeRecord.create({
-      data: { ...data, reportedByUserId: session!.user.id, status: "REPORTED" },
+      data: {
+        ...data,
+        reportedByUserId: session!.user.id,
+        status: "REPORTED",
+        employeeNameSnapshot: `${employee.firstName} ${employee.lastName}`,
+        branchNameSnapshot:   branch.name,
+        positionNameSnapshot: employee.position.name,
+      },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true } },
         branch:   { select: { id: true, name: true } },
