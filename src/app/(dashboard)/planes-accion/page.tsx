@@ -138,9 +138,9 @@ function PlanCard({ plan: p, onOpen }: {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
-              {p.employee.firstName} {p.employee.lastName}
+              {p.employeeNameSnapshot ?? `${p.employee.firstName} ${p.employee.lastName}`}
             </p>
-            <span className="text-xs text-gray-500">{p.employee.position?.name}</span>
+            <span className="text-xs text-gray-500">{p.positionNameSnapshot ?? p.employee.position?.name}</span>
             {p.isOverdue && (
               <span className="text-xs font-medium text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
                 Vencido
@@ -149,7 +149,7 @@ function PlanCard({ plan: p, onOpen }: {
           </div>
           <p className="text-sm text-gray-700 mt-0.5 truncate">{p.reason}</p>
           <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
-            <span>{p.branch?.name}</span>
+            <span>{p.branchNameSnapshot ?? p.branch?.name}</span>
             <span>·</span>
             <span>Plazo: {deadline.toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" })}</span>
           </div>

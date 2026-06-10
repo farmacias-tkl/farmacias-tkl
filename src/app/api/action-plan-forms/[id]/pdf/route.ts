@@ -54,8 +54,8 @@ export async function GET(
 
   const element = createElement(ActionPlanDocument, {
     logoBase64,
-    employeeName:    `${employee.firstName} ${employee.lastName}`,
-    branchName:      plan.branch.name,
+    employeeName:    plan.employeeNameSnapshot ?? `${employee.firstName} ${employee.lastName}`,
+    branchName:      plan.branchNameSnapshot ?? plan.branch.name,
     encargado:       creator?.name ?? "—",
     planDate:        plan.date.toISOString(),
     deadline:        plan.deadline.toISOString(),

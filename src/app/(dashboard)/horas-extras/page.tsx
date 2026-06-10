@@ -321,15 +321,15 @@ function OvertimeCard({ record: r, canApprove, onApprove, onReject }: {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
-              {r.employee.firstName} {r.employee.lastName}
+              {r.employeeNameSnapshot ?? `${r.employee.firstName} ${r.employee.lastName}`}
             </p>
-            <span className="text-xs text-gray-500">{r.employee.position?.name}</span>
+            <span className="text-xs text-gray-500">{r.positionNameSnapshot ?? r.employee.position?.name}</span>
             <span className="text-sm font-bold text-gray-800">{r.hours}hs</span>
           </div>
           <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 flex-wrap">
             <span>{date}</span>
             <span>·</span>
-            <span>{r.branch?.name}</span>
+            <span>{r.branchNameSnapshot ?? r.branch?.name}</span>
             <span>·</span>
             <span>{OVERTIME_REASONS.find(or => or.value === r.reason)?.label ?? r.reason}</span>
           </div>

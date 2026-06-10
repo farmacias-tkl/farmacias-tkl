@@ -979,21 +979,21 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
-              {a.employee.firstName} {a.employee.lastName}
+              {a.employeeNameSnapshot ?? `${a.employee.firstName} ${a.employee.lastName}`}
             </p>
             {a.employee.isRotating && (
               <span className="inline-flex items-center gap-1 text-[10px] bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded font-medium">
                 <RotateCcw className="w-2.5 h-2.5" />Rotativa
               </span>
             )}
-            <span className="text-xs text-gray-500">{a.employee.position?.name}</span>
+            <span className="text-xs text-gray-500">{a.positionNameSnapshot ?? a.employee.position?.name}</span>
             {a.isActiveToday && <span className="text-xs font-medium text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Hoy</span>}
             {a.absenceType === "SUSPENSION" && <span className="text-xs font-medium text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded">Suspension</span>}
             {a.employee.position?.requiresCoverage && <span className="text-xs font-medium text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">critico</span>}
           </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap text-xs text-gray-500">
             <span>{isSameDay ? fmt(start) : `${fmt(start)} → ${fmt(end)} (${a.totalDays}d)`}</span>
-            <span>·</span><span>{a.branch?.name}</span>
+            <span>·</span><span>{a.branchNameSnapshot ?? a.branch?.name}</span>
             {a.branchDetectedFromAssignment && (
               <span className="text-[10px] text-blue-600 bg-blue-50 px-1 rounded">asignacion detectada</span>
             )}

@@ -57,7 +57,8 @@ export default function ActionPlanDetailModal({ open, plan, canManage, onClose, 
 
   const meta = STATUS_META[plan.status] ?? STATUS_META.OPEN;
   const SI   = meta.icon;
-  const employeeName = `${plan.employee?.firstName ?? ""} ${plan.employee?.lastName ?? ""}`.trim();
+  const employeeName = plan.employeeNameSnapshot
+    ?? `${plan.employee?.firstName ?? ""} ${plan.employee?.lastName ?? ""}`.trim();
 
   // Interpretación de respuestas (solo para answer/favorable). El score y el %
   // documentales vienen de lo persistido; evaluateForm NO los reemplaza.
@@ -121,7 +122,7 @@ export default function ActionPlanDetailModal({ open, plan, canManage, onClose, 
         {/* Datos del plan */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-2.5 gap-x-4 text-xs">
           <Field icon={UserIcon} label="Empleado" value={employeeName || "—"} />
-          <Field icon={MapPin}   label="Sucursal" value={plan.branch?.name ?? "—"} />
+          <Field icon={MapPin}   label="Sucursal" value={plan.branchNameSnapshot ?? plan.branch?.name ?? "—"} />
           <Field icon={Calendar} label="Fecha"    value={fmtDate(plan.date)} />
           <Field icon={Calendar} label="Plazo"    value={fmtDate(plan.deadline)} />
         </div>
