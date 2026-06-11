@@ -30,12 +30,35 @@ y puesto al crear, y display + PDF leen el snapshot con fallback a la relación 
 Sub-hitos: DM-7A captura (`ffc0034`), DM-7B1 display+PDF (`7920745`), DM-7B2 backfill
 de filas previas (`5efc827`).
 
+### ✅ Overtime 404 — acción de aprobación/rechazo sin backend — RESUELTO (OVERTIME-0)
+
+Resuelto como **OVERTIME-0** (commit `7490366`): se ocultó la acción rota en
+`/horas-extras` (frontend-only). `PATCH /api/overtime/[id]` no existe — daba 404 real
+al click en Aprobar/Rechazar. El "loop" del audit era **engañoso**: era una acción
+muerta al click, no un loop automático. Crear y listar quedaron intactos.
+
 ### Deuda pendiente (en orden de prioridad)
 
-1. 🐛 **Overtime loop 404** — único bug vivo en producción.
-2. **DC-1** — pendiente.
-3. **DC-3** — pendiente.
-4. ⚠️ **OWNER absoluto** — pendiente.
+1. **DC-1** — pendiente.
+2. **DC-3** — pendiente.
+3. ⚠️ **OWNER absoluto** — pendiente.
+4. 💡 **OVERTIME-1** — aprobación real de horas extras (feature faltante). Detalle abajo.
+5. 🔒 **Sidebar hardening** — `name.charAt(0)` sin guard. Detalle abajo.
+
+### 💡 OVERTIME-1 — Aprobación real de horas extras (feature faltante, no bug)
+
+No existe `PATCH /api/overtime/[id]`. El schema de `OvertimeRecord` **ya** tiene
+`approvedByUserId` / `approvedAt` / `status` / `rejectionReason`; falta el handler y
+reactivar los botones que OVERTIME-0 ocultó. Patrón "la forma TKL": guard de transición
+con matriz blanca (`REPORTED → APPROVED` / `REPORTED → REJECTED`) y `auditLog` dentro de
+un `$transaction`.
+
+### 🔒 Sidebar — `name.charAt(0)` sin guard (hardening, no bug vivo)
+
+`src/components/layout/Sidebar.tsx:80` hace `name.charAt(0)` sin guard → **500 que
+voltea el layout entero** si `user.name` es `undefined`/vacío. No reproducible con
+login normal (`name` siempre viene), pero un user sin nombre rompe la app. Fix de una
+línea (`name?.charAt(0)` con fallback). Hardening, no urgente.
 
 ### ⚠️ DC-4 (parcial) — `POST /api/absences` audita fuera de transacción
 
