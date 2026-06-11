@@ -130,26 +130,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Validación específica para LATE_ARRIVAL
+  // DC-1: las llegadas tarde son TimeEvent (path canónico), no AbsenceRecord.
+  // El legacy de AbsenceRecord.LATE_ARRIVAL se mantiene read-only (no se crea más).
   if (data.absenceType === "LATE_ARRIVAL") {
-    if (!data.expectedArrivalTime || !data.actualArrivalTime) {
-      return NextResponse.json(
-        { error: "Llegó tarde requiere hora esperada y hora real de llegada" },
-        { status: 400 }
-      );
-    }
-    if (data.actualArrivalTime <= data.expectedArrivalTime) {
-      return NextResponse.json(
-        { error: "La hora real debe ser posterior a la hora esperada" },
-        { status: 400 }
-      );
-    }
-    // Calcular lateMinutes si no vino explícito
-    if (data.lateMinutes == null) {
-      data.lateMinutes = Math.round(
-        (data.actualArrivalTime.getTime() - data.expectedArrivalTime.getTime()) / 60000
-      );
-    }
+    return NextResponse.json(
+      { error: "Las llegadas tarde se registran en Asistencia (Llegadas tarde / retiros), no como ausencia." },
+      { status: 400 }
+    );
   }
 
   // BRANCH_MANAGER solo puede registrar en su sucursal

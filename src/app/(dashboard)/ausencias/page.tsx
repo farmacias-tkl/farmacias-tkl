@@ -46,24 +46,6 @@ const ABSENCE_FORM_TYPES = ABSENCE_TYPES.filter(
   t => t.value !== "LATE_NOTICE" && t.value !== "LATE_ARRIVAL"
 );
 
-// Combina una fecha (YYYY-MM-DD) con una hora (HH:mm) en un Date local
-function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
-  if (!dateStr || !timeStr) return null;
-  const [h, m] = timeStr.split(":").map(Number);
-  if (isNaN(h) || isNaN(m)) return null;
-  const d = new Date(dateStr);
-  d.setHours(h, m, 0, 0);
-  return d;
-}
-
-function diffMinutes(expectedTime: string, actualTime: string): number | null {
-  if (!expectedTime || !actualTime) return null;
-  const [eh, em] = expectedTime.split(":").map(Number);
-  const [ah, am] = actualTime.split(":").map(Number);
-  if (isNaN(eh) || isNaN(em) || isNaN(ah) || isNaN(am)) return null;
-  return (ah * 60 + am) - (eh * 60 + em);
-}
-
 const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
   REPORTED:     { label: "Reportada",     color: "bg-yellow-50 text-yellow-800 border-yellow-200", icon: ClockIcon },
   JUSTIFIED:    { label: "Justificada",   color: "bg-green-50 text-green-800 border-green-200",   icon: CheckCircle2 },
@@ -83,9 +65,6 @@ const baseSchema = {
   hasCertificate:      z.boolean().default(false),
   certificateUntil:    z.string().optional(),
   notifiedAt:          z.string().optional(),
-  // Solo completos cuando absenceType === LATE_ARRIVAL
-  expectedArrivalTime: z.string().optional(),
-  actualArrivalTime:   z.string().optional(),
 };
 
 const fixedSchema = z.object({
@@ -271,27 +250,10 @@ export default function AusenciasPage() {
 
   const createMut = useMutation({
     mutationFn: async (data: FixedForm | RotatingForm) => {
-      // Si es LATE_ARRIVAL, combinar startDate + horas en ISO timestamps
-      const payload: any = { ...data };
-      if (data.absenceType === "LATE_ARRIVAL") {
-        const expectedDt = combineDateAndTime(data.startDate, data.expectedArrivalTime ?? "");
-        const actualDt   = combineDateAndTime(data.startDate, data.actualArrivalTime ?? "");
-        if (!expectedDt || !actualDt) {
-          throw new Error("Llegó tarde requiere hora esperada y hora real");
-        }
-        if (actualDt <= expectedDt) {
-          throw new Error("La hora real debe ser posterior a la hora esperada");
-        }
-        payload.expectedArrivalTime = expectedDt.toISOString();
-        payload.actualArrivalTime   = actualDt.toISOString();
-      } else {
-        delete payload.expectedArrivalTime;
-        delete payload.actualArrivalTime;
-      }
       const res = await fetch("/api/absences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(data),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error");
@@ -311,27 +273,13 @@ export default function AusenciasPage() {
     },
   });
 
-  // Sincroniza valores derivados del flujo elegido para que pasen la validación
-  // de Zod sin que el usuario tenga que tipearlos.
-  //
-  //   lateness → absenceType = LATE_ARRIVAL, endDate = startDate
-  //   absence  → absenceType vacío para que el usuario lo elija
-  //
-  // Cambios posteriores de startDate dentro de lateness ya se sincronizan por
-  // los onChange de los inputs de fecha (handleFormDateChange y el del rotativo).
+  // Al elegir "Ausencia / licencia" reseteo el tipo para que el usuario lo elija.
+  // (El flujo de llegadas tarde es TimeEvent — no toca estos forms.)
   useEffect(() => {
-    if (flow === "lateness") {
-      const fixedStart = fixedForm.getValues("startDate") || todayStr;
-      const rotStart   = rotForm.getValues("startDate")   || todayStr;
-      fixedForm.setValue("absenceType", "LATE_ARRIVAL", { shouldValidate: false });
-      fixedForm.setValue("endDate",     fixedStart,     { shouldValidate: false });
-      rotForm.setValue("absenceType",   "LATE_ARRIVAL", { shouldValidate: false });
-      rotForm.setValue("endDate",       rotStart,       { shouldValidate: false });
-    } else if (flow === "absence") {
+    if (flow === "absence") {
       fixedForm.setValue("absenceType", "", { shouldValidate: false });
       rotForm.setValue("absenceType",   "", { shouldValidate: false });
     }
-    // flow === null: no tocar — el panel muestra el chooser
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow]);
 
@@ -497,13 +445,7 @@ export default function AusenciasPage() {
           {/* FLUJO FIJO */}
           {formMode === "fixed" && (
             <form
-              onSubmit={fixedForm.handleSubmit(d => {
-                if (flow === "lateness") {
-                  d.absenceType = "LATE_ARRIVAL";
-                  d.endDate = d.startDate;
-                }
-                createMut.mutate(d);
-              })}
+              onSubmit={fixedForm.handleSubmit(d => createMut.mutate(d))}
               className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
@@ -533,9 +475,7 @@ export default function AusenciasPage() {
 
                 {/* Fecha — determina qué rotativos aparecen */}
                 <div>
-                  <label className="label">
-                    {flow === "lateness" ? "Fecha *" : "Fecha de ausencia *"}
-                  </label>
+                  <label className="label">Fecha de ausencia *</label>
                   <input type="date"
                     value={formDate}
                     onChange={e => handleFormDateChange(e.target.value)}
@@ -624,17 +564,12 @@ export default function AusenciasPage() {
                 )}
 
                 <div>
-                  <label className="label">{flow === "lateness" ? "Motivo / observación" : "Motivo / detalle"}</label>
+                  <label className="label">Motivo / detalle</label>
                   <input {...fixedForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
                 </div>
 
-                {/* Campos LATE_ARRIVAL — siempre visibles en flujo lateness */}
-                {flow === "lateness" && (
-                  <LateArrivalFields form={fixedForm} />
-                )}
-
                 <div>
-                  <label className="label">Hora de aviso{flow === "lateness" ? " (opcional)" : ""}</label>
+                  <label className="label">Hora de aviso</label>
                   <input type="datetime-local" {...fixedForm.register("notifiedAt")} className="input" />
                 </div>
 
@@ -679,13 +614,7 @@ export default function AusenciasPage() {
           {/* FLUJO ROTATIVO */}
           {formMode === "rotating" && (
             <form
-              onSubmit={rotForm.handleSubmit(d => {
-                if (flow === "lateness") {
-                  d.absenceType = "LATE_ARRIVAL";
-                  d.endDate = d.startDate;
-                }
-                createMut.mutate(d);
-              })}
+              onSubmit={rotForm.handleSubmit(d => createMut.mutate(d))}
               className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
@@ -707,16 +636,11 @@ export default function AusenciasPage() {
                 </div>
 
                 <div>
-                  <label className="label">{flow === "lateness" ? "Fecha *" : "Fecha inicio *"}</label>
+                  <label className="label">Fecha inicio *</label>
                   <input type="date" value={rotStartDate}
                     onChange={e => {
                       setRotStartDate(e.target.value);
                       rotForm.setValue("startDate", e.target.value);
-                      // En lateness, sincronizar endDate con startDate
-                      if (flow === "lateness") {
-                        setRotEndDate(e.target.value);
-                        rotForm.setValue("endDate", e.target.value);
-                      }
                     }}
                     className="input" />
                 </div>
@@ -805,21 +729,9 @@ export default function AusenciasPage() {
                 )}
 
                 <div>
-                  <label className="label">{flow === "lateness" ? "Motivo / observación" : "Motivo"}</label>
+                  <label className="label">Motivo</label>
                   <input {...rotForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
                 </div>
-
-                {/* Campos LATE_ARRIVAL — siempre visibles en flujo lateness */}
-                {flow === "lateness" && (
-                  <LateArrivalFields form={rotForm} />
-                )}
-
-                {flow === "lateness" && (
-                  <div>
-                    <label className="label">Hora de aviso (opcional)</label>
-                    <input type="datetime-local" {...rotForm.register("notifiedAt")} className="input" />
-                  </div>
-                )}
 
                 <div className="sm:col-span-2">
                   <label className="label">Observaciones</label>
@@ -1066,50 +978,5 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
         </div>
       )}
     </div>
-  );
-}
-
-function LateArrivalFields({ form }: { form: any }) {
-  const expected = form.watch("expectedArrivalTime") ?? "";
-  const actual   = form.watch("actualArrivalTime") ?? "";
-  const minutes  = diffMinutes(expected, actual);
-  const valid    = minutes !== null && minutes > 0;
-  const invalid  = expected && actual && minutes !== null && minutes <= 0;
-
-  return (
-    <>
-      <div>
-        <label className="label">Hora esperada *</label>
-        <input
-          type="time"
-          {...form.register("expectedArrivalTime")}
-          className={cn("input", invalid && "input-error")}
-        />
-      </div>
-      <div>
-        <label className="label">Hora real de llegada *</label>
-        <input
-          type="time"
-          {...form.register("actualArrivalTime")}
-          className={cn("input", invalid && "input-error")}
-        />
-      </div>
-      <div className="sm:col-span-2">
-        {valid && (
-          <div className="inline-flex items-center gap-2 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2">
-            <ClockIcon className="w-4 h-4 text-orange-600" />
-            <span className="text-sm font-semibold text-orange-800">
-              {minutes} {minutes === 1 ? "minuto" : "minutos"} de demora
-            </span>
-          </div>
-        )}
-        {invalid && (
-          <p className="error-msg">La hora real debe ser posterior a la hora esperada.</p>
-        )}
-        {!expected && !actual && (
-          <p className="text-xs text-gray-400">Cargá ambas horas para calcular la demora.</p>
-        )}
-      </div>
-    </>
   );
 }
