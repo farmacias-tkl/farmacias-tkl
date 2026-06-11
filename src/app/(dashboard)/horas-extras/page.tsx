@@ -51,13 +51,10 @@ export default function HorasExtrasPage() {
   const [formBranchId, setFormBranchId] = useState(
     role === "BRANCH_MANAGER" ? (userBranchId ?? "") : ""
   );
-  const [rejectId,    setRejectId]    = useState<string | null>(null);
-  const [rejectReason,setRejectReason]= useState("");
 
   const sessionReady    = status === "authenticated";
   const isBranchManager = role === "BRANCH_MANAGER";
   const canCreate       = role ? can.createOvertime(role) : false;
-  const canApprove      = role ? can.approveOvertime(role) : false;
 
   const { data: overtimeData, isLoading } = useQuery({
     queryKey: ["overtime", { branchFilter, statusFilter }],
@@ -119,17 +116,6 @@ export default function HorasExtrasPage() {
       setShowForm(false);
     },
   });
-
-  const updateStatus = async (id: string, newStatus: string, rejectionReason?: string) => {
-    await fetch(`/api/overtime/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus, ...(rejectionReason && { rejectionReason }) }),
-    });
-    qc.invalidateQueries({ queryKey: ["overtime"] });
-    setRejectId(null);
-    setRejectReason("");
-  };
 
   if (status === "loading") {
     return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
@@ -270,54 +256,24 @@ export default function HorasExtrasPage() {
       ) : (
         <div className="space-y-2">
           {records.map((r: any) => (
-            <OvertimeCard key={r.id} record={r} canApprove={canApprove}
-              onApprove={id => updateStatus(id, "APPROVED")}
-              onReject={id => setRejectId(id)} />
+            <OvertimeCard key={r.id} record={r} />
           ))}
-        </div>
-      )}
-
-      {/* Modal rechazo */}
-      {rejectId && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="card p-5 w-full max-w-md">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Motivo de rechazo</h3>
-            <textarea
-              value={rejectReason}
-              onChange={e => setRejectReason(e.target.value)}
-              rows={3} className="input resize-none w-full mb-4"
-              placeholder="Explicacion del rechazo..." />
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => { setRejectId(null); setRejectReason(""); }} className="btn-secondary">
-                Cancelar
-              </button>
-              <button
-                onClick={() => updateStatus(rejectId, "REJECTED", rejectReason)}
-                disabled={!rejectReason.trim()}
-                className="btn-primary bg-red-600 hover:bg-red-700 disabled:opacity-50">
-                Confirmar rechazo
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
   );
 }
 
-function OvertimeCard({ record: r, canApprove, onApprove, onReject }: {
-  record: any; canApprove: boolean;
-  onApprove: (id: string) => void;
-  onReject:  (id: string) => void;
-}) {
+function OvertimeCard({ record: r }: { record: any }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[r.status] ?? STATUS_META.REPORTED;
   const SI   = meta.icon;
   const date = new Date(r.date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+  const hasDetail = r.notes || r.rejectionReason;
 
   return (
     <div className="card overflow-hidden">
-      <div className="px-4 py-3 cursor-pointer flex items-start gap-3" onClick={() => setExpanded(v => !v)}>
+      <div className={cn("px-4 py-3 flex items-start gap-3", hasDetail && "cursor-pointer")} onClick={() => hasDetail && setExpanded(v => !v)}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
@@ -338,27 +294,19 @@ function OvertimeCard({ record: r, canApprove, onApprove, onReject }: {
           <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
             <SI className="w-3 h-3" />{meta.label}
           </span>
-          {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+          {hasDetail && (
+            expanded
+              ? <ChevronUp className="w-4 h-4 text-gray-400" />
+              : <ChevronDown className="w-4 h-4 text-gray-400" />
+          )}
         </div>
       </div>
 
-      {expanded && (
-        <div className="px-4 pb-3 border-t border-gray-100 pt-3 bg-gray-50/50 space-y-2">
+      {expanded && hasDetail && (
+        <div className="px-4 pb-3 border-t border-gray-100 pt-3 bg-gray-50/50">
           {r.notes && <p className="text-xs text-gray-600 italic">{r.notes}</p>}
           {r.rejectionReason && (
-            <p className="text-xs text-red-600">Motivo de rechazo: {r.rejectionReason}</p>
-          )}
-          {canApprove && r.status === "REPORTED" && (
-            <div className="flex gap-2 pt-1">
-              <button onClick={() => onApprove(r.id)}
-                className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
-                Aprobar
-              </button>
-              <button onClick={() => onReject(r.id)}
-                className="btn-secondary text-xs py-1.5 px-3 text-red-600 border-red-300 hover:bg-red-50">
-                Rechazar
-              </button>
-            </div>
+            <p className="text-xs text-red-600 mt-1">Motivo de rechazo: {r.rejectionReason}</p>
           )}
         </div>
       )}
