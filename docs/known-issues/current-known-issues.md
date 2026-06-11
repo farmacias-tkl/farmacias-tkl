@@ -37,13 +37,25 @@ Resuelto como **OVERTIME-0** (commit `7490366`): se ocultó la acción rota en
 al click en Aprobar/Rechazar. El "loop" del audit era **engañoso**: era una acción
 muerta al click, no un loop automático. Crear y listar quedaron intactos.
 
+### ✅ DC-1 — Doble fuente de verdad en llegadas tarde — RESUELTO (commit `62cbe90`)
+
+`AbsenceRecord.LATE_ARRIVAL` ya **no se puede crear**: `POST /api/absences` con
+`absenceType=LATE_ARRIVAL` devuelve **400** claro y accionable. Las llegadas tarde van
+por el path canónico `TimeEvent` (`TimeEventFormPanel` → `POST /api/time-events`), que
+es lo que la **UI visible ya usaba**. La premisa original del audit estaba
+**desactualizada**: no hubo que migrar la UI visible — se eliminó *dead code* de
+`AbsenceRecord.LATE_ARRIVAL` en ausencias y se bloqueó el backend residual. Conteo prod
+previo: **1** `AbsenceRecord.LATE_ARRIVAL` legacy / **0** `TimeEvent.LATE_ARRIVAL`. El
+legacy queda **read-only** (no se migró data). El gap de DC-4 en `/api/absences` no se
+tocó (deuda separada).
+
 ### Deuda pendiente (en orden de prioridad)
 
-1. **DC-1** — pendiente.
-2. **DC-3** — pendiente.
-3. ⚠️ **OWNER absoluto** — pendiente.
-4. 💡 **OVERTIME-1** — aprobación real de horas extras (feature faltante). Detalle abajo.
-5. 🔒 **Sidebar hardening** — `name.charAt(0)` sin guard. Detalle abajo.
+1. **DC-3** — pendiente.
+2. ⚠️ **OWNER absoluto** — pendiente.
+3. 💡 **OVERTIME-1** — aprobación real de horas extras (feature faltante). Detalle abajo.
+4. 🔒 **Sidebar hardening** — `name.charAt(0)` sin guard. Detalle abajo.
+5. ⚠️ **DC-4 gap** — audit fuera de `$transaction` en `POST /api/absences`. Detalle abajo.
 
 ### 💡 OVERTIME-1 — Aprobación real de horas extras (feature faltante, no bug)
 
