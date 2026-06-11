@@ -1,5 +1,5 @@
 "use client";
-import { Menu, Bell, LineChart } from "lucide-react";
+import { Menu, Bell, LineChart, Headset } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -16,7 +16,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/admin":         "Administración",
 };
 
-export function TopBar({ onMenuClick, canExecutive }: { onMenuClick: () => void; canExecutive: boolean }) {
+export function TopBar({ onMenuClick, canExecutive, canCallCenter }: { onMenuClick: () => void; canExecutive: boolean; canCallCenter: boolean }) {
   const pathname = usePathname();
   // Páginas no listadas (incluyendo /ausencias) muestran la barra sin título
   // porque el título ya aparece en el contenido de la página.
@@ -30,6 +30,17 @@ export function TopBar({ onMenuClick, canExecutive }: { onMenuClick: () => void;
         <Menu className="w-5 h-5" />
       </button>
       <h1 className="flex-1 text-sm font-semibold text-gray-800 truncate">{title}</h1>
+      {canCallCenter && (
+        <Link
+          href="/call-center"
+          title="Call Center"
+          aria-label="Call Center"
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#1E2D5A] bg-white px-2.5 py-1 text-xs font-semibold text-[#1E2D5A] hover:bg-[#1E2D5A] hover:text-white transition-colors"
+        >
+          <Headset className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden sm:inline">Call Center</span>
+        </Link>
+      )}
       {canExecutive && (
         <Link
           href="/executive"

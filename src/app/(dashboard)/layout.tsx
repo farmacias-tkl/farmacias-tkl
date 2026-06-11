@@ -14,6 +14,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       role:     session.user.role,
       branchId: session.user.branchId,
       executiveAccess: session.user.executiveAccess ?? false,
+      callCenterAccess: session.user.callCenterAccess ?? false,
     }}>
       {children}
     </DashboardShell>

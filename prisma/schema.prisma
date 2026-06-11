@@ -451,10 +451,21 @@ model User {
   // acceso a menos que OWNER lo otorgue explícitamente.
   executiveAccess Boolean @default(false)
 
+  // Acceso al módulo Call Center — modelo JERARQUÍA + EXCEPCIÓN (no flag-puro).
+  // OWNER/ADMIN/SUPERVISOR entran SIEMPRE por rol (ver canViewCallCenter), sin
+  // toggle. El resto (incluido HR) entra solo con callCenterAccess = true,
+  // otorgado por OWNER. grantedAt/grantedBy se llenan SOLO al togglear el flag
+  // (acceso excepcional); para quienes entran por jerarquía quedan NULL POR
+  // DISEÑO — su acceso no es un grant, no es dato faltante.
+  callCenterAccess          Boolean   @default(false)
+  callCenterAccessGrantedAt DateTime?
+  callCenterAccessGrantedBy String?
+
   @@index([email])
   @@index([role])
   @@index([branchId])
   @@index([executiveAccess])
+  @@index([callCenterAccess])
 }
 
 model Account {
@@ -662,6 +673,8 @@ model AccessLog {
 enum SecurityEventType {
   EXECUTIVE_ACCESS_GRANTED
   EXECUTIVE_ACCESS_REVOKED
+  CALL_CENTER_ACCESS_GRANTED
+  CALL_CENTER_ACCESS_REVOKED
   USER_CREATED
   USER_ROLE_CHANGED
   USER_DEACTIVATED

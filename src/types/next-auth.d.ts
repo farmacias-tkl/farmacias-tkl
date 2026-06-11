@@ -10,6 +10,7 @@ declare module "next-auth" {
       branchId:           string | null;
       mustChangePassword: boolean;
       executiveAccess:    boolean;
+      callCenterAccess:   boolean;
     };
   }
   interface User {
@@ -20,5 +21,6 @@ declare module "next-auth" {
     branchId:           string | null;
     mustChangePassword: boolean;
     executiveAccess:    boolean;
+    callCenterAccess:   boolean;
   }
 }

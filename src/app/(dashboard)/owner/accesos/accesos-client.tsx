@@ -1,20 +1,24 @@
 "use client";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, ShieldCheck, ShieldOff, Info, Users } from "lucide-react";
-import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
+import { Search, ShieldCheck, ShieldOff, Info, Users, BadgeCheck } from "lucide-react";
+import { ROLE_LABELS, ROLE_COLORS, CALL_CENTER_ROLE_ACCESS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
-type FilterValue = "all" | "with-access" | "without-access";
+type FilterValue =
+  | "all"
+  | "with-access" | "without-access"        // acceso ejecutivo (flag)
+  | "cc-with-access" | "cc-without-access";  // acceso Call Center (efectivo)
 
 interface UserRow {
-  id:              string;
-  name:            string;
-  email:           string;
-  role:            UserRole;
-  executiveAccess: boolean;
-  branch:          { id: string; name: string } | null;
+  id:               string;
+  name:             string;
+  email:            string;
+  role:             UserRole;
+  executiveAccess:  boolean;
+  callCenterAccess: boolean;
+  branch:           { id: string; name: string } | null;
 }
 
 export function AccessosClient({ currentUserId }: { currentUserId: string }) {
@@ -34,7 +38,7 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
     },
   });
 
-  const toggle = useMutation({
+  const execToggle = useMutation({
     mutationFn: async ({ userId, value }: { userId: string; value: boolean }) => {
       const res = await fetch(`/api/owner/access/${userId}`, {
         method:  "PATCH",
@@ -48,16 +52,31 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["owner-access"] }),
   });
 
+  const ccToggle = useMutation({
+    mutationFn: async ({ userId, value }: { userId: string; value: boolean }) => {
+      const res = await fetch(`/api/owner/call-center-access/${userId}`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ callCenterAccess: value }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Error");
+      return json;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owner-access"] }),
+  });
+
+  const mutError = (execToggle.error ?? ccToggle.error) as Error | null;
+
   const users  = data?.data ?? [];
   const total  = users.length;
-  const withAccess = users.filter(u => u.executiveAccess).length;
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-gray-900">Accesos al Dashboard Ejecutivo</h2>
+        <h2 className="text-base font-semibold text-gray-900">Accesos a módulos</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          {total} usuarios · {withAccess} con acceso ejecutivo
+          {total} usuarios · Dashboard Ejecutivo y Call Center
         </p>
       </div>
 
@@ -67,14 +86,15 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
         <div className="text-xs text-blue-900 leading-relaxed">
           Los cambios pueden tardar hasta 8 horas en propagarse a sesiones activas.
           Para revocacion inmediata, comunica al usuario que cierre sesion.
-          Los usuarios con rol Direccion (OWNER) tienen acceso siempre, no se puede modificar.
+          OWNER tiene acceso a todo siempre. <strong>Call Center</strong> es acceso por rol para
+          OWNER / ADMIN / SUPERVISOR (no se otorga ni revoca); el resto se gestiona por flag.
         </div>
       </div>
 
       {/* Error de mutación */}
-      {toggle.isError && (
+      {(execToggle.isError || ccToggle.isError) && (
         <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {(toggle.error as Error).message}
+          {mutError?.message}
         </div>
       )}
 
@@ -93,6 +113,8 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
           <option value="all">Todos</option>
           <option value="with-access">Con acceso ejecutivo</option>
           <option value="without-access">Sin acceso ejecutivo</option>
+          <option value="cc-with-access">Con acceso Call Center</option>
+          <option value="cc-without-access">Sin acceso Call Center</option>
         </select>
       </div>
 
@@ -107,23 +129,26 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
           <p className="text-sm text-gray-400">No hay usuarios con los filtros aplicados.</p>
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Usuario</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Rol</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Sucursal</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Acceso ejecutivo</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Accion</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Dashboard Ejecutivo</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Call Center</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {users.map(u => {
-                const isOwner   = u.role === "OWNER";
-                const isSelf    = u.id === currentUserId;
-                const cantToggle= isOwner || isSelf;
-                const tooltip   = isOwner ? "OWNER tiene acceso siempre" : isSelf ? "No podes modificar tu propio acceso" : undefined;
+                const isOwner = u.role === "OWNER";
+                const isSelf  = u.id === currentUserId;
+                // Ejecutivo: OWNER y uno mismo no se togglean (precedente).
+                const execLocked  = isOwner || isSelf;
+                const execTooltip = isOwner ? "OWNER tiene acceso siempre" : isSelf ? "No podes modificar tu propio acceso" : undefined;
+                // Call Center: OWNER/ADMIN/SUPERVISOR acceden por rol → sin toggle.
+                const ccByRole = CALL_CENTER_ROLE_ACCESS.includes(u.role);
 
                 return (
                   <tr key={u.id} className="hover:bg-gray-50 transition-colors">
@@ -139,29 +164,56 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {u.branch?.name ?? <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      {u.executiveAccess
-                        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                            <ShieldCheck className="w-3 h-3" />Otorgado
-                          </span>
-                        : <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                            <ShieldOff className="w-3 h-3" />Sin acceso
-                          </span>}
+
+                    {/* Dashboard Ejecutivo: estado + acción (flag) */}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <StateBadge granted={u.executiveAccess} />
+                        <button
+                          onClick={() => execToggle.mutate({ userId: u.id, value: !u.executiveAccess })}
+                          disabled={execLocked || execToggle.isPending}
+                          title={execTooltip}
+                          className={cn(
+                            "btn-secondary text-xs py-1 px-2.5",
+                            execLocked && "opacity-40 cursor-not-allowed",
+                            !execLocked && u.executiveAccess && "text-red-700 border-red-300 hover:bg-red-50",
+                            !execLocked && !u.executiveAccess && "text-emerald-700 border-emerald-300 hover:bg-emerald-50",
+                          )}
+                        >
+                          {u.executiveAccess ? "Revocar" : "Otorgar"}
+                        </button>
+                      </div>
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => toggle.mutate({ userId: u.id, value: !u.executiveAccess })}
-                        disabled={cantToggle || toggle.isPending}
-                        title={tooltip}
-                        className={cn(
-                          "btn-secondary text-xs py-1 px-2.5",
-                          cantToggle && "opacity-40 cursor-not-allowed",
-                          !cantToggle && u.executiveAccess && "text-red-700 border-red-300 hover:bg-red-50",
-                          !cantToggle && !u.executiveAccess && "text-emerald-700 border-emerald-300 hover:bg-emerald-50",
+
+                    {/* Call Center: jerarquía (rol) o flag */}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
+                        {ccByRole ? (
+                          <span
+                            title="Acceso por rol (OWNER / ADMIN / SUPERVISOR). No se otorga ni revoca por flag."
+                            className="inline-flex items-center gap-1 text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full"
+                          >
+                            <BadgeCheck className="w-3 h-3" />Acceso por rol
+                          </span>
+                        ) : (
+                          <>
+                            <StateBadge granted={u.callCenterAccess} />
+                            <button
+                              onClick={() => ccToggle.mutate({ userId: u.id, value: !u.callCenterAccess })}
+                              disabled={isSelf || ccToggle.isPending}
+                              title={isSelf ? "No podes modificar tu propio acceso" : undefined}
+                              className={cn(
+                                "btn-secondary text-xs py-1 px-2.5",
+                                isSelf && "opacity-40 cursor-not-allowed",
+                                !isSelf && u.callCenterAccess && "text-red-700 border-red-300 hover:bg-red-50",
+                                !isSelf && !u.callCenterAccess && "text-emerald-700 border-emerald-300 hover:bg-emerald-50",
+                              )}
+                            >
+                              {u.callCenterAccess ? "Revocar" : "Otorgar"}
+                            </button>
+                          </>
                         )}
-                      >
-                        {u.executiveAccess ? "Revocar" : "Otorgar"}
-                      </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -172,4 +224,14 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
       )}
     </div>
   );
+}
+
+function StateBadge({ granted }: { granted: boolean }) {
+  return granted
+    ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+        <ShieldCheck className="w-3 h-3" />Otorgado
+      </span>
+    : <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+        <ShieldOff className="w-3 h-3" />Sin acceso
+      </span>;
 }

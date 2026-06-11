@@ -19,6 +19,35 @@ export function canViewExecutive(
   return Boolean(u.executiveAccess);
 }
 
+/**
+ * Roles con acceso a Call Center por JERARQUÍA (acceso automático, sin flag).
+ * FUENTE ÚNICA — usar en canViewCallCenter, el endpoint de grant, el GET de
+ * /owner/accesos y la UI. No duplicar esta lista en ningún otro lado.
+ * HR NO está acá: entra solo por callCenterAccess = true.
+ */
+export const CALL_CENTER_ROLE_ACCESS: readonly UserRole[] = ["OWNER", "ADMIN", "SUPERVISOR"];
+
+/**
+ * ¿Puede ver el módulo Call Center?
+ * Modelo JERARQUÍA + EXCEPCIÓN (NO flag-puro como executiveAccess): Call Center es
+ * un área de trabajo diaria, no un dominio excepcional.
+ * - OWNER, ADMIN, SUPERVISOR → true SIEMPRE (acceso implícito por rol, sin toggle).
+ * - Cualquier otro rol (incluido HR) → depende del flag callCenterAccess (otorgado
+ *   por OWNER). HR NO entra por jerarquía: solo por flag. Si en el futuro se decide
+ *   que sí, es agregar "HR" a CALL_CENTER_ROLE_ACCESS (un solo lugar).
+ *
+ * Única fuente de verdad del gate: usar IDÉNTICA en middleware, layout SSR y en el
+ * handler de CADA API route bajo /api/call-center (no chequear callCenterAccess solo,
+ * o un SUPERVISOR sin flag vería la UI pero comería 403 en las API).
+ */
+export function canViewCallCenter(
+  u: { role: UserRole; callCenterAccess?: boolean | null } | null | undefined,
+): boolean {
+  if (!u) return false;
+  if (CALL_CENTER_ROLE_ACCESS.includes(u.role)) return true;
+  return Boolean(u.callCenterAccess);
+}
+
 /** ¿Puede acceder al panel /owner? Solo OWNER. */
 export function canAccessOwnerPanel(
   u: { role: UserRole } | null | undefined,
@@ -64,6 +93,9 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/perfil":        ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   // Nota: /executive y /api/dashboard NO van aquí. Su gate es canViewExecutive
   // (chequea rol OWNER + flag executiveAccess) aplicado directo en el middleware.
+  // Nota: /call-center y /api/call-center TAMPOCO van aquí. Su gate es
+  // canViewCallCenter (jerarquía OWNER/ADMIN/SUPERVISOR + flag callCenterAccess),
+  // aplicado en el middleware, el layout SSR y cada handler del dominio.
   "/sin-acceso":    ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
   // API routes
   "/api/me":            ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],

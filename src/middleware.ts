@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { canAccessRoute, canViewExecutive } from "@/lib/permissions";
+import { canAccessRoute, canViewExecutive, canViewCallCenter } from "@/lib/permissions";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -72,6 +72,18 @@ export default auth((req: NextRequest & { auth: any }) => {
   // branch dashboardHost (que ya usa canViewExecutive).
   if (pathname.startsWith("/executive") || pathname.startsWith("/api/dashboard")) {
     if (!canViewExecutive(session.user)) {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+      }
+      return NextResponse.redirect(new URL("/sin-acceso", req.url));
+    }
+    return NextResponse.next();
+  }
+
+  // Call Center: gate único via canViewCallCenter (jerarquía OWNER/ADMIN/SUPERVISOR
+  // + flag callCenterAccess). No usar canAccessRoute — no honra la jerarquía+flag.
+  if (pathname.startsWith("/call-center") || pathname.startsWith("/api/call-center")) {
+    if (!canViewCallCenter(session.user)) {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
       }
