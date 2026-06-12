@@ -10,6 +10,25 @@ historial: `git log` en el repo.
 
 ## Junio 2026
 
+### feat (call-center) — Fundación del dominio gateado
+
+- `6233c49` — Call Center como **dominio separado** (route group `(call-center)` con
+  layout propio, espejando el Ejecutivo), con gate de acceso modelo **jerarquía +
+  excepción**: `canViewCallCenter` (OWNER/ADMIN/SUPERVISOR por rol; el resto —incluido
+  HR— por flag `callCenterAccess`) es la **única fuente de verdad**, aplicada en las
+  **4 capas**: middleware, omisión en `ROUTE_PERMISSIONS`, layout SSR y el handler de
+  CADA API route bajo `/api/call-center`. Esto corrige la **puerta lateral** del
+  Ejecutivo (donde las API chequean rol pero no el flag). Roles base en una sola
+  constante `CALL_CENTER_ROLE_ACCESS`. Schema expand (en Neon antes del deploy):
+  `User.callCenterAccess` + `callCenterAccessGrantedAt`/`GrantedBy` (NULL por diseño
+  para acceso por jerarquía) + 2 valores `SecurityEventType`. Otorgamiento en
+  `/owner/accesos` (columna Call Center: "Acceso por rol" sin toggle para roles base,
+  toggle para el resto; filtro por **acceso efectivo**) vía
+  `PATCH /api/owner/call-center-access/[userId]` **transaccional** (flag + grantedAt/By
+  + `SecurityEvent` en un `$transaction` — sin el patrón fire-and-forget de DC-4).
+  Dominio vacío (placeholder). **Fuera de la fundación** (cada uno su propia Fase A):
+  modelo de conversaciones, capa de IA, safety farmacéutico, Emozion, WhatsApp.
+
 ### feat (dm-7) — DM-7 COMPLETO: snapshots históricos (1er hallazgo del Technical Audit, resuelto end-to-end)
 
 Corta la corrupción silenciosa de históricos cuando un empleado cambia de puesto,
