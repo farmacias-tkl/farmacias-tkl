@@ -3,7 +3,7 @@
  * Sin imports externos. Todo inline.
  * Incluye: Call Center + Operador Call Center
  */
-import { PrismaClient, UserRole, PositionScope, AbsenceType, AbsenceStatus } from "@prisma/client";
+import { PrismaClient, UserRole, PositionScope, AbsenceType, AbsenceStatus, ConversationStatus, ConversationMessageAuthor } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
@@ -251,6 +251,173 @@ async function main() {
     console.log(`   ✓ ${records.length} ausencias de ejemplo`);
   } else {
     console.log(`   ℹ Ya existen ausencias, omitiendo`);
+  }
+
+  // Call Center — fixtures conversacionales (Sprint 1)
+  // PII (Ley 25.326): datos 100% FICTICIOS y anonimizados. Teléfonos obviamente
+  // falsos (+54 9 11 0000 000X), nombres "Cliente Ficticio N", textos genéricos
+  // que representan PATRONES operativos, NO conversaciones reales.
+  // Actores (assignedTo/sender/changedBy) = Users con acceso al módulo por rol
+  // (SUPERVISOR/ADMIN). Todas las transiciones respetan la whitelist canónica.
+  console.log("☎️  Call Center (fixtures)...");
+  const existingConvs = await prisma.conversation.count();
+  if (existingConvs === 0) {
+    const operatorA = reporterId; // SUPERVISOR
+    const operatorB = (await prisma.user.findFirst({ where: { role: "ADMIN" } }))?.id ?? "";
+
+    if (!operatorA || !operatorB) {
+      console.log(`   ⚠ Faltan usuarios actor (SUPERVISOR/ADMIN), omito fixtures Call Center`);
+    } else {
+      const now = new Date();
+      const minsAgo = (m: number) => new Date(now.getTime() - m * 60_000);
+
+      const CUSTOMERS = [
+        { phone: "+5491100000001", displayName: "Cliente Ficticio 1" },
+        { phone: "+5491100000002", displayName: "Cliente Ficticio 2" },
+        { phone: "+5491100000003", displayName: null },               // wa_id sin perfil
+        { phone: "+5491100000004", displayName: "Cliente Ficticio 4" },
+        { phone: "+5491100000005", displayName: "Cliente Ficticio 5" },
+      ];
+      const custMap: Record<string, string> = {};
+      for (const c of CUSTOMERS) {
+        const cust = await prisma.customer.upsert({
+          where: { phone: c.phone },
+          update: { displayName: c.displayName },
+          create: { phone: c.phone, displayName: c.displayName },
+        });
+        custMap[c.phone] = cust.id;
+      }
+
+      type MsgSeed = { author: ConversationMessageAuthor; senderUserId?: string; body: string; sentAt: Date };
+      type HistSeed = {
+        fromStatus: ConversationStatus | null; toStatus: ConversationStatus;
+        fromAssignedToUserId?: string | null; toAssignedToUserId?: string | null;
+        changedByUserId?: string | null; changedAt: Date; note?: string;
+      };
+      async function createConversation(conv: {
+        phone: string; status: ConversationStatus; assignedToUserId?: string | null;
+        source: string; externalConversationId?: string | null;
+        firstResponseAt?: Date | null; closedAt?: Date | null; createdAt: Date;
+        messages: MsgSeed[]; history: HistSeed[];
+      }) {
+        const created = await prisma.conversation.create({
+          data: {
+            customerId: custMap[conv.phone],
+            status: conv.status,
+            assignedToUserId: conv.assignedToUserId ?? null,
+            customerPhoneSnapshot: conv.phone,            // congelado al crear (DM-7)
+            source: conv.source,
+            externalConversationId: conv.externalConversationId ?? null,
+            firstResponseAt: conv.firstResponseAt ?? null,
+            closedAt: conv.closedAt ?? null,
+            createdAt: conv.createdAt,
+          },
+        });
+        for (const m of conv.messages) {
+          await prisma.conversationMessage.create({
+            data: {
+              conversationId: created.id, author: m.author,
+              senderUserId: m.senderUserId ?? null, body: m.body, sentAt: m.sentAt,
+            },
+          });
+        }
+        for (const h of conv.history) {
+          await prisma.conversationStateHistory.create({
+            data: {
+              conversationId: created.id,
+              fromStatus: h.fromStatus, toStatus: h.toStatus,
+              fromAssignedToUserId: h.fromAssignedToUserId ?? null,
+              toAssignedToUserId: h.toAssignedToUserId ?? null,
+              changedByUserId: h.changedByUserId ?? null,
+              changedAt: h.changedAt, note: h.note,
+            },
+          });
+        }
+      }
+
+      // A — PENDIENTE: recién ingresó, aún sin operador
+      await createConversation({
+        phone: "+5491100000001", status: ConversationStatus.PENDIENTE,
+        source: "EMOZION", externalConversationId: "EMZ-DEMO-0001", createdAt: minsAgo(3),
+        messages: [
+          { author: ConversationMessageAuthor.CUSTOMER, body: "Hola, ¿tienen disponibilidad de un producto de venta libre?", sentAt: minsAgo(3) },
+          { author: ConversationMessageAuthor.BOT, body: "¡Hola! Soy el asistente de Farmacias TKL. Un operador te responderá a la brevedad.", sentAt: minsAgo(2) },
+        ],
+        history: [
+          { fromStatus: null, toStatus: ConversationStatus.PENDIENTE, changedByUserId: null, changedAt: minsAgo(3) },
+        ],
+      });
+
+      // B — SIN_ASIGNAR: nadie la tomó, timeout automático (sin actor humano)
+      await createConversation({
+        phone: "+5491100000002", status: ConversationStatus.SIN_ASIGNAR,
+        source: "WHATSAPP_CLOUD", externalConversationId: "WA-DEMO-0002", createdAt: minsAgo(25),
+        messages: [
+          { author: ConversationMessageAuthor.CUSTOMER, body: "Buenas, consulta por el horario de atención de la sucursal.", sentAt: minsAgo(25) },
+          { author: ConversationMessageAuthor.BOT, body: "¡Hola! En breve un operador te asiste.", sentAt: minsAgo(24) },
+        ],
+        history: [
+          { fromStatus: null, toStatus: ConversationStatus.PENDIENTE, changedByUserId: null, changedAt: minsAgo(25) },
+          { fromStatus: ConversationStatus.PENDIENTE, toStatus: ConversationStatus.SIN_ASIGNAR, changedByUserId: null, changedAt: minsAgo(14), note: "Timeout automático (10')" },
+        ],
+      });
+
+      // C — ASIGNADA: tomada por un operador
+      await createConversation({
+        phone: "+5491100000003", status: ConversationStatus.ASIGNADA, assignedToUserId: operatorA,
+        source: "EMOZION", externalConversationId: "EMZ-DEMO-0003",
+        firstResponseAt: minsAgo(40), createdAt: minsAgo(50),
+        messages: [
+          { author: ConversationMessageAuthor.CUSTOMER, body: "Hola, necesito información sobre un trámite.", sentAt: minsAgo(50) },
+          { author: ConversationMessageAuthor.BOT, body: "¡Hola! Un operador continúa la conversación.", sentAt: minsAgo(49) },
+          { author: ConversationMessageAuthor.OPERATOR, senderUserId: operatorA, body: "Hola, soy del equipo de atención. ¿En qué puedo ayudarte?", sentAt: minsAgo(40) },
+        ],
+        history: [
+          { fromStatus: null, toStatus: ConversationStatus.SIN_ASIGNAR, changedByUserId: null, changedAt: minsAgo(50) },
+          { fromStatus: ConversationStatus.SIN_ASIGNAR, toStatus: ConversationStatus.ASIGNADA, toAssignedToUserId: operatorA, changedByUserId: operatorA, changedAt: minsAgo(41) },
+        ],
+      });
+
+      // D — ASIGNADA con reasignación (handoff ASIGNADA→ASIGNADA, cambia dueño)
+      await createConversation({
+        phone: "+5491100000004", status: ConversationStatus.ASIGNADA, assignedToUserId: operatorB,
+        source: "MANUAL", externalConversationId: null,
+        firstResponseAt: minsAgo(120), createdAt: minsAgo(130),
+        messages: [
+          { author: ConversationMessageAuthor.CUSTOMER, body: "Consulta sobre una factura.", sentAt: minsAgo(130) },
+          { author: ConversationMessageAuthor.OPERATOR, senderUserId: operatorA, body: "Hola, te ayudo con eso.", sentAt: minsAgo(120) },
+          { author: ConversationMessageAuthor.OPERATOR, senderUserId: operatorB, body: "Hola, continúo yo con tu consulta.", sentAt: minsAgo(60) },
+        ],
+        history: [
+          { fromStatus: null, toStatus: ConversationStatus.SIN_ASIGNAR, changedByUserId: null, changedAt: minsAgo(130) },
+          { fromStatus: ConversationStatus.SIN_ASIGNAR, toStatus: ConversationStatus.ASIGNADA, toAssignedToUserId: operatorA, changedByUserId: operatorA, changedAt: minsAgo(121) },
+          { fromStatus: ConversationStatus.ASIGNADA, toStatus: ConversationStatus.ASIGNADA, fromAssignedToUserId: operatorA, toAssignedToUserId: operatorB, changedByUserId: operatorB, changedAt: minsAgo(60), note: "Reasignación" },
+        ],
+      });
+
+      // E — RESUELTA: cerrada pero NO terminal (puede reabrir)
+      await createConversation({
+        phone: "+5491100000005", status: ConversationStatus.RESUELTA, assignedToUserId: operatorA,
+        source: "EMOZION", externalConversationId: "EMZ-DEMO-0005",
+        firstResponseAt: minsAgo(90), closedAt: minsAgo(15), createdAt: minsAgo(100),
+        messages: [
+          { author: ConversationMessageAuthor.CUSTOMER, body: "Hola, una consulta rápida por favor.", sentAt: minsAgo(100) },
+          { author: ConversationMessageAuthor.BOT, body: "¡Hola! Un operador te asiste enseguida.", sentAt: minsAgo(99) },
+          { author: ConversationMessageAuthor.OPERATOR, senderUserId: operatorA, body: "Hola, ¿en qué te puedo ayudar?", sentAt: minsAgo(90) },
+          { author: ConversationMessageAuthor.CUSTOMER, body: "Perfecto, muchas gracias.", sentAt: minsAgo(20) },
+          { author: ConversationMessageAuthor.OPERATOR, senderUserId: operatorA, body: "¡Gracias a vos! Cerramos la consulta.", sentAt: minsAgo(15) },
+        ],
+        history: [
+          { fromStatus: null, toStatus: ConversationStatus.SIN_ASIGNAR, changedByUserId: null, changedAt: minsAgo(100) },
+          { fromStatus: ConversationStatus.SIN_ASIGNAR, toStatus: ConversationStatus.ASIGNADA, toAssignedToUserId: operatorA, changedByUserId: operatorA, changedAt: minsAgo(91) },
+          { fromStatus: ConversationStatus.ASIGNADA, toStatus: ConversationStatus.RESUELTA, fromAssignedToUserId: operatorA, toAssignedToUserId: operatorA, changedByUserId: operatorA, changedAt: minsAgo(15), note: "Consulta resuelta" },
+        ],
+      });
+
+      console.log(`   ✓ ${CUSTOMERS.length} clientes ficticios · 5 conversaciones (1 por estado + reasignación)`);
+    }
+  } else {
+    console.log(`   ℹ Ya existen conversaciones, omitiendo`);
   }
 
   // Resumen + verificacion
