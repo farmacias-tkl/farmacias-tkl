@@ -445,6 +445,14 @@ model User {
   timeEventCompsAuthorized        TimeEventCompensation[]   @relation("TimeEventCompAuthorizedBy")
   timeEventStateChanges           TimeEventStateHistory[]   @relation("TimeEventStateChangedBy")
 
+  // Call Center — dominio conversacional (Sprint 1).
+  // assignedConversations = dueño-vivo (SetNull por default al borrar el User).
+  // sentMessages / conversationStateChanges = histórico-actor inmutable
+  // (onDelete: Restrict en la relación, espeja el canon de Vacation/TimeEvent).
+  assignedConversations     Conversation[]             @relation("ConversationAssignedTo")
+  sentMessages              ConversationMessage[]      @relation("ConversationMessageSender")
+  conversationStateChanges  ConversationStateHistory[] @relation("ConversationStateChangedBy")
+
   // Acceso granular al módulo ejecutivo (independiente del rol).
   // OWNER tiene acceso siempre via canViewExecutive; los demás roles
   // necesitan este flag = true. Default false: usuarios nuevos no tienen
@@ -986,5 +994,116 @@ model TimeEventStateHistory {
   note            String?
 
   @@index([timeEventId])
+  @@index([changedAt])
+}
+
+// ============================================================================
+// CALL CENTER — Fundación conversacional (Sprint 1)
+//
+// Aditivo / expand puro: tablas y enums nuevos, sin tocar nada existente.
+// Copia "la forma TKL": snapshots congelados + StateHistory + actor + (en las
+// mutaciones del Sprint 2) $transaction. Referencia: Vacaciones / TimeEvent.
+//
+// RESUELTA NO es terminal: reabre. No lleva guard tipo COMPLETED.
+// Whitelist de transiciones: src/lib/call-center/transitions.ts (fuente única).
+// ============================================================================
+
+enum ConversationStatus {
+  PENDIENTE
+  SIN_ASIGNAR
+  ASIGNADA
+  RESUELTA          // NO terminal — reabre a PENDIENTE/SIN_ASIGNAR
+}
+
+enum ConversationMessageAuthor {
+  CUSTOMER
+  BOT
+  OPERATOR
+}
+
+model Customer {
+  id            String   @id @default(cuid())
+  phone         String   @unique          // wa_id / E.164 normalizado
+  displayName   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  conversations Conversation[]
+}
+
+model Conversation {
+  id                     String             @id @default(cuid())
+  customerId             String
+  customer               Customer           @relation(fields: [customerId], references: [id])
+
+  status                 ConversationStatus @default(PENDIENTE)
+  // dueño-vivo: si se borra el User, la conversación queda libre para reasignar
+  // (SetNull por default de relación optional). NO es histórico-actor.
+  assignedToUserId       String?
+  assignedTo             User?              @relation("ConversationAssignedTo", fields: [assignedToUserId], references: [id])
+
+  category               String?            // scratchpad descartable — NO taxonomía de intents
+  customerPhoneSnapshot  String?            // congelado al crear (DM-7)
+  externalConversationId String?            // ID externo (conector) — nullable, no unique aún
+  source                 String?            // EMOZION | WHATSAPP_CLOUD | MANUAL — String?, sin enum aún
+
+  firstResponseAt        DateTime?
+  closedAt               DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  messages               ConversationMessage[]
+  stateHistory           ConversationStateHistory[]
+
+  @@index([status])
+  @@index([assignedToUserId])
+  @@index([customerId])
+  @@index([externalConversationId])
+}
+
+model ConversationMessage {
+  id                String                    @id @default(cuid())
+  conversationId    String
+  conversation      Conversation              @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  author            ConversationMessageAuthor
+  // histórico-actor inmutable: un operador con mensajes enviados no se borra
+  // físicamente (Restrict). En TKL los users se desactivan, no se borran.
+  senderUserId      String?                   // solo cuando author = OPERATOR
+  senderUser        User?                     @relation("ConversationMessageSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+
+  body              String?                   // nullable: mensaje solo-media
+  mediaUrl          String?                   // provisionado; fixtures = solo texto
+  mediaType         String?                   // String?, sin enum aún
+  externalMessageId String?                   // idempotencia de ingesta — nullable, no unique aún
+
+  sentAt            DateTime                  // timestamp real (Emozion/WA)
+  createdAt         DateTime                  @default(now())
+
+  @@index([conversationId])
+  @@index([externalMessageId])
+}
+
+model ConversationStateHistory {
+  id                   String              @id @default(cuid())
+  conversationId       String
+  conversation         Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  fromStatus           ConversationStatus? // null en la fila de nacimiento
+  toStatus             ConversationStatus
+
+  fromAssignedToUserId String?             // snapshot del handoff (escalar, como customerPhoneSnapshot)
+  toAssignedToUserId   String?
+
+  // actor en forma canónica (FK + relación), pero nullable: la transición
+  // automática PENDIENTE→SIN_ASIGNAR (timeout 10') no tiene actor humano.
+  // onDelete: Restrict — histórico-actor inmutable, espeja el canon.
+  changedByUserId      String?
+  changedBy            User?               @relation("ConversationStateChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict)
+
+  changedAt            DateTime            @default(now())
+  note                 String?
+
+  @@index([conversationId])
   @@index([changedAt])
 }
