@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ConversationMessageAuthor } from "@prisma/client";
 import { STATUS_META } from "@/lib/call-center/status-display";
+import ConversationActions from "./ConversationActions";
 
 export const metadata = { title: "Call Center — Conversación" };
 
@@ -68,6 +69,13 @@ export default async function ConversationDetailPage({
         <Meta label="Cerrada" value={fmtOrDash(conv.closedAt)} />
         <Meta label="Última actualización" value={fmtOrDash(conv.updatedAt)} />
       </dl>
+
+      {/* Acciones (Sprint 2) — isla client; el server component se refresca tras mutar */}
+      <ConversationActions
+        conversationId={conv.id}
+        status={conv.status}
+        assignedToUserId={conv.assignedToUserId}
+      />
 
       {/* Timeline de mensajes */}
       <h2 style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginTop: 28, marginBottom: 12 }}>
