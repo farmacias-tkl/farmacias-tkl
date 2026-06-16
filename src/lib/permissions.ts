@@ -48,6 +48,21 @@ export function canViewCallCenter(
   return Boolean(u.callCenterAccess);
 }
 
+/**
+ * ¿Puede OPERAR en Call Center (tomar / reasignar / cerrar conversaciones)?
+ * HOY actuar == ver: es un alias de canViewCallCenter (misma fuente única). Existe
+ * como función propia para preparar un split futuro (permisos finos por puesto) sin
+ * tocar los call sites. NO se construyen permisos por puesto hasta que el dueño lo
+ * pida (deuda explícita). El control va server-side en cada handler, no solo en la UI.
+ * Como canViewCallCenter, es PURO y recibe el user por parámetro: sirve igual para el
+ * predicado de la sesión actual y para filtrar un listado de usuarios.
+ */
+export function canActOnCallCenter(
+  u: { role: UserRole; callCenterAccess?: boolean | null } | null | undefined,
+): boolean {
+  return canViewCallCenter(u);
+}
+
 /** ¿Puede acceder al panel /owner? Solo OWNER. */
 export function canAccessOwnerPanel(
   u: { role: UserRole } | null | undefined,

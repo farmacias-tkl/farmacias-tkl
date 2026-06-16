@@ -58,3 +58,19 @@ export function canTransition(
 ): boolean {
   return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
 }
+
+/**
+ * CICLO DE VIDA de Conversation.assignedToUserId (regla de diseño del dominio).
+ * No todo se implementa en Sprint 2 — esto documenta el contrato para el futuro.
+ *
+ *  - Tomar      (SIN_ASIGNAR→ASIGNADA): assignedToUserId = operador que toma. [Sprint 2]
+ *  - Reasignar  (ASIGNADA→ASIGNADA):    assignedToUserId = nuevo operador.    [Sprint 2]
+ *  - Cerrar     (ASIGNADA→RESUELTA):    assignedToUserId SE CONSERVA (último
+ *      responsable, necesario para métricas "resueltas por operador") + closedAt = now.
+ *      NO se nullea al cerrar.                                                  [Sprint 2]
+ *  - Reapertura por mensaje entrante (RESUELTA→PENDIENTE | RESUELTA→SIN_ASIGNAR):
+ *      ahí SÍ se limpia assignedToUserId = null Y closedAt = null, porque la
+ *      conversación vuelve al bot (Emozion) hasta que un operador la tome/se asigne.
+ *      [NO Sprint 2 — sin endpoint/botón/handler de reapertura; regla para el conector
+ *       Emozion/WhatsApp, Sprint 4.]
+ */
