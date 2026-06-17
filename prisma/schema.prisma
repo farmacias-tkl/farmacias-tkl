@@ -1045,8 +1045,9 @@ model Conversation {
 
   category               String?            // scratchpad descartable — NO taxonomía de intents
   customerPhoneSnapshot  String?            // congelado al crear (DM-7)
-  externalConversationId String?            // ID externo (conector) — nullable, no unique aún
+  externalConversationId String?  @unique   // dedup de dominio (uuid Emozion); nullable → Postgres trata nulls como distintos, las conv manuales de Sprint 2 con null no chocan
   source                 String?            // EMOZION | WHATSAPP_CLOUD | MANUAL — String?, sin enum aún
+  externalLabels         String[] @default([]) // staging de labels crudas de Emozion; NO se unifican; futuro = modelo ConversationTag (sub-dominio aparte)
 
   firstResponseAt        DateTime?
   closedAt               DateTime?
@@ -1076,8 +1077,9 @@ model ConversationMessage {
   body              String?                   // nullable: mensaje solo-media
   mediaUrl          String?                   // provisionado; fixtures = solo texto
   mediaType         String?                   // String?, sin enum aún
-  externalMessageId String?                   // idempotencia de ingesta — nullable, no unique aún
+  externalMessageId String?  @unique          // dedup de dominio (source_id Emozion / fallback "emozion-message:<id>"); nullable → nulls distintos en Postgres
   externalSenderId  String?                   // sender.id crudo de Emozion; NO se cruza a User TKL aún (cruce por email = dominio futuro)
+  isPrivate         Boolean  @default(false)  // notas internas entre operadores; no contaminan el timeline del cliente en el render
 
   sentAt            DateTime                  // timestamp real (Emozion/WA)
   createdAt         DateTime                  @default(now())
@@ -1108,4 +1110,43 @@ model ConversationStateHistory {
 
   @@index([conversationId])
   @@index([changedAt])
+}
+
+// ============================================================================
+// CALL CENTER — Ingesta por webhook de Emozion (Sprint 4B)
+//
+// Log APPEND-ONLY de eventos recibidos: registra cada evento, incluso reenvíos
+// (los webhooks se reentregan; queremos VER el reenvío, no rechazarlo). Por eso
+// NO lleva @@unique — la deduplicación vive en el DOMINIO (los @unique de
+// Conversation.externalConversationId / ConversationMessage.externalMessageId).
+// El procesamiento real (mapeo → upsert de dominio) es el processor del 4B 4/4.
+// ============================================================================
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  ERROR
+  IGNORED
+}
+
+model WebhookEvent {
+  id                     String             @id @default(cuid())
+  source                 SyncSource         @default(EMOZION)
+  eventType              String
+  accountId              Int
+  externalConversationId String?
+  externalMessageId      String?
+  // payload MÍNIMO NORMALIZADO (lo arma el processor del 4B 4/4): NUNCA
+  // custom_attributes/data_url/DNI/teléfono completo. Se nulea tras TTL 7 días.
+  // Sin UI; los logs no imprimen contenido. Cifrado de campo = gate de decisión
+  // pre-prod (datos de salud, Ley 25.326), no en 4B inicial.
+  payload                Json?
+  status                 WebhookEventStatus @default(RECEIVED)
+  attempts               Int                @default(0)
+  receivedAt             DateTime           @default(now())
+  processedAt            DateTime?
+  error                  String?
+
+  @@index([status, receivedAt])
+  @@index([externalConversationId])
 }
