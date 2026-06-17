@@ -13,8 +13,18 @@ export default auth((req: NextRequest & { auth: any }) => {
 
   // Rutas públicas / de auth
   // /api/sync/* tiene su propia autenticación con Authorization: Bearer (no usa session)
+  //
+  // EXCEPCIÓN WEBHOOK EMOZION (4B): el webhook lo llama Emozion SIN sesión; su auth es el
+  // secreto en la URL, validado en el handler. La excepción es ULTRA acotada: matchea SOLO
+  // "/api/call-center/emozion/webhook/<secret>" (con la barra final). NO abre rutas vecinas:
+  //   - /api/call-center/conversations/*  → SIGUE gateado por canViewCallCenter (abajo)
+  //   - /api/call-center/operators        → SIGUE gateado
+  //   - /api/call-center/emozion/<otra>   → NO matchea (requiere "/webhook/")
+  //   - /api/call-center/emozion/webhook  (sin barra/secret) → NO matchea
+  // Va ANTES del redirect-a-login por no-sesión y del gate; si no, el webhook comería 307.
   if (pathname.startsWith("/api/auth") || pathname.startsWith("/_next") ||
       pathname.startsWith("/api/sync") ||
+      pathname.startsWith("/api/call-center/emozion/webhook/") ||
       pathname === "/login" || pathname === "/cambiar-password" || pathname === "/sin-acceso") {
     if (pathname === "/login" && session?.user) {
       const isOwner = session.user.role === "OWNER";
