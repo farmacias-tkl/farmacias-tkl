@@ -12,10 +12,18 @@ import type {
 } from "./emozion-types";
 
 /**
- * Mappers PUROS Emozion(Chatwoot) → TKL (Sprint 4B, commit 2/4). Sin DB, sin red.
+ * Mappers PUROS Emozion(Chatwoot fork) → TKL. Sin DB, sin red.
  * FRONTERA PURA: CERO import de Prisma/@prisma/client (los enums son uniones locales).
  * Producen payload MÍNIMO NORMALIZADO: NUNCA custom_attributes/additional_attributes,
  * DNI, domicilio, obra_social, data_url/thumb_url ni URLs completas. No inventan datos.
+ *
+ * FORMA REAL del fork (capturada en prod, distinta del Chatwoot estándar):
+ *  - message_created: la RAÍZ es el MENSAJE; la conversación va embebida en `conversation`;
+ *    account_id en `account.id`. El id de conversación es NUMÉRICO (`conversation.id`), NO uuid.
+ *  - conversation_created / conversation_status_changed: la RAÍZ es la CONVERSACIÓN; su id
+ *    es `id` (numérico); account_id viene en `messages[0].account_id`.
+ *  - message_type es STRING ("incoming" | "outgoing" | "activity"); created_at es ISO string.
+ *  - externalConversationId = String(<id numérico>) (el webhook no trae uuid).
  */
 
 /** id del agente bot en Emozion (Asistente Virtual), confirmado por el probe de agentes. */
@@ -25,9 +33,34 @@ export const BOT_SENDER_ID = 1;
 export const SUPPORTED_EVENTS = ["conversation_created", "message_created", "conversation_status_changed"] as const;
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
-/** epoch (segundos) → Date; null si no es un número válido. */
-export function epochToDate(v: unknown): Date | null {
-  return typeof v === "number" && v > 0 ? new Date(v * 1000) : null;
+/** Parsea timestamp del fork: ISO string (new Date) o epoch number (seg→*1000, o ms). null si inválido. */
+export function parseTimestamp(v: unknown): Date | null {
+  if (typeof v === "number" && v > 0) {
+    const d = new Date(v < 1e12 ? v * 1000 : v); // <1e12 ⇒ epoch en segundos
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof v === "string" && v.trim()) {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/**
+ * Resuelve el id (numérico → string) de la conversación a partir de candidatos posibles:
+ * el `id` del objeto conversación y `messages[0].conversation_id`. Si ambos existen y NO
+ * coinciden → discrepancy=true (no elegir silenciosamente; el caller marca warning/ERROR).
+ */
+export function resolveConversationId(conv: EmozionConversation | null | undefined): { id: string | null; discrepancy: boolean } {
+  const cands: string[] = [];
+  if (conv?.id != null) cands.push(String(conv.id));
+  const m0 = conv?.messages?.[0]?.conversation_id;
+  if (m0 != null) cands.push(String(m0));
+  const uniq = [...new Set(cands)];
+  if (uniq.length > 1) return { id: null, discrepancy: true };
+  return { id: uniq[0] ?? null, discrepancy: false };
 }
 
 /** status Emozion + presencia de assignee → ConversationStatus (conservador + warning). */
@@ -47,21 +80,24 @@ export function mapStatus(status: unknown, hasAssignee: boolean): { status: Norm
   }
 }
 
-/** author de un mensaje. fallback=true marca un outgoing con sender raro/ausente. */
+/**
+ * author de un mensaje (fork: message_type STRING). fallback=true marca un outgoing con
+ * sender raro/ausente. incoming / sender contacto → CUSTOMER; outgoing sender.id==1 → BOT;
+ * outgoing sender.type=="user" (id!=1) → OPERATOR; resto → OPERATOR (fallback técnico).
+ */
 export function mapAuthor(m: EmozionMessage): { author: NormalizedAuthor; fallback: boolean } {
-  const mt = Number(m?.message_type);
+  const mt = m?.message_type;
   const s = m?.sender ?? null;
-  if (mt === 0 || s?.type === "contact") return { author: "CUSTOMER", fallback: false };
+  if (mt === "incoming" || mt === 0 || s?.type === "contact") return { author: "CUSTOMER", fallback: false };
   if (s?.type === "agent_bot") return { author: "BOT", fallback: false };
   if (Number(s?.id) === BOT_SENDER_ID) return { author: "BOT", fallback: false };
   if (s?.type === "user") return { author: "OPERATOR", fallback: false };
-  // outgoing con sender raro/ausente: OPERATOR solo como fallback técnico, marcado.
   return { author: "OPERATOR", fallback: true };
 }
 
 /** labels crudas → string[] limpio (sin unificar). Staging hacia futuro ConversationTag. */
-export function normalizeLabels(raw: EmozionConversation | EmozionWebhookEnvelope | null | undefined): string[] {
-  const labels = (raw as EmozionConversation | null)?.labels;
+export function normalizeLabels(conv: EmozionConversation | null | undefined): string[] {
+  const labels = conv?.labels;
   if (!Array.isArray(labels)) return [];
   return labels.filter((l): l is string => typeof l === "string" && l.length > 0);
 }
@@ -73,34 +109,44 @@ function normalizeContact(c: EmozionContact | null | undefined): { phone: string
 }
 
 // ── mappers principales ───────────────────────────────────────────────────────────
-/** Conversación Emozion → NormalizedConversation. insufficientData si falta uuid o phone. */
-export function normalizeConversation(raw: EmozionConversation | null | undefined): NormalizeResult<NormalizedConversation> {
+/**
+ * Conversación Emozion → NormalizedConversation. insufficientData si falta el id o el phone,
+ * o si hay discrepancia entre candidatos de id de conversación (defensa, no elegir a ciegas).
+ */
+export function normalizeConversation(conv: EmozionConversation | null | undefined): NormalizeResult<NormalizedConversation> {
   const warnings: string[] = [];
-  const uuid = typeof raw?.uuid === "string" && raw.uuid ? raw.uuid : null;
-  const contactRaw = raw?.meta?.sender ?? raw?.contact ?? null;
-  const contact = normalizeContact(contactRaw);
-  if (!uuid || !contact) {
+  const { id, discrepancy } = resolveConversationId(conv);
+  if (discrepancy) {
     return {
       outcome: "insufficientData",
       data: null,
-      warnings: [`conversación incompleta (uuid:${!!uuid} phone:${!!contact}) → no se mapea`],
+      warnings: [`ids de conversación discrepantes (id vs messages[0].conversation_id) → no se mapea`],
       authorFallbackCount: 0,
     };
   }
-  const hasAssignee = Boolean(raw?.meta?.assignee && raw.meta.assignee.id != null);
-  const st = mapStatus(raw?.status, hasAssignee);
+  const contact = normalizeContact(conv?.meta?.sender ?? conv?.contact ?? null);
+  if (!id || !contact) {
+    return {
+      outcome: "insufficientData",
+      data: null,
+      warnings: [`conversación incompleta (id:${!!id} phone:${!!contact}) → no se mapea`],
+      authorFallbackCount: 0,
+    };
+  }
+  const hasAssignee = Boolean(conv?.meta?.assignee && conv.meta.assignee.id != null);
+  const st = mapStatus(conv?.status, hasAssignee);
   warnings.push(...st.warnings);
   return {
     outcome: "processed",
     data: {
-      externalConversationId: uuid,
+      externalConversationId: id,
       status: st.status,
       source: "EMOZION",
       customerPhoneSnapshot: contact.phone,
-      firstResponseAt: epochToDate(raw?.first_reply_created_at),
-      closedAt: epochToDate(raw?.resolved_at),
-      externalCreatedAt: epochToDate(raw?.created_at),
-      externalLabels: normalizeLabels(raw),
+      firstResponseAt: parseTimestamp(conv?.first_reply_created_at),
+      closedAt: parseTimestamp(conv?.resolved_at),
+      externalCreatedAt: parseTimestamp(conv?.created_at),
+      externalLabels: normalizeLabels(conv),
       contact,
     },
     warnings,
@@ -110,16 +156,16 @@ export function normalizeConversation(raw: EmozionConversation | null | undefine
 
 /**
  * Mensaje Emozion → NormalizedMessage.
- *  - activity (message_type 2) → outcome "ignored" (no se persiste).
+ *  - activity (message_type "activity"/2) → outcome "ignored" (no se persiste).
  *  - sin source_id ni id → insufficientData.
  *  - externalMessageId = source_id ?? "emozion-message:<id>".
  */
 export function normalizeMessage(raw: EmozionMessage | null | undefined): NormalizeResult<NormalizedMessage> {
   const warnings: string[] = [];
-  const mt = Number(raw?.message_type);
+  const mt = raw?.message_type;
 
-  if (mt === 2) {
-    return { outcome: "ignored", data: null, warnings: ["activity (message_type 2) ignorada"], authorFallbackCount: 0 };
+  if (mt === "activity" || mt === 2) {
+    return { outcome: "ignored", data: null, warnings: ["activity ignorada (no se persiste)"], authorFallbackCount: 0 };
   }
 
   const sourceId = typeof raw?.source_id === "string" && raw.source_id ? raw.source_id : null;
@@ -132,6 +178,9 @@ export function normalizeMessage(raw: EmozionMessage | null | undefined): Normal
   const { author, fallback } = mapAuthor(raw ?? {});
   if (fallback) warnings.push(`author fallback (outgoing con sender raro/ausente) → OPERATOR; extId=${externalMessageId}`);
 
+  const sentAt = parseTimestamp(raw?.created_at);
+  if (!sentAt) warnings.push(`mensaje sin created_at parseable → sentAt centinela; extId=${externalMessageId}`);
+
   const att = Array.isArray(raw?.attachments) && raw!.attachments!.length ? raw!.attachments![0] : null;
 
   return {
@@ -143,7 +192,7 @@ export function normalizeMessage(raw: EmozionMessage | null | undefined): Normal
       body: typeof raw?.content === "string" ? raw.content : null,
       mediaType: att?.file_type ?? null, // mediaUrl SIEMPRE null en la ingesta
       isPrivate: raw?.private === true,
-      sentAt: epochToDate(raw?.created_at) ?? new Date(0), // sin timestamp real → centinela; el caller puede warninguear
+      sentAt: sentAt ?? new Date(0), // sin timestamp → centinela (warning arriba)
       isActivity: false,
     },
     warnings,
@@ -151,26 +200,34 @@ export function normalizeMessage(raw: EmozionMessage | null | undefined): Normal
   };
 }
 
-/** Evento de cambio de estado → NormalizedStatusEvent. insufficientData si falta uuid. */
-export function normalizeStatusEvent(raw: EmozionConversation | null | undefined): NormalizeResult<NormalizedStatusEvent> {
-  const uuid = typeof raw?.uuid === "string" && raw.uuid ? raw.uuid : null;
-  if (!uuid) {
-    return { outcome: "insufficientData", data: null, warnings: ["status change sin uuid → no se mapea"], authorFallbackCount: 0 };
+/** Evento de cambio de estado → NormalizedStatusEvent. insufficientData si falta id o hay discrepancia. */
+export function normalizeStatusEvent(conv: EmozionConversation | null | undefined): NormalizeResult<NormalizedStatusEvent> {
+  const { id, discrepancy } = resolveConversationId(conv);
+  if (discrepancy) {
+    return { outcome: "insufficientData", data: null, warnings: ["ids de conversación discrepantes → no se mapea"], authorFallbackCount: 0 };
   }
-  const hasAssignee = Boolean(raw?.meta?.assignee && raw.meta.assignee.id != null);
-  const st = mapStatus(raw?.status, hasAssignee);
+  if (!id) {
+    return { outcome: "insufficientData", data: null, warnings: ["status change sin id de conversación → no se mapea"], authorFallbackCount: 0 };
+  }
+  const hasAssignee = Boolean(conv?.meta?.assignee && conv.meta.assignee.id != null);
+  const st = mapStatus(conv?.status, hasAssignee);
   return {
     outcome: "processed",
-    data: { externalConversationId: uuid, status: st.status, closedAt: epochToDate(raw?.resolved_at) },
+    data: { externalConversationId: id, status: st.status, closedAt: parseTimestamp(conv?.resolved_at) },
     warnings: st.warnings,
     authorFallbackCount: 0,
   };
 }
 
+/** Id externo (string) de una conversación para denormalizar columnas (mismo criterio que los mappers). */
+export function conversationExternalId(conv: EmozionConversation | null | undefined): string | null {
+  return resolveConversationId(conv).id;
+}
+
 /**
- * Localiza, en el envelope del webhook, el tipo de evento + accountId + las entidades.
- * Defensivo: para message_created el mensaje está en el top-level; para conversation_*
- * la conversación está en el top-level.
+ * Localiza, según el eventType, el objeto conversación + el mensaje + el account_id, sin
+ * importar la forma del fork (message_created: raíz=mensaje; conversation_*: raíz=conversación).
+ * Devuelve siempre el objeto conversación, para que los mappers downstream no sepan de la diferencia.
  */
 export function readEnvelope(raw: EmozionWebhookEnvelope | null | undefined): {
   event: string | null;
@@ -179,8 +236,19 @@ export function readEnvelope(raw: EmozionWebhookEnvelope | null | undefined): {
   message: EmozionMessage | null;
 } {
   const event = typeof raw?.event === "string" ? raw.event : null;
-  const accountId = (raw?.account?.id ?? raw?.account_id) ?? null;
-  const conversation = event === "message_created" ? (raw?.conversation ?? null) : ((raw as EmozionConversation | null) ?? null);
-  const message = event === "message_created" ? ((raw as EmozionMessage | null) ?? null) : null;
-  return { event, accountId: typeof accountId === "number" ? accountId : null, conversation, message };
+
+  if (event === "message_created") {
+    const message = (raw as EmozionMessage | null) ?? null; // raíz = mensaje
+    const conversation = raw?.conversation ?? null;
+    const accountId =
+      numOrNull(raw?.account?.id) ?? numOrNull(raw?.account_id) ?? numOrNull(raw?.conversation?.account_id);
+    return { event, accountId, conversation, message };
+  }
+
+  // conversation_created / conversation_status_changed / otros: raíz = conversación.
+  const conversation = (raw as EmozionConversation | null) ?? null;
+  const msgs = Array.isArray(raw?.messages) ? raw!.messages! : [];
+  const accountId =
+    numOrNull(raw?.account_id) ?? numOrNull(raw?.account?.id) ?? numOrNull(msgs[0]?.account_id);
+  return { event, accountId, conversation, message: null };
 }

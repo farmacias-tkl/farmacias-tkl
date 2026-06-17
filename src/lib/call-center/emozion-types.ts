@@ -32,11 +32,17 @@ export interface EmozionAttachment {
 export interface EmozionMessage {
   id?: number | null;
   content?: string | null;
-  message_type?: number | null; // 0 incoming, 1 outgoing, 2 activity, 3 template
+  // Fork real: STRING "incoming" | "outgoing" | "activity" (no el 0/1/2 de Chatwoot estándar).
+  message_type?: string | number | null;
   content_type?: string | null;
   source_id?: string | null;
   private?: boolean | null;
-  created_at?: number | null; // epoch segundos
+  created_at?: string | number | null; // fork real: STRING ISO ("2026-...-03:00")
+  conversation_id?: number | null;     // para validación de consistencia (si viene)
+  account?: { id?: number | null } | null; // message_created: account.id = account_id real
+  account_id?: number | null;
+  inbox?: { id?: number | null } | null;
+  conversation?: EmozionConversation | null; // message_created: conversación embebida
   sender?: EmozionSender | null;
   attachments?: EmozionAttachment[] | null;
 }
@@ -53,19 +59,19 @@ export interface EmozionConversationMeta {
 }
 
 export interface EmozionConversation {
-  id?: number | null;
+  id?: number | null; // fork real: id NUMÉRICO de la conversación (no hay uuid en el webhook)
   uuid?: string | null;
   status?: string | null; // pending | open | resolved | snoozed
   account_id?: number | null;
   inbox_id?: number | null;
-  first_reply_created_at?: number | null; // epoch segundos
-  created_at?: number | null;
-  updated_at?: number | null;
-  resolved_at?: number | null;
+  first_reply_created_at?: string | number | null; // ISO o epoch (parseamos ambos)
+  created_at?: string | number | null;
+  updated_at?: string | number | null;
+  resolved_at?: string | number | null;
   labels?: string[] | null;
   meta?: EmozionConversationMeta | null;
   contact?: EmozionContact | null; // algunos payloads lo traen top-level
-  messages?: EmozionMessage[] | null;
+  messages?: EmozionMessage[] | null; // conversation_*: mensajes embebidos (+ account_id en [0])
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   normalizeConversation,
   normalizeMessage,
   normalizeStatusEvent,
+  conversationExternalId,
   SUPPORTED_EVENTS,
 } from "@/lib/call-center/emozion-mappers";
 import { processWebhookEvent } from "@/lib/call-center/processor";
@@ -144,7 +145,8 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
 
   const eventType = env.event ?? "unknown";
   const accountId = env.accountId;
-  const externalConversationId = env.conversation?.uuid ?? null;
+  // Fork real: el id de conversación es numérico (no uuid) → String(id) vía el helper del mapper.
+  const externalConversationId = conversationExternalId(env.conversation);
 
   let status: "RECEIVED" | "IGNORED" | "ERROR" = "RECEIVED";
   let error: string | null = null;

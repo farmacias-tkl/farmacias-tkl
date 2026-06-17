@@ -106,10 +106,14 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
           break;
         }
         case "message_created": {
-          let conv = await tx.conversation.findUnique({
-            where: { externalConversationId: payload.externalConversationId },
-            select: { id: true },
-          });
+          // externalConversationId puede ser null (mensaje sin conversación embebida):
+          // no llamar findUnique con null (tiraría error); va directo a la rama de orden.
+          let conv = payload.externalConversationId
+            ? await tx.conversation.findUnique({
+                where: { externalConversationId: payload.externalConversationId },
+                select: { id: true },
+              })
+            : null;
           if (!conv) {
             // fuera de orden: crear mínima SOLO si el payload trae la conversación normalizada.
             if (payload.conversation) {
