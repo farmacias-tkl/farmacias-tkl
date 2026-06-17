@@ -10,7 +10,7 @@
  */
 import fs from "node:fs";
 import { execSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import assert from "node:assert/strict";
 
 const TEST_DB = "tkl_cc4b_smoke";
@@ -52,7 +52,7 @@ async function main() {
   // Redirigir el singleton @/lib/prisma a la DB efímera ANTES de importar el processor.
   process.env.DATABASE_URL = TEST_URL;
   const { prisma } = await import("../prisma");
-  const { processWebhookEvent } = await import("./processor");
+  const { processWebhookEvent, getUniqueViolationTarget, isDomainIdempotencyUniqueViolation } = await import("./processor");
 
   const mkEvent = (eventType: string, payload: unknown, extConv: string | null, extMsg: string | null) =>
     prisma.webhookEvent.create({
@@ -157,6 +157,63 @@ async function main() {
       assert.equal(await prisma.conversation.count({ where: { externalConversationId: "uuid-BAD" } }), 0, "dominio rolled back (sin conversación parcial)");
       // El Customer del payload BAD tampoco debe quedar (rollback de toda la tx de dominio)
       assert.equal(await prisma.customer.count({ where: { phone: "+5491100000099" } }), 0, "customer del fallo rolled back");
+    });
+
+    // 7. P2002 discrimina el constraint (UNIT, determinístico): phone NO idempotente; ext* SÍ.
+    await check("7. P2002 discrimina constraint (phone→ERROR; externalIds→idempotente)", () => {
+      const mk = (target: unknown) =>
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "5.22.0", meta: { target } } as any);
+      // idempotencia de dominio
+      assert.equal(isDomainIdempotencyUniqueViolation(mk(["externalMessageId"])), true);
+      assert.equal(isDomainIdempotencyUniqueViolation(mk(["externalConversationId"])), true);
+      assert.equal(isDomainIdempotencyUniqueViolation(mk("ConversationMessage_externalMessageId_key")), true); // forma string
+      // Customer.phone NO idempotente (carrera de cliente recurrente)
+      assert.equal(isDomainIdempotencyUniqueViolation(mk(["phone"])), false);
+      assert.equal(isDomainIdempotencyUniqueViolation(mk("Customer_phone_key")), false);
+      // target ausente → conservador (no idempotente, ERROR)
+      const noMeta = new Prisma.PrismaClientKnownRequestError("x", { code: "P2002", clientVersion: "5.22.0" } as any);
+      assert.equal(isDomainIdempotencyUniqueViolation(noMeta), false);
+      assert.deepEqual(getUniqueViolationTarget(noMeta), []);
+      // no-P2002 → null (no entra al manejo idempotente)
+      const other = new Prisma.PrismaClientKnownRequestError("x", { code: "P2025", clientVersion: "5.22.0" } as any);
+      assert.equal(getUniqueViolationTarget(other), null);
+    });
+
+    // 8. phone P2002 a TRAVÉS del processor → WebhookEvent ERROR (no PROCESSED), sin dominio
+    //    parcial. (El P2002 de phone solo ocurre por concurrencia, porque el upsert protege el
+    //    caso secuencial; varios conversation_created concurrentes con el MISMO phone nuevo.)
+    //    Invariante de seguridad, válido en cualquier interleaving: PROCESSED ⇒ su conversación
+    //    existe; ERROR ⇒ sin conversación parcial; un solo Customer para el phone compartido.
+    await check("8. phone P2002 vía processor → ERROR (no PROCESSED), sin dominio parcial", async () => {
+      const phone = "+5491100007777";
+      const N = 6;
+      const evs: { id: string }[] = [];
+      for (let i = 0; i < N; i++) {
+        evs.push(await mkEvent("conversation_created", convPayload(`uuid-PH-${i}`, phone, "Cliente Recurrente", "SIN_ASIGNAR", []), `uuid-PH-${i}`, null));
+      }
+      await Promise.all(evs.map((e) => processWebhookEvent(e.id)));
+
+      assert.equal(await prisma.customer.count({ where: { phone } }), 1, "un solo Customer para el phone compartido");
+      let processedCount = 0;
+      let errorCount = 0;
+      for (let i = 0; i < N; i++) {
+        const we = await prisma.webhookEvent.findUnique({ where: { id: evs[i].id } });
+        const convExists = (await prisma.conversation.count({ where: { externalConversationId: `uuid-PH-${i}` } })) > 0;
+        if (we!.status === "PROCESSED") {
+          processedCount++;
+          assert.ok(convExists, `PROCESSED ⇒ su conversación existe (uuid-PH-${i})`);
+        } else {
+          errorCount++;
+          assert.equal(we!.status, "ERROR", `el no-procesado quedó ERROR, no PROCESSED (uuid-PH-${i})`);
+          assert.ok(!convExists, `ERROR ⇒ sin conversación parcial (uuid-PH-${i})`);
+        }
+      }
+      const convsForPhone = await prisma.conversation.count({ where: { customerPhoneSnapshot: phone } });
+      assert.equal(convsForPhone, processedCount, "conversaciones creadas == eventos PROCESSED (ninguna marca de éxito sin dominio)");
+      console.log(`   (concurrencia: ${processedCount} PROCESSED, ${errorCount} ERROR por phone P2002)`);
+      if (errorCount > 0) {
+        assert.ok((await prisma.syncLog.count({ where: { source: "EMOZION", status: { in: ["ERROR", "PARTIAL"] } } })) >= 1, "SyncLog ERROR/PARTIAL persiste");
+      }
     });
 
     // Verificaciones agregadas + salida sanitizada

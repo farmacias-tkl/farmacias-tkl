@@ -37,8 +37,36 @@ export interface ProcessResult {
   error: string | null;
 }
 
-function isUniqueViolation(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+/**
+ * Únicos @unique cuya violación (P2002) es idempotencia VÁLIDA de evento (mismo evento
+ * repetido / dos webhooks concurrentes del mismo evento). Cualquier otro target —en
+ * particular Customer.phone (carrera de clientes recurrentes)— NO es idempotencia: marca
+ * ERROR, no se pierde el evento.
+ */
+export const DOMAIN_IDEMPOTENCY_TARGETS = ["externalConversationId", "externalMessageId"] as const;
+
+/**
+ * Targets de un P2002, normalizados a string[]. Prisma devuelve `meta.target` como array
+ * de columnas o como string (nombre de constraint) según versión/DB → soportamos ambas.
+ * Devuelve [] si es P2002 sin target (conservador), null si NO es P2002.
+ */
+export function getUniqueViolationTarget(e: unknown): string[] | null {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return null;
+  const t = (e.meta as { target?: unknown } | undefined)?.target;
+  if (Array.isArray(t)) return t.map((x) => String(x));
+  if (typeof t === "string") return [t];
+  return [];
+}
+
+/**
+ * ¿El P2002 es de un @unique de idempotencia de dominio (externalConversationId/
+ * externalMessageId)? Acepta tanto el nombre de columna como el de constraint
+ * ("Conversation_externalConversationId_key"). Target ausente → false (ERROR conservador).
+ */
+export function isDomainIdempotencyUniqueViolation(e: unknown): boolean {
+  const targets = getUniqueViolationTarget(e);
+  if (!targets || targets.length === 0) return false;
+  return targets.every((t) => DOMAIN_IDEMPOTENCY_TARGETS.some((col) => t === col || t.includes(col)));
 }
 
 // El payload persistido serializa Dates a ISO (JSON). Re-hidratamos antes de pasar a ingest.
@@ -109,12 +137,19 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
     domainOk = true;
     outcome = "processed";
   } catch (e) {
-    if (isUniqueViolation(e)) {
-      // Concurrencia: dos webhooks del mismo evento a la vez. El @unique de dominio ganó
-      // en uno; el otro es idempotente (ya existe) → tratar como procesado, NO error.
+    if (isDomainIdempotencyUniqueViolation(e)) {
+      // Concurrencia / repetición del MISMO evento: el @unique de dominio
+      // (externalConversationId/externalMessageId) ganó en uno; el otro es idempotente.
       domainOk = true;
       outcome = "processed";
-      warnings.push("idempotente: unique violation (P2002) tratada como ya-procesado");
+      warnings.push("idempotente: unique violation de dominio (externalConversationId/externalMessageId) tratada como ya-procesado");
+    } else if (getUniqueViolationTarget(e) !== null) {
+      // P2002 de OTRO constraint (p.ej. Customer.phone — carrera de cliente recurrente) o
+      // sin target → NO idempotente. NO se marca PROCESSED: fluye como ERROR por la misma
+      // estructura de atomicidad (la marca se escribe FUERA de la tx rolleada, abajo).
+      const tgt = getUniqueViolationTarget(e);
+      outcome = "error";
+      errorMsg = `P2002 no idempotente (constraint: ${tgt && tgt.length ? tgt.join(",") : "desconocido"})`;
     } else if (e instanceof ProcessError) {
       outcome = e.outcome;
       errorMsg = e.message;
