@@ -569,6 +569,7 @@ enum SyncStatus {
 enum SyncSource {
   GOOGLE_DRIVE
   SALES_API
+  EMOZION
 }
 
 enum SyncTrigger {
@@ -1076,6 +1077,7 @@ model ConversationMessage {
   mediaUrl          String?                   // provisionado; fixtures = solo texto
   mediaType         String?                   // String?, sin enum aún
   externalMessageId String?                   // idempotencia de ingesta — nullable, no unique aún
+  externalSenderId  String?                   // sender.id crudo de Emozion; NO se cruza a User TKL aún (cruce por email = dominio futuro)
 
   sentAt            DateTime                  // timestamp real (Emozion/WA)
   createdAt         DateTime                  @default(now())
