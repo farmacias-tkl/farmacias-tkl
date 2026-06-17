@@ -22,6 +22,7 @@ import {
   normalizeStatusEvent,
   SUPPORTED_EVENTS,
 } from "@/lib/call-center/emozion-mappers";
+import { processWebhookEvent } from "@/lib/call-center/processor";
 
 export const runtime = "nodejs";
 
@@ -62,7 +63,16 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
   } else if (eventType === "message_created") {
     const r = normalizeMessage(env.message);
     if (r.outcome === "processed") {
-      payload = { event: eventType, externalConversationId, message: r.data };
+      // Incluimos la conversación normalizada SI viene embebida (Chatwoot la trae en
+      // message_created): permite al processor crear la conversación mínima si el mensaje
+      // llega fuera de orden. Si no viene → conversation: null → el processor hará needsRetry.
+      const rc = normalizeConversation(env.conversation);
+      payload = {
+        event: eventType,
+        externalConversationId,
+        message: r.data,
+        conversation: rc.outcome === "processed" ? rc.data : null,
+      };
       externalMessageId = r.data!.externalMessageId; // mapper = fuente única del fallback de id
     } else if (r.outcome === "ignored") {
       status = "IGNORED";
@@ -81,6 +91,7 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
   // Solo metadata + status IGNORED/ERROR. Las Dates del normalizado se serializan a ISO.
   const payloadJson = payload ? JSON.parse(JSON.stringify(payload)) : undefined;
 
+  let eventId: string;
   try {
     const ev = await prisma.webhookEvent.create({
       data: {
@@ -96,14 +107,28 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
       },
       select: { id: true },
     });
+    eventId = ev.id;
     // Log sin payload/body/secret.
     console.log("[emozion-webhook]", JSON.stringify({ eventId: ev.id, eventType, accountId, externalConversationId, externalMessageId, status, error }));
-    return NextResponse.json({ ok: true, status }, { status: 200 });
   } catch (e) {
-    // No se pudo ni persistir → 5xx para que Emozion reintente.
+    // No se pudo ni persistir → 5xx para que Emozion reintente (única red de seguridad).
     console.error("[emozion-webhook] persist failed:", e instanceof Error ? e.message : String(e));
     return NextResponse.json({ ok: false }, { status: 500 });
   }
+
+  // Procesamiento síncrono: solo para eventos RECEIVED (IGNORED/ERROR no tienen dominio que
+  // procesar). Aunque el processor falle, respondemos 200 — el evento ya está persistido y
+  // queda como ERROR para reproceso. El processor maneja su propia atomicidad y errores.
+  if (status === "RECEIVED") {
+    try {
+      const result = await processWebhookEvent(eventId);
+      console.log("[emozion-webhook] processed", JSON.stringify({ eventId, eventType, status: result.status, outcome: result.outcome }));
+    } catch (e) {
+      console.error("[emozion-webhook] processor threw:", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return NextResponse.json({ ok: true, status }, { status: 200 });
 }
 
 export async function GET() {
