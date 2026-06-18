@@ -433,10 +433,26 @@ salud) antes de mostrar/almacenar. No decidir implementación antes del diagnós
 
 #### ⚠️ 2. Live refresh de UI
 
-OBSERVACIÓN DE USO, NO DIAGNOSTICADA. Los mensajes nuevos
-parecieron no aparecer sin refresh manual. Confirmar contra código antes de proponer
-solución: cómo carga datos la UI hoy (server components / fetch / TanStack Query),
-si hay refetchInterval o invalidación. No proponer solución hasta verificar la causa.
+DIAGNÓSTICO COMPLETADO: capacidad ausente, no bug. Los mensajes nuevos no aparecen
+en `/call-center` sin refresh/navegación manual.
+
+Encuadre (verificado contra código):
+- Sprint 1 es vista read-only server-rendered: listado y detalle cargan por Prisma
+  durante el render server (no client fetch).
+- No hay TanStack Query / SWR / polling / SSE / websocket en el área Call Center.
+- `router.refresh()` existe SOLO post-mutación en `ConversationActions` (tomar/reasignar/
+  cerrar); no se dispara por mensajes entrantes del webhook.
+- Por eso, mientras la página queda abierta, no se actualiza sola: requiere refresh/
+  navegación manual para ver mensajes nuevos.
+- NO es problema de caché: las vistas son dinámicas por request; al navegar/refrescar
+  traen datos frescos. El problema no es stale cache sino la ausencia de un mecanismo de
+  actualización mientras la página permanece abierta.
+
+Pendiente (no bloqueante): resolverlo como parte del Sprint 2 / Inbox operativo, NO como
+fix suelto. No elegir todavía la técnica (polling vs SSE vs websocket) — queda para una
+Fase A propia del Sprint 2. El mecanismo de refresco debe considerar privacidad/PII de
+salud: frecuencia y superficie de transmisión de bodies de mensajes, recetas, imágenes o
+datos sensibles hacia operadores que quizá no estén atendiendo esa conversación.
 
 #### ⚠️ 3. Timezone UI
 
