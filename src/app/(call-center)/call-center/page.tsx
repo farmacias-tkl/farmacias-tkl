@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { STATUS_META, STATUS_ORDER, parseStatus } from "@/lib/call-center/status-display";
+import { formatDateTimeAR } from "@/lib/dates/format";
 
 export const metadata = { title: "Call Center — Conversaciones" };
 
 // Vista read-only del Sprint 1 (fundación conversacional). Lista las
 // conversaciones (fixtures) con filtro simple por estado. SIN acciones:
 // nada de tomar / derivar / cerrar / responder; eso llega en el Sprint 2.
-const fmt = new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" });
 
 function StatusBadge({ status }: { status: keyof typeof STATUS_META }) {
   const m = STATUS_META[status];
@@ -85,7 +85,7 @@ export default async function CallCenterPage({
                 </div>
               </div>
               <div style={{ textAlign: "right", color: "#9ca3af", fontSize: 12, whiteSpace: "nowrap" }}>
-                {fmt.format(c.updatedAt)}
+                {formatDateTimeAR(c.updatedAt)}
               </div>
             </Link>
           ))}

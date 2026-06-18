@@ -3,14 +3,14 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ConversationMessageAuthor } from "@prisma/client";
 import { STATUS_META } from "@/lib/call-center/status-display";
+import { formatDateTimeAR } from "@/lib/dates/format";
 import ConversationActions from "./ConversationActions";
 
 export const metadata = { title: "Call Center — Conversación" };
 
 // Detalle read-only (Sprint 1): estado actual, operador asignado, timestamps,
 // timeline de mensajes e historial de estado. SIN acciones de ningún tipo.
-const fmt = new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" });
-const fmtOrDash = (d: Date | null | undefined) => (d ? fmt.format(d) : "—");
+// Timestamps con hora real → formatDateTimeAR (zona America/Argentina/Buenos_Aires).
 
 const AUTHOR_LABEL: Record<ConversationMessageAuthor, string> = {
   CUSTOMER: "Cliente",
@@ -64,10 +64,10 @@ export default async function ConversationDetailPage({
         <Meta label="Operador asignado" value={conv.assignedTo?.name ?? "—"} />
         <Meta label="Origen" value={conv.source ?? "—"} />
         <Meta label="ID externo" value={conv.externalConversationId ?? "—"} />
-        <Meta label="Creada" value={fmtOrDash(conv.createdAt)} />
-        <Meta label="Primera respuesta" value={fmtOrDash(conv.firstResponseAt)} />
-        <Meta label="Cerrada" value={fmtOrDash(conv.closedAt)} />
-        <Meta label="Última actualización" value={fmtOrDash(conv.updatedAt)} />
+        <Meta label="Creada" value={formatDateTimeAR(conv.createdAt)} />
+        <Meta label="Primera respuesta" value={formatDateTimeAR(conv.firstResponseAt)} />
+        <Meta label="Cerrada" value={formatDateTimeAR(conv.closedAt)} />
+        <Meta label="Última actualización" value={formatDateTimeAR(conv.updatedAt)} />
       </dl>
 
       {/* Acciones (Sprint 2) — isla client; el server component se refresca tras mutar */}
@@ -95,7 +95,7 @@ export default async function ConversationDetailPage({
                   {msg.body ?? <em style={{ color: "#9ca3af" }}>[contenido multimedia]</em>}
                 </div>
                 <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, textAlign: "right" }}>
-                  {fmt.format(msg.sentAt)}
+                  {formatDateTimeAR(msg.sentAt)}
                 </div>
               </div>
             </div>
@@ -120,7 +120,7 @@ export default async function ConversationDetailPage({
               <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>
                 {h.changedBy?.name ? `Por ${h.changedBy.name}` : "Sistema (automático)"}
                 {" · "}
-                {fmt.format(h.changedAt)}
+                {formatDateTimeAR(h.changedAt)}
                 {h.note ? ` · ${h.note}` : ""}
               </div>
             </li>
