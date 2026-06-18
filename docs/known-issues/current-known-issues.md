@@ -425,11 +425,40 @@ Cementerio histórico pre-fix (NO recuperar, NO borrar, filtrar por fecha en rep
 
 #### 🔒 1. Multimedia en UI
 
-Mensajes multimedia se muestran como `[contenido multimedia]`
-sin render de imagen/PDF/archivo. Verificado visualmente. Diagnóstico pendiente:
-¿mapper guarda mediaUrl/mediaType? ¿API los expone? ¿UI los renderiza? ¿Emozion
-manda URL usable o solo referencia? Evaluar implicancias PII (recetas = datos de
-salud) antes de mostrar/almacenar. No decidir implementación antes del diagnóstico.
+DIAGNÓSTICO COMPLETADO. La UI muestra `[contenido multimedia]` porque en mensajes
+solo-media `body` viene null y el render cae a ese fallback.
+
+- Schema ya tiene `mediaUrl` y `mediaType` (`ConversationMessage`).
+- La ingesta guarda `mediaType` (etiqueta del adjunto), pero **`mediaUrl` queda siempre
+  `null`**.
+- **`mediaUrl = null` es DELIBERADO/CONSERVADOR, no un olvido del mapper**: la URL del
+  adjunto (`data_url` de Emozion) se descarta por diseño hasta resolver privacidad, acceso,
+  retención y almacenamiento de datos sensibles (recetas/fotos clínicas/PDFs = datos de salud).
+
+Conteo real en prod (query PII-safe, Neon Console):
+- `mediaUrl` poblados: **0**
+- `mediaType` poblados: **293**
+- `body` null: **190**
+- tipos: image **218**, file **69**, audio **7**
+
+Clasificación final: **B + D + E**.
+- **B** — mapper/ingesta descarta la URL por diseño.
+- **D** — la naturaleza real de la URL Emozion/Chatwoot (pública / temporal / autenticada /
+  expirable) NO es determinable desde el repo.
+- **E** — privacidad/PII de salud aplica obligatoriamente.
+
+Orden de dependencia para resolver (NO empezar por la UI: sin decisión E no hay nada seguro
+que ingerir ni mostrar):
+1. **E primero** — decisión de privacidad/producto/storage.
+2. **Luego B** — ingesta de la URL, si se decide conservar/traer adjuntos.
+3. **Luego D** — proxy/storage si la URL es temporal, protegida o no debe exponerse directo.
+4. **UI al final.**
+
+No es un fix UI chico: sin `mediaUrl` no hay archivo que renderizar. Mostrar adjuntos
+requiere decisión previa de producto/privacidad/storage: permisos; quién puede ver qué
+conversación; retención; si se guarda la URL de Emozion; si se usa proxy; si se copia a
+storage propio; cómo tratar recetas, PDFs, imágenes y audios. No elegir todavía la solución
+técnica. Resolverlo dentro del Sprint 2 / Inbox operativo, no como parche suelto.
 
 #### ⚠️ 2. Live refresh de UI
 
