@@ -454,11 +454,23 @@ Fase A propia del Sprint 2. El mecanismo de refresco debe considerar privacidad/
 salud: frecuencia y superficie de transmisión de bodies de mensajes, recetas, imágenes o
 datos sensibles hacia operadores que quizá no estén atendiendo esa conversación.
 
-#### ⚠️ 3. Timezone UI
+#### ✅ 3. Timezone UI — RESUELTO
 
-Posible confusión UTC vs hora Argentina en display de fechas.
-Dato en DB correcto (UTC); fix sería en capa de presentación. Revisar render de
-sentAt/createdAt/receivedAt. Mostrar hora local a operadores, conservar UTC en DB/logs.
+Las fechas/horas de Call Center se mostraban en UTC en vez de hora Argentina.
+
+- **Causa**: las vistas son server-side (Vercel = UTC) y formateaban con
+  `Intl.DateTimeFormat` sin `timeZone` → el string salía en UTC y llegaba congelado
+  al browser (no dependía del navegador del operador).
+- **Fix** (commit `26ffad6`): helper `src/lib/dates/format.ts` con `formatDateTimeAR`
+  (instantes/timestamps, zona `America/Argentina/Buenos_Aires`) y `formatDateAR`
+  (date-only, sin correr el día). Aplicado SOLO en las dos vistas de Call Center
+  (`/call-center` listado y `/call-center/[id]` detalle).
+- **Verificado visualmente en producción**: `/call-center` muestra hora local correcta.
+- **Deuda residual (no bloqueante)**: el patrón "sin `timeZone` explícita" sigue latente
+  en otros módulos que formateen timestamps server-side a futuro. El helper queda
+  disponible como camino correcto, pero NO se migraron los 40+ call sites existentes
+  (riesgo de corrimiento de día en date-only si se aplica zona a fechas calendario).
+  Hardening separado si se decide.
 
 #### 💡 4. Auto-heal de conversation_status_changed huérfano
 
