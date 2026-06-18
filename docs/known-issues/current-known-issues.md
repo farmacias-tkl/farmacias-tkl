@@ -405,6 +405,75 @@ actualizar el formato del Excel y el parser.
 
 ---
 
+## Call Center / Emozion
+
+### ✅ Estado post-reconexión (2026-06-18)
+
+Webhook Emozion reconectado 2026-06-18 12:17 UTC. Verificado en tráfico real
+sostenido (~1h): 497 message_created PROCESSED, 0 ERROR en mensajes,
+0 externalMessageId repetidos sobre ~500 mensajes (idempotencia confirmada
+en prod, incluido el fallback outgoing emozion-message:<id> que no era
+verificable desde código). Deploy 65c9722, EMOZION_DEBUG_CAPTURE ausente/OFF.
+Salud del conector: cerrada y verificada.
+
+Cementerio histórico pre-fix (NO recuperar, NO borrar, filtrar por fecha en reportes):
+- 153 NORMALIZED_OR_RAW (17/06 20:31–20:41 UTC): mensajes reales ya atendidos
+  por operadores en Emozion; pérdida solo del espejo TKL. Decisión: no recuperar.
+- 23 DEBUG_SANITIZED (17/06 22:09–22:17 UTC): capturas de diagnóstico, no reprocesables.
+
+### Pendientes no bloqueantes (diagnóstico read-only antes de construir)
+
+#### 🔒 1. Multimedia en UI
+
+Mensajes multimedia se muestran como `[contenido multimedia]`
+sin render de imagen/PDF/archivo. Verificado visualmente. Diagnóstico pendiente:
+¿mapper guarda mediaUrl/mediaType? ¿API los expone? ¿UI los renderiza? ¿Emozion
+manda URL usable o solo referencia? Evaluar implicancias PII (recetas = datos de
+salud) antes de mostrar/almacenar. No decidir implementación antes del diagnóstico.
+
+#### ⚠️ 2. Live refresh de UI
+
+OBSERVACIÓN DE USO, NO DIAGNOSTICADA. Los mensajes nuevos
+parecieron no aparecer sin refresh manual. Confirmar contra código antes de proponer
+solución: cómo carga datos la UI hoy (server components / fetch / TanStack Query),
+si hay refetchInterval o invalidación. No proponer solución hasta verificar la causa.
+
+#### ⚠️ 3. Timezone UI
+
+Posible confusión UTC vs hora Argentina en display de fechas.
+Dato en DB correcto (UTC); fix sería en capa de presentación. Revisar render de
+sentAt/createdAt/receivedAt. Mostrar hora local a operadores, conservar UTC en DB/logs.
+
+#### 💡 4. Auto-heal de conversation_status_changed huérfano
+
+Durante la reconexión en
+caliente, ~11 status_changed sobre conversaciones nacidas mientras el webhook estaba
+apagado (sin conversation_created) cayeron en needsRetry/ERROR. Clusterizados 12:23–12:35
+UTC, se agotaron solos (>40 min sin nuevos). Residuo esperado de reconexión, NO bug,
+NO corrupción. Pendiente: evaluar si el processor debe crear conversación mínima desde
+status_changed (análogo al auto-heal de message_created embebido). Priorizar solo si
+reaparece en tráfico normal. CUIDADO de diseño: definir qué pasa si llega el
+conversation_created real después del auto-heal (idempotencia, no pisar estado nuevo
+con uno viejo).
+
+#### ⚠️ 5. Whitelist de transiciones
+
+Emozion manda transiciones fuera de whitelist
+(ej. SIN_ASIGNAR→RESUELTA, 7 casos/1h), ingeridas como PROCESSED con nota
+"Emozion es la realidad". NO bug — decisión de diseño deliberada. Pendiente: leer
+whitelist actual vs transiciones reales del fork; decidir si formalizar los saltos
+comunes o mantener el registro-como-excepción.
+
+#### 💡 6. Endpoint/vista de monitoreo (opcional)
+
+Evaluar vista interna read-only de salud
+del webhook (eventos por status, errores recientes, duplicados por externalMessageId,
+huérfanos) para no depender de queries manuales en Neon. Patrón seguro: endpoint
+server-side + GitHub Actions con secret (como el sync SIAF), credencial en Vercel,
+nunca en sandbox. Feature con diseño/gate propio; no implementar si distrae del Inbox.
+
+---
+
 ## Resumen prioritario
 
 Si tuviera que priorizar fixes para los próximos sprints:
