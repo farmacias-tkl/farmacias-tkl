@@ -1056,6 +1056,7 @@ model Conversation {
 
   messages               ConversationMessage[]
   stateHistory           ConversationStateHistory[]
+  attachments            ConversationAttachment[]
 
   @@index([status])
   @@index([assignedToUserId])
@@ -1084,6 +1085,8 @@ model ConversationMessage {
   sentAt            DateTime                  // timestamp real (Emozion/WA)
   createdAt         DateTime                  @default(now())
 
+  attachments       ConversationAttachment[]
+
   @@index([conversationId])
   @@index([externalMessageId])
 }
@@ -1110,6 +1113,97 @@ model ConversationStateHistory {
 
   @@index([conversationId])
   @@index([changedAt])
+}
+
+// ============================================================================
+// CALL CENTER — Adjuntos / multimedia (B1: schema base storage-AGNÓSTICO)
+//
+// Attachment-first: la entidad base es el adjunto. La receta NO es una entidad
+// ni un derivado del mediaType: es un valor de documentType, seteado por un
+// HUMANO (acción auditada), NUNCA inferido en la ingesta.
+//
+// B1 = SOLO identidad / vínculo / clasificación / status base / hook de retención.
+// NO incluye columnas de storage (URL/provider/estados de rama): esas son B6,
+// expand-only, una vez resuelta copia-vs-referencia. Ningún código LEE estas
+// columnas todavía (la ingesta de metadata es B2).
+// ============================================================================
+
+enum AttachmentSource {
+  EMOZION
+  INTERNAL
+  MIGRATED
+}
+
+// SIGNIFICADO documental, NO formato técnico. El formato (image/file/audio/pdf)
+// vive en mediaType/mimeType y NO se duplica acá. Default UNKNOWN; lo setea
+// SIEMPRE un humano (acción auditada), NUNCA derivado de mediaType en ingesta.
+// IMAGE/AUDIO/PDF NO van acá: son formato, ya cubierto por mediaType/mimeType.
+// PATIENT_PHOTO se agrega solo si aparece como necesidad operativa real (no ahora).
+enum DocumentType {
+  UNKNOWN
+  PRESCRIPTION
+  ARCHIVED_PRESCRIPTION
+  RECEIPT
+  OTHER
+}
+
+// Estados storage-AGNÓSTICOS. NO incluye STORED / AVAILABLE_BY_PROXY: esos
+// presuponen una rama de storage y van en B6 (lista 2b).
+enum AttachmentStatus {
+  RECEIVED   // metadata ingerida OK (sin bytes aún — los bytes son B6)
+  PENDING    // creado, esperando un paso posterior (resolución en B6)
+  FAILED     // row existe pero con problema conocido y acotado
+  REDACTED   // contenido removido por política/legal; el row queda como lápida
+  DELETED    // baja lógica
+}
+
+model ConversationAttachment {
+  id               String   @id @default(cuid())
+
+  // onDelete: Restrict — un adjunto puede ser receta/documentación clínica; NO debe
+  // borrarse por el borrado de una Conversation. Restrict fuerza una acción explícita
+  // de retención/redacción antes de poder borrar la conversación (borrado RUIDOSO, no
+  // silencioso). Divergencia DELIBERADA respecto de messages/stateHistory (que usan
+  // Cascade en conversationId): la naturaleza clínica lo justifica.
+  conversationId   String
+  conversation     Conversation         @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+
+  // Opcional: un adjunto nace casi siempre de un mensaje, pero puede sobrevivirlo.
+  messageId        String?
+  message          ConversationMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  source           AttachmentSource @default(EMOZION)
+  // id del adjunto en Emozion → idempotencia. Nullable: INTERNAL/MIGRATED no lo tienen
+  // (Postgres trata NULLs como distintos, no colisionan). Espeja el patrón de
+  // ConversationMessage.externalMessageId.
+  sourceExternalId String?  @unique
+
+  // FORMATO TÉCNICO (separado de documentType):
+  mediaType        String?  // image | file | audio (lo único que hoy se ingiere). String?, sin enum (espeja ConversationMessage.mediaType)
+  mimeType         String?
+  originalFileName String?  // PII-sensible (puede contener nombre del paciente) → NUNCA va a logs/AuditLog
+  sizeBytes        Int?     // WhatsApp tope ~100MB → Int alcanza
+
+  // SIGNIFICADO documental (separado del formato):
+  documentType     DocumentType     @default(UNKNOWN)
+  status           AttachmentStatus @default(RECEIVED)
+
+  retentionUntil   DateTime?        // único hook de retención en B1; SIN política/plazo (pendiente legal/interno)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // PROVENANCE DE CLASIFICACIÓN — decisión explícita de diseño:
+  // quién/cuándo setea documentType vive en AuditLog vía el evento ATTACHMENT_CLASSIFIED
+  // (action + userId + detail {from,to}), NO como columna de este modelo.
+  // NO agregar classifiedByUserId/classifiedAt acá: el row se mantiene en la lista 2a.
+  // Si en el futuro se quiere mostrar "clasificado por X" sin join al audit, será una
+  // denormalización expand-only en SU momento, no ahora.
+
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([documentType])
+  @@index([status])
 }
 
 // ============================================================================
