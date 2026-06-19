@@ -529,6 +529,44 @@ huérfanos) para no depender de queries manuales en Neon. Patrón seguro: endpoi
 server-side + GitHub Actions con secret (como el sync SIAF), credencial en Vercel,
 nunca en sandbox. Feature con diseño/gate propio; no implementar si distrae del Inbox.
 
+#### ✅ 7. Adjuntos / multimedia — B1 (schema base) APLICADO en prod (2026-06-19)
+
+Primer ciclo del diseño storage-agnóstico de adjuntos (resuelve la base del ítem 🔒 1).
+Modelo `ConversationAttachment` **attachment-first**: la receta NO es entidad ni se infiere
+del `mediaType` — es un valor de `documentType` que setea un humano (acción auditada), no la
+ingesta. **Solo schema; ningún código lee la tabla todavía** (la ingesta de metadata es B2).
+
+- **Aplicado y verificado en Neon producción** + commiteado (`a2d8a7c`).
+- Verificado en prod: tabla + 14 columnas; FK `conversationId` → `Conversation`
+  **ON DELETE RESTRICT** (divergente de messages/stateHistory, que usan Cascade: un adjunto
+  puede ser receta, no se borra en cascada); FK `messageId` → `ConversationMessage`
+  **ON DELETE SET NULL**; `sourceExternalId` **UNIQUE nullable** (idempotencia, patrón de
+  `externalMessageId`); defaults `source=EMOZION` / `documentType=UNKNOWN` / `status=RECEIVED`;
+  4 índices (`conversationId`, `messageId`, `documentType`, `status`); 3 enums con valores
+  exactos: `AttachmentSource{EMOZION,INTERNAL,MIGRATED}`,
+  `DocumentType{UNKNOWN,PRESCRIPTION,ARCHIVED_PRESCRIPTION,RECEIPT,OTHER}`,
+  `AttachmentStatus{RECEIVED,PENDING,FAILED,REDACTED,DELETED}`.
+- **Storage-agnóstico**: NO hay columnas de URL/provider/estados de rama — esas son B6,
+  expand-only, recién cuando se resuelva copia-vs-referencia.
+
+Próximos ciclos (NO hechos — solo B1 está cerrado):
+- **B2 (mapper de metadata sin descarga) — PRÓXIMO.** Confirmar contra payload real del fork
+  el nombre del campo id del adjunto y de `mimeType`/`fileName`/`size` (hoy no determinables
+  desde el repo).
+- **B3 endpoint seguro · B4 audit granular · B5 UI mínima** — posteriores.
+- **B6 (storage) — BLOQUEADO por decisión de retención (abierta).** Rama **A (copia a storage
+  propio privado) probable**: el `curl -I` limpio dio adjuntos Emozion **world-readable sin
+  auth, `Cache-Control: public`, token ActiveStorage `exp:null`** → proxy/referencia a una URL
+  pública permanente no es modelo de privacidad válido. La exposición world-readable es además
+  un hallazgo a escalar con el proveedor de Emozion, no solo input de storage.
+
+**Nota operativa (precedencia de env en el push a prod).** El `db push` de B1 a Neon lo
+ejecutó Daniel con una `DATABASE_URL` temporal seteada en la sesión de PowerShell: la variable
+de entorno de sesión tuvo **precedencia sobre el `.env` local** (que apunta a `localhost`).
+Para futuros pushes a prod, preferir el patrón documentado **`.env.neon` efímero + dotenv-cli**
+(`npx dotenv-cli -e .env.neon -- npx prisma db push`), o **verificar explícitamente la
+precedencia de env** antes de ejecutar, para no aplicar contra la DB equivocada.
+
 ---
 
 ## Resumen prioritario
