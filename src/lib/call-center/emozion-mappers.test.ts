@@ -139,7 +139,7 @@ test("11. payload con DNI/custom_attributes/data_url → Normalized* NO los cont
 
   const rawMsg = {
     id: 1, source_id: "m-pii", message_type: "incoming", content: "consulta general", created_at: ISO,
-    attachments: [{ file_type: "image", data_url: "https://signed.example/secret.jpg", thumb_url: "https://signed.example/thumb.jpg" }],
+    attachments: [{ id: 88001, file_type: "image", file_size: 2048, data_url: "https://signed.example/secret.jpg", thumb_url: "https://signed.example/thumb.jpg" }],
   } as unknown as Parameters<typeof normalizeMessage>[0];
   const mr = normalizeMessage(rawMsg);
   const msgJson = JSON.stringify(mr.data);

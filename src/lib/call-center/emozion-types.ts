@@ -25,8 +25,11 @@ export interface EmozionSender {
 }
 
 export interface EmozionAttachment {
-  file_type?: string | null; // "image" | "audio" | "file" | ... (solo presencia/tipo)
-  // data_url / thumb_url NO se tipan: nunca se ingieren.
+  id?: number | string | null; // id ESTABLE del adjunto (contrato real B2.0) → llave de idempotencia
+  file_type?: string | null;   // "image" | "audio" | "file" | ... (solo presencia/tipo) → mediaType
+  file_size?: number | null;   // bytes → sizeBytes
+  // data_url / thumb_url NO se tipan: nunca se ingieren (URLs world-readable).
+  // mime_type / content_type / file_name: el fork NO los manda. extension vino null → no se usa.
 }
 
 export interface EmozionMessage {
@@ -105,15 +108,29 @@ export interface NormalizedConversation {
   contact: NormalizedContact;
 }
 
+/**
+ * Adjunto normalizado (B2.1): metadata MÍNIMA, SIN bytes ni URL cruda. documentType NO se
+ * setea acá — lo pone el ingest (B2.2) como UNKNOWN. mimeType/originalFileName van null
+ * porque el fork NO los manda (contrato real confirmado en la captura B2.0).
+ */
+export interface NormalizedAttachment {
+  sourceExternalId: string;        // "emozion-attachment:<id>" — id estable del fork (idempotencia)
+  mediaType: string | null;        // file_type
+  sizeBytes: number | null;        // file_size
+  mimeType: string | null;         // null — el fork no lo manda
+  originalFileName: string | null; // null — el fork no lo manda
+}
+
 export interface NormalizedMessage {
   externalMessageId: string;
   externalSenderId: string | null;
   author: NormalizedAuthor;
   body: string | null;
-  mediaType: string | null; // file_type; mediaUrl SIEMPRE null en ingesta
+  mediaType: string | null; // file_type del primer adjunto (compat); mediaUrl SIEMPRE null en ingesta
   isPrivate: boolean;
   sentAt: Date;
   isActivity: boolean; // message_type 2 → no se persiste como ConversationMessage
+  attachments: NormalizedAttachment[]; // B2.1: metadata de adjuntos (todos), sin bytes/URL. [] si no hay.
 }
 
 export interface NormalizedStatusEvent {

@@ -5,6 +5,7 @@ import type {
   EmozionWebhookEnvelope,
   NormalizedConversation,
   NormalizedMessage,
+  NormalizedAttachment,
   NormalizedStatusEvent,
   NormalizeResult,
   NormalizedStatus,
@@ -47,6 +48,53 @@ export function parseTimestamp(v: unknown): Date | null {
 }
 
 const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/**
+ * ¿id de adjunto usable? Por TIPO, NO truthiness (id 0 es válido).
+ *  - number: finito (rechaza NaN/Infinity/-Infinity).
+ *  - string: no vacío tras trim (rechaza "" y solo-whitespace).
+ */
+function isUsableAttachmentId(id: unknown): id is number | string {
+  if (typeof id === "number") return Number.isFinite(id);
+  return typeof id === "string" && id.trim().length > 0;
+}
+
+/**
+ * Metadata de attachments → NormalizedAttachment[] (B2.1). PURO: sin bytes, sin URL cruda.
+ * Mapea TODOS los adjuntos (no solo [0]). SIN documentType (lo pone el ingest = UNKNOWN).
+ *
+ * Identidad rota (NO objeto, o sin id usable) → brokenIdentity=true y attachments=[]: el caller
+ * devuelve insufficientData para que el receptor/ingest falle RUIDOSO (todo-o-nada, sin dominio
+ * parcial). NO se inventa fallback por índice: el fork manda id estable (contrato real B2.0).
+ */
+export function normalizeAttachments(
+  rawAttachments: unknown,
+  externalMessageId: string,
+): { attachments: NormalizedAttachment[]; brokenIdentity: boolean; warnings: string[] } {
+  if (!Array.isArray(rawAttachments)) return { attachments: [], brokenIdentity: false, warnings: [] };
+  const attachments: NormalizedAttachment[] = [];
+  const warnings: string[] = [];
+  for (let i = 0; i < rawAttachments.length; i++) {
+    const a = rawAttachments[i];
+    if (!a || typeof a !== "object" || Array.isArray(a)) {
+      return { attachments: [], brokenIdentity: true, warnings: [`adjunto[${i}] no es objeto → identidad rota; extId=${externalMessageId}`] };
+    }
+    const att = a as Record<string, unknown>;
+    if (!isUsableAttachmentId(att.id)) {
+      return { attachments: [], brokenIdentity: true, warnings: [`adjunto[${i}] sin id usable → identidad rota; extId=${externalMessageId}`] };
+    }
+    // id trimmeado si es string → no generar keys de idempotencia divergentes por whitespace.
+    const rawId = typeof att.id === "string" ? att.id.trim() : att.id;
+    attachments.push({
+      sourceExternalId: `emozion-attachment:${rawId}`, // id estable (no índice)
+      mediaType: typeof att.file_type === "string" ? att.file_type : null,
+      sizeBytes: typeof att.file_size === "number" && Number.isFinite(att.file_size) ? att.file_size : null,
+      mimeType: null,         // el fork no lo manda
+      originalFileName: null, // el fork no lo manda
+    });
+  }
+  return { attachments, brokenIdentity: false, warnings };
+}
 
 /**
  * Resuelve el id (numérico → string) de la conversación a partir de candidatos posibles:
@@ -181,7 +229,20 @@ export function normalizeMessage(raw: EmozionMessage | null | undefined): Normal
   const sentAt = parseTimestamp(raw?.created_at);
   if (!sentAt) warnings.push(`mensaje sin created_at parseable → sentAt centinela; extId=${externalMessageId}`);
 
-  const att = Array.isArray(raw?.attachments) && raw!.attachments!.length ? raw!.attachments![0] : null;
+  // B2.1 — metadata de adjuntos (todos, no solo [0]); SIN bytes ni URL cruda.
+  const att = normalizeAttachments(raw?.attachments, externalMessageId);
+  if (att.brokenIdentity) {
+    // Adjunto con identidad rota tira insufficientData → el mensaje NO se crea (todo-o-nada).
+    // Decisión deliberada: preferimos perder temporalmente el espejo del mensaje y dejar
+    // WebhookEvent ERROR reprocesable, antes que crear un mensaje con adjuntos parciales o
+    // no idempotentes.
+    return {
+      outcome: "insufficientData",
+      data: null,
+      warnings: [...warnings, ...att.warnings],
+      authorFallbackCount: fallback ? 1 : 0,
+    };
+  }
 
   return {
     outcome: "processed",
@@ -190,12 +251,13 @@ export function normalizeMessage(raw: EmozionMessage | null | undefined): Normal
       externalSenderId: raw?.sender?.id != null ? String(raw.sender.id) : null,
       author,
       body: typeof raw?.content === "string" ? raw.content : null,
-      mediaType: att?.file_type ?? null, // mediaUrl SIEMPRE null en la ingesta
+      mediaType: att.attachments[0]?.mediaType ?? null, // compat: file_type del primer adjunto; mediaUrl SIEMPRE null en ingesta
       isPrivate: raw?.private === true,
       sentAt: sentAt ?? new Date(0), // sin timestamp → centinela (warning arriba)
       isActivity: false,
+      attachments: att.attachments,
     },
-    warnings,
+    warnings: [...warnings, ...att.warnings],
     authorFallbackCount: fallback ? 1 : 0,
   };
 }
