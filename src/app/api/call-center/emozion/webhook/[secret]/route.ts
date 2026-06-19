@@ -24,6 +24,7 @@ import {
   SUPPORTED_EVENTS,
 } from "@/lib/call-center/emozion-mappers";
 import { processWebhookEvent } from "@/lib/call-center/processor";
+import { buildAttachmentCapture } from "@/lib/call-center/attachment-debug";
 
 export const runtime = "nodejs";
 
@@ -130,6 +131,10 @@ function buildDebugCapture(raw: any, env: ReturnType<typeof readEnvelope>): unkn
       conversationLikeFields: findByKeyName(raw, /conversation|chat|ticket|thread/i),
       accountLikeFields: findByKeyName(raw, /account|workspace|inbox/i),
     },
+    // B2.0 — estructura PII-safe de attachments (SOLO message_created; nunca valores).
+    // buildAttachmentCapture es accesorio y NUNCA lanza (try/catch interno); su falla no
+    // afecta el WebhookEvent de dominio (esto corre fuera de la tx, en el receptor).
+    ...(env.event === "message_created" ? { attachments: buildAttachmentCapture(msg?.attachments) } : {}),
   };
 }
 
