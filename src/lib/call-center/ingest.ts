@@ -83,8 +83,17 @@ export async function upsertConversationFromEmozion(
 }
 
 /**
- * Upsert de mensaje. find/create por externalMessageId (idempotente). No persiste
- * activities. Conserva isPrivate. mediaUrl SIEMPRE null (no se descargan adjuntos).
+ * Upsert de mensaje + sus adjuntos (B2.2). find/create por externalMessageId (idempotente).
+ * No persiste activities. Conserva isPrivate. mediaUrl SIEMPRE null (no se descargan adjuntos).
+ *
+ * ATTACHMENTS (Opción B): tras resolver el messageId (sea mensaje nuevo o preexistente por
+ * retry), se corre SIEMPRE el loop find-by-sourceExternalId → create-if-absent por adjunto.
+ * Correrlo en AMBOS paths (no solo en el create) es deliberado: si Emozion reenvía un
+ * message_created con el MISMO externalMessageId pero un adjunto NUEVO, el adjunto se crea
+ * igual (no se pierde en silencio). Todo en la MISMA tx → si un create falla, rollback total
+ * (mensaje + adjuntos), nunca dominio parcial. NormalizedAttachment NO transporta URL/bytes:
+ * mediaUrl/data_url/thumb_url/filename no se persisten acá. documentType = UNKNOWN (lo decide
+ * un humano, no la ingesta); status = RECEIVED.
  */
 export async function upsertMessageFromEmozion(
   tx: Prisma.TransactionClient,
@@ -95,28 +104,67 @@ export async function upsertMessageFromEmozion(
     return { messageId: null, created: false, ignored: true, warnings: [] };
   }
 
+  // (1) Resolver el messageId: find-by-externalMessageId → create-if-absent.
   const existing = await tx.conversationMessage.findUnique({
     where: { externalMessageId: n.externalMessageId },
   });
+
+  let messageId: string;
+  let created: boolean;
   if (existing) {
-    return { messageId: existing.id, created: false, ignored: false, warnings: [] };
+    messageId = existing.id;
+    created = false;
+  } else {
+    const msg = await tx.conversationMessage.create({
+      data: {
+        conversationId,
+        author: n.author,
+        senderUserId: null, // cruce a User TKL = dominio futuro
+        externalSenderId: n.externalSenderId,
+        body: n.body,
+        mediaType: n.mediaType,
+        mediaUrl: null,
+        isPrivate: n.isPrivate,
+        externalMessageId: n.externalMessageId,
+        sentAt: n.sentAt,
+      },
+    });
+    messageId = msg.id;
+    created = true;
   }
 
-  const msg = await tx.conversationMessage.create({
-    data: {
-      conversationId,
-      author: n.author,
-      senderUserId: null, // cruce a User TKL = dominio futuro
-      externalSenderId: n.externalSenderId,
-      body: n.body,
-      mediaType: n.mediaType,
-      mediaUrl: null,
-      isPrivate: n.isPrivate,
-      externalMessageId: n.externalMessageId,
-      sentAt: n.sentAt,
-    },
-  });
-  return { messageId: msg.id, created: true, ignored: false, warnings: [] };
+  // (2) Adjuntos: SIEMPRE (ambos paths), con el messageId ya resuelto. find-create-if-absent.
+  let attachmentsCreated = 0;
+  for (const a of n.attachments) {
+    const existingAtt = await tx.conversationAttachment.findUnique({
+      where: { sourceExternalId: a.sourceExternalId },
+    });
+    if (existingAtt) continue; // idempotente: ya persistido (retry / reenvío)
+    await tx.conversationAttachment.create({
+      data: {
+        conversationId,
+        messageId,
+        source: "EMOZION",
+        sourceExternalId: a.sourceExternalId,
+        mediaType: a.mediaType,
+        mimeType: null,         // el fork no lo manda
+        originalFileName: null, // el fork no lo manda
+        sizeBytes: a.sizeBytes,
+        documentType: "UNKNOWN", // lo setea un humano, NUNCA la ingesta
+        status: "RECEIVED",
+        // retentionUntil omitido → default null (sin política de retención aún)
+        // NUNCA: mediaUrl/data_url/thumb_url/source_url/filename/bytes/storageProvider/storageKey
+      },
+    });
+    attachmentsCreated++;
+  }
+
+  return {
+    messageId,
+    created,
+    ignored: false,
+    warnings: attachmentsCreated ? [`attachments creados: ${attachmentsCreated}`] : [],
+  };
 }
 
 /**

@@ -42,8 +42,13 @@ export interface ProcessResult {
  * repetido / dos webhooks concurrentes del mismo evento). Cualquier otro target —en
  * particular Customer.phone (carrera de clientes recurrentes)— NO es idempotencia: marca
  * ERROR, no se pierde el evento.
+ *
+ * sourceExternalId (B2.2): ConversationAttachment.sourceExternalId. El loop find-create-if-absent
+ * cubre el caso normal; este target es la RED para la carrera concurrente (dos tx pasan el
+ * findUnique viendo el adjunto ausente y ambas create → una gana, la otra P2002 → idempotente).
+ * No colisiona por substring con otros constraints (Customer.phone, etc. siguen ERROR).
  */
-export const DOMAIN_IDEMPOTENCY_TARGETS = ["externalConversationId", "externalMessageId"] as const;
+export const DOMAIN_IDEMPOTENCY_TARGETS = ["externalConversationId", "externalMessageId", "sourceExternalId"] as const;
 
 /**
  * Targets de un P2002, normalizados a string[]. Prisma devuelve `meta.target` como array
@@ -143,10 +148,10 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
   } catch (e) {
     if (isDomainIdempotencyUniqueViolation(e)) {
       // Concurrencia / repetición del MISMO evento: el @unique de dominio
-      // (externalConversationId/externalMessageId) ganó en uno; el otro es idempotente.
+      // (externalConversationId/externalMessageId/sourceExternalId) ganó en uno; el otro es idempotente.
       domainOk = true;
       outcome = "processed";
-      warnings.push("idempotente: unique violation de dominio (externalConversationId/externalMessageId) tratada como ya-procesado");
+      warnings.push("idempotente: unique violation de dominio (externalConversationId/externalMessageId/sourceExternalId) tratada como ya-procesado");
     } else if (getUniqueViolationTarget(e) !== null) {
       // P2002 de OTRO constraint (p.ej. Customer.phone — carrera de cliente recurrente) o
       // sin target → NO idempotente. NO se marca PROCESSED: fluye como ERROR por la misma

@@ -58,11 +58,19 @@ const rawConvCreated = (id: number, phone: string, name: string, status: string,
   first_reply_created_at: ISO2, created_at: ISO, resolved_at: status === "resolved" ? ISO2 : null,
   messages: [{ account_id: 22, conversation_id: id }],
 });
-const rawMsg = (opts: { convId: number | null; msgId: number; sourceId: string | null; mt: string; content: string; isPrivate?: boolean; senderId: number | null; senderType: string | null; embedConv?: boolean; phone?: string }) => ({
+const rawMsg = (opts: { convId: number | null; msgId: number; sourceId: string | null; mt: string; content: string; isPrivate?: boolean; senderId: number | null; senderType: string | null; embedConv?: boolean; phone?: string; attachments?: any[] }) => ({
   event: "message_created", id: opts.msgId, source_id: opts.sourceId, message_type: opts.mt, private: !!opts.isPrivate,
   content: opts.content, created_at: ISO, sender: { id: opts.senderId, type: opts.senderType }, account: { id: 22 },
+  ...(opts.attachments ? { attachments: opts.attachments } : {}),
   conversation: opts.embedConv === false || opts.convId == null ? null
     : { id: opts.convId, status: "open", meta: { sender: { phone_number: opts.phone ?? "+5491100000001", name: "Cliente" } }, messages: [{ account_id: 22, conversation_id: opts.convId }] },
+});
+// Adjunto RAW con forma real del fork (B2.0): id:number, file_type, file_size; data_url/thumb_url
+// presentes pero NO deben persistirse (el mapper los descarta).
+const rawAtt = (id: number, fileType = "image", fileSize = 1024, sentinel = "") => ({
+  id, file_type: fileType, file_size: fileSize,
+  data_url: `https://emozion.example/rails/active_storage/SENTINEL_DATAURL_${sentinel || id}.jpg`,
+  thumb_url: `https://emozion.example/rails/active_storage/SENTINEL_THUMB_${sentinel || id}.jpg`,
 });
 
 // Espeja la construcción de payload del handler usando los MAPPERS REALES.
@@ -216,6 +224,9 @@ async function main() {
       assert.equal(isDomainIdempotencyUniqueViolation(mk(["externalMessageId"])), true);
       assert.equal(isDomainIdempotencyUniqueViolation(mk(["externalConversationId"])), true);
       assert.equal(isDomainIdempotencyUniqueViolation(mk("ConversationMessage_externalMessageId_key")), true);
+      // B2.2: sourceExternalId (attachment) → idempotente; phone sigue ERROR (sin colisión de substrings)
+      assert.equal(isDomainIdempotencyUniqueViolation(mk(["sourceExternalId"])), true);
+      assert.equal(isDomainIdempotencyUniqueViolation(mk("ConversationAttachment_sourceExternalId_key")), true);
       assert.equal(isDomainIdempotencyUniqueViolation(mk(["phone"])), false);
       assert.equal(isDomainIdempotencyUniqueViolation(mk("Customer_phone_key")), false);
       const noMeta = new Prisma.PrismaClientKnownRequestError("x", { code: "P2002", clientVersion: "5.22.0" } as any);
@@ -252,6 +263,110 @@ async function main() {
       const we = await prisma.webhookEvent.findUnique({ where: { id } });
       assert.equal(we!.status, "ERROR");
       assert.equal(await prisma.conversation.count({ where: { externalConversationId: "88888" } }), 0, "no se creó conversación con id ambiguo");
+    });
+
+    // ── B2.2: ATTACHMENTS ────────────────────────────────────────────────────────
+    console.log("\n== B2.2: attachments ==");
+
+    // a) mensaje nuevo con 1 attachment → message + 1 ConversationAttachment
+    await check("a. mensaje nuevo + 1 attachment → crea message + 1 attachment", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: CONV, msgId: 26001, sourceId: "wamid-att1", mt: "incoming", content: "foto", senderId: 555, senderType: null, attachments: [rawAtt(31001)] }));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const m = await prisma.conversationMessage.findUnique({ where: { externalMessageId: "wamid-att1" }, include: { attachments: true } });
+      assert.ok(m, "mensaje creado");
+      assert.equal(m!.attachments.length, 1);
+      assert.equal(m!.attachments[0].sourceExternalId, "emozion-attachment:31001");
+      assert.equal(m!.attachments[0].conversationId, m!.conversationId, "conversationId del attachment = el del mensaje");
+    });
+
+    // b) mensaje nuevo con 2 attachments → crea ambos
+    await check("b. mensaje nuevo + 2 attachments → crea ambos", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: CONV, msgId: 26002, sourceId: "wamid-att2", mt: "incoming", content: "dos fotos", senderId: 555, senderType: null, attachments: [rawAtt(31002, "image", 2048), rawAtt(31003, "file", 4096)] }));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const atts = await prisma.conversationAttachment.findMany({ where: { sourceExternalId: { in: ["emozion-attachment:31002", "emozion-attachment:31003"] } } });
+      assert.equal(atts.length, 2);
+    });
+
+    // c) retry del mismo webhook (mismos attachments) → NO duplica
+    await check("c. retry del mismo webhook → NO duplica attachments", async () => {
+      const retry = await fromRaw(rawMsg({ convId: CONV, msgId: 26001, sourceId: "wamid-att1", mt: "incoming", content: "foto", senderId: 555, senderType: null, attachments: [rawAtt(31001)] }));
+      assert.equal((await processWebhookEvent(retry.id)).status, "PROCESSED");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:31001" } }), 1, "no duplica");
+      assert.equal(await prisma.conversationMessage.count({ where: { externalMessageId: "wamid-att1" } }), 1, "mensaje tampoco duplica");
+    });
+
+    // d/e) defaults: documentType=UNKNOWN, status=RECEIVED, source=EMOZION; mimeType/originalFileName=null
+    await check("d/e. defaults UNKNOWN/RECEIVED/EMOZION; mimeType/originalFileName null; sizeBytes mapeado", async () => {
+      const a = await prisma.conversationAttachment.findUnique({ where: { sourceExternalId: "emozion-attachment:31002" } });
+      assert.ok(a);
+      assert.equal(a!.documentType, "UNKNOWN");
+      assert.equal(a!.status, "RECEIVED");
+      assert.equal(a!.source, "EMOZION");
+      assert.equal(a!.mimeType, null);
+      assert.equal(a!.originalFileName, null);
+      assert.equal(a!.mediaType, "image");
+      assert.equal(a!.sizeBytes, 2048);
+      assert.equal(a!.retentionUntil, null);
+    });
+
+    // f) RED DURA: data_url/thumb_url NO se persisten (leer el row y serializar; sentinelas ausentes)
+    await check("f. red dura: data_url/thumb_url NO aparecen en el row persistido", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: CONV, msgId: 26004, sourceId: "wamid-att-pii", mt: "incoming", content: "receta", senderId: 555, senderType: null, attachments: [rawAtt(31004, "image", 5000, "PIITEST")] }));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const a = await prisma.conversationAttachment.findUnique({ where: { sourceExternalId: "emozion-attachment:31004" } });
+      const json = JSON.stringify(a);
+      assert.ok(!json.includes("SENTINEL_DATAURL"), "no persiste data_url");
+      assert.ok(!json.includes("SENTINEL_THUMB"), "no persiste thumb_url");
+      assert.ok(!/active_storage|https?:/i.test(json), "no persiste ninguna URL");
+    });
+
+    // g) falla un attachment DENTRO de la tx → rollback completo (sin mensaje, sin adjuntos)
+    await check("g. attachment inválido (sizeBytes overflow Int4) → rollback total", async () => {
+      const badMsg = {
+        event: "message_created", externalConversationId: String(CONV), conversation: null,
+        message: {
+          externalMessageId: "wamid-badatt", externalSenderId: "555", author: "CUSTOMER", body: "x",
+          mediaType: "image", isPrivate: false, sentAt: ISO, isActivity: false,
+          attachments: [{ sourceExternalId: "emozion-attachment:badsize", mediaType: "image", sizeBytes: 9999999999, mimeType: null, originalFileName: null }],
+        },
+      };
+      const id = await fromNormalized("message_created", badMsg, String(CONV));
+      const r = await processWebhookEvent(id);
+      assert.equal(r.status, "ERROR");
+      assert.equal(await prisma.conversationMessage.count({ where: { externalMessageId: "wamid-badatt" } }), 0, "mensaje rolled back");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:badsize" } }), 0, "attachment rolled back");
+    });
+
+    // h) reenvío del mismo attachment NO duplica (find-create-if-absent).
+    //
+    // ALCANCE / LÍMITE EXPLÍCITO: este smoke NO cubre el end-to-end del P2002 sobre
+    // sourceExternalId bajo CARRERA REAL. Con una sola conexión las dos tx se serializan: la
+    // segunda corre su findUnique DESPUÉS del commit de la primera → encuentra el row → continue
+    // (rama find-skip), sin llegar nunca al create→P2002. Forzar el choque exige una carrera
+    // genuina (dos tx que no ven el write uncommitted de la otra), no reproducible de forma
+    // determinística acá. Lo que SÍ está cubierto determinísticamente es la CLASIFICACIÓN del
+    // P2002 (caso 7: isDomainIdempotencyUniqueViolation incluye sourceExternalId → idempotente;
+    // phone → ERROR). Acá solo verificamos el invariante observable: reenvío no duplica + PROCESSED.
+    await check("h. reenvío del mismo attachment no duplica (find-skip; P2002 e2e NO cubierto, ver caso 7)", async () => {
+      const base = await fromRaw(rawMsg({ convId: CONV, msgId: 26005, sourceId: "wamid-h", mt: "incoming", content: "msg", senderId: 555, senderType: null, attachments: [rawAtt(31005)] }));
+      assert.equal((await processWebhookEvent(base.id)).status, "PROCESSED");
+      // reenvío idéntico (mismo mensaje, mismo attachment) → find-skip, no duplica.
+      const again = await fromRaw(rawMsg({ convId: CONV, msgId: 26005, sourceId: "wamid-h", mt: "incoming", content: "msg", senderId: 555, senderType: null, attachments: [rawAtt(31005)] }));
+      assert.equal((await processWebhookEvent(again.id)).status, "PROCESSED");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:31005" } }), 1, "reenvío no duplica");
+    });
+
+    // j) CASO DE BORDE (distingue B de A): mensaje PREEXISTENTE + attachment NUEVO en el reenvío →
+    //    el nuevo SE CREA (find-create-if-absent lo detecta ausente), no se pierde.
+    await check("j. mensaje preexistente + attachment NUEVO en reenvío → se crea (Opción B)", async () => {
+      const e1 = await fromRaw(rawMsg({ convId: CONV, msgId: 26006, sourceId: "wamid-j", mt: "incoming", content: "1 adj", senderId: 555, senderType: null, attachments: [rawAtt(31006)] }));
+      assert.equal((await processWebhookEvent(e1.id)).status, "PROCESSED");
+      // reenvío del MISMO mensaje con un adjunto adicional (j1 ya estaba + j2 nuevo)
+      const e2 = await fromRaw(rawMsg({ convId: CONV, msgId: 26006, sourceId: "wamid-j", mt: "incoming", content: "1 adj", senderId: 555, senderType: null, attachments: [rawAtt(31006), rawAtt(31007)] }));
+      assert.equal((await processWebhookEvent(e2.id)).status, "PROCESSED");
+      assert.equal(await prisma.conversationMessage.count({ where: { externalMessageId: "wamid-j" } }), 1, "mensaje no duplica");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:31006" } }), 1, "adjunto preexistente no duplica");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:31007" } }), 1, "adjunto NUEVO se creó (no se perdió)");
     });
 
     // Verificación agregada + salida sanitizada
