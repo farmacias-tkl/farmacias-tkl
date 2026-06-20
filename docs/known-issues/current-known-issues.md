@@ -549,23 +549,55 @@ ingesta. **Solo schema; ningún código lee la tabla todavía** (la ingesta de m
 - **Storage-agnóstico**: NO hay columnas de URL/provider/estados de rama — esas son B6,
   expand-only, recién cuando se resuelva copia-vs-referencia.
 
-Próximos ciclos (NO hechos — solo B1 está cerrado):
-- **B2 (mapper de metadata sin descarga) — PRÓXIMO.** Confirmar contra payload real del fork
-  el nombre del campo id del adjunto y de `mimeType`/`fileName`/`size` (hoy no determinables
-  desde el repo).
-- **B3 endpoint seguro · B4 audit granular · B5 UI mínima** — posteriores.
-- **B6 (storage) — BLOQUEADO por decisión de retención (abierta).** Rama **A (copia a storage
-  propio privado) probable**: el `curl -I` limpio dio adjuntos Emozion **world-readable sin
-  auth, `Cache-Control: public`, token ActiveStorage `exp:null`** → proxy/referencia a una URL
-  pública permanente no es modelo de privacidad válido. La exposición world-readable es además
-  un hallazgo a escalar con el proveedor de Emozion, no solo input de storage.
-
 **Nota operativa (precedencia de env en el push a prod).** El `db push` de B1 a Neon lo
 ejecutó Daniel con una `DATABASE_URL` temporal seteada en la sesión de PowerShell: la variable
 de entorno de sesión tuvo **precedencia sobre el `.env` local** (que apunta a `localhost`).
 Para futuros pushes a prod, preferir el patrón documentado **`.env.neon` efímero + dotenv-cli**
 (`npx dotenv-cli -e .env.neon -- npx prisma db push`), o **verificar explícitamente la
 precedencia de env** antes de ejecutar, para no aplicar contra la DB equivocada.
+
+#### ✅ 8. Adjuntos / multimedia — B2 (ingesta de metadata) APLICADO y VERIFICADO en prod (2026-06-20)
+
+Ingesta de **metadata** de adjuntos desde el webhook Emozion → rows reales en
+`ConversationAttachment`. Sin descargar archivos, sin URLs, sin bytes. Tres micro-ciclos,
+los tres cerrados:
+- **B2.0 — captura estructural PII-safe** (deployada y usada en ventana controlada): registró
+  la FORMA real del adjunto del fork sin exponer contenido. Confirmó el contrato:
+  `id:number` estable, `file_type`, `file_size`; el fork NO manda `mime_type`/`content_type`/
+  `file_name`; `data_url`/`thumb_url` presentes (world-readable) pero nunca se ingieren.
+- **B2.1 — mapper puro de metadata** (commit `8a65013`): `normalizeMessage` emite
+  `attachments: NormalizedAttachment[]` (todos, no solo `[0]`); `sourceExternalId =
+  "emozion-attachment:<id>"` (id estable, sin fallback por índice); `mimeType`/
+  `originalFileName` = null; identidad rota → `insufficientData` (todo-o-nada).
+- **B2.2 — persistencia** (commit `af4b69e`): crea los rows dentro de la MISMA `$transaction`
+  del processor.
+
+Verificado en producción con dato real (primer `ConversationAttachment` creado):
+- `sourceExternalId="emozion-attachment:1214256"`, `mediaType="image"`,
+  `documentType="UNKNOWN"`, `status="RECEIVED"`, `source="EMOZION"`, `mimeType=null`,
+  `originalFileName=null`, `sizeBytes=115669`, **sin ninguna URL persistida**.
+- **Cadena verificada de punta a punta**: webhook → mapper → ingest → row real.
+- **Idempotencia por `sourceExternalId`** (find-create-if-absent + `sourceExternalId` en
+  `DOMAIN_IDEMPOTENCY_TARGETS` como red para la carrera concurrente).
+- **Opción B implementada**: si el mensaje ya existe y llega un adjunto NUEVO en un reenvío,
+  el adjunto se crea — no se pierde en silencio.
+- Salud post-deploy: `message_created` con adjunto procesado OK; el único ERROR reciente es el
+  huérfano conocido (`conversation_status_changed` sobre conversación inexistente / needsRetry,
+  ítem 💡 4), **no relacionado con B2.2**.
+
+Próximos ciclos (NO hechos — solo B1 y B2 están cerrados):
+- **B3 — endpoint seguro de acceso al adjunto — PRÓXIMO, diseño pendiente.**
+- **B4 — auditoría granular** — posterior.
+- **B5 — UI mínima** — posterior.
+- **B6 — storage — BLOQUEADO por decisión de retención/storage (abierta).** Rama **A (copia a
+  storage propio privado) probable** por el hallazgo de exposición (adjuntos Emozion
+  world-readable sin auth, `exp:null`); proxy/referencia a una URL pública permanente no es
+  modelo de privacidad válido.
+
+**Nota de UI (esperado, no es bug).** En `/call-center` un adjunto puede seguir apareciendo
+como `[contenido multimedia]`. Es lo esperado: B2 registra la metadata en el dominio, pero la
+UI **todavía no lee `ConversationAttachment`** — la visibilidad en pantalla corresponde a
+**B5**, y el acceso/servicio seguro del archivo dependerá del diseño de **B3/B6**.
 
 ---
 
