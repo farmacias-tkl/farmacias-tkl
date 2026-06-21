@@ -621,6 +621,40 @@ sin implementar:
 
 (NO documentar B6/B3-B/B4 como hechos: solo el carril metadata está cerrado.)
 
+#### ⚠️ 10. Riesgo histórico — adjuntos ya ingeridos sin origen propio recuperable
+
+Los `ConversationAttachment` **ya ingeridos** (p. ej. `emozion-attachment:1214256`) **no tienen
+`data_url` recuperable desde TKL**. Confirmado en B6 Fase A, desde el código:
+- nunca se guardó en `ConversationAttachment` (B1 es storage-agnóstico, sin columna de URL);
+- el payload normalizado del `WebhookEvent` no contiene URL (`NormalizedAttachment` no la lleva);
+- el debug capture solo guardaba estructura (nombres+tipos), nunca el valor de `data_url`;
+- el processor **anula `payload` (`JsonNull`)** al quedar `PROCESSED`.
+
+**Conclusión:** TKL tiene la **metadata** pero NO una **copia privada propia** del archivo. Esos
+archivos existen **solo en Emozion**. Si Emozion se corta, borra adjuntos, o se migra **sin
+rescate**, se pierden.
+
+- La salida de Emozion **no es inminente** (depende de que la plataforma TKL esté lista y
+  probada), pero el acceso a históricos es **incierto** y conviene asegurarlo con tiempo.
+- **Acción externa pendiente (Daniel / infra):** verificar una vía de rescate **antes de migrar**.
+
+**Nota técnica que favorece el rescate:** los `data_url` de Emozion son **world-readable y
+`exp:null`** (no expiran mientras Emozion siga vivo) — la misma exposición detectada en la
+decisión de storage. Mientras Emozion siga vivo, los archivos históricos son **descargables por
+su URL sin token**. El cuello de botella del rescate **NO es el acceso al archivo, sino obtener
+el LISTADO de URLs**. Por eso la **vía 1** es probablemente la más simple si infra puede listar
+las URLs.
+
+Vías a chequear (ninguna verificada — no asumir que existen/funcionan hasta confirmarlo):
+1. **Export/listado** de `data_url` / ActiveStorage desde Emozion.
+2. **API Emozion/Chatwoot** para listar conversaciones, mensajes y adjuntos históricos por ids.
+3. **Acceso directo al storage/base de Emozion** para copiar archivos físicos / blobs.
+
+Encuadre:
+- NO bloquea **B6.0** going-forward (la captura de origen para adjuntos NUEVOS es independiente).
+- SÍ debe quedar **resuelto antes de apagar/migrar** fuera de Emozion.
+- El rescate **NO está hecho**; es un esfuerzo proactivo, separado del diseño going-forward.
+
 ---
 
 ## Resumen prioritario
