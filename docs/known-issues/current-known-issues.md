@@ -710,6 +710,44 @@ superficie. Reabrir solo si cambia el modelo de amenaza o si se decide cifrar PI
 
 (NO documentar B6 como implementado.)
 
+#### ⚠️ 12. Track C — continuidad de recordatorios de medicación (crónicos/anticonceptivos) atada a Emozion
+
+Hoy se envían **recordatorios de reposición de medicación** (crónicos/anticonceptivos) a
+pacientes por WhatsApp **desde Emozion**. **CONFIRMADO: tienen OPT-IN documentado en Emozion**
+(consentimiento registrado del paciente). Es un flujo **consentido y se seguirá haciendo**.
+
+**El problema:** esos datos viven **SOLO en Emozion** — el contacto, el atributo de medicación
+(CRONICO/ANTICONCEPTIVOS) y, **lo más crítico, la EVIDENCIA DE OPT-IN** (cuándo, vía, qué
+consintió). Si Emozion se apaga sin migrarlos, TKL pierde la **continuidad** del envío **y la
+prueba de licitud** del tratamiento.
+
+- **El opt-in es el dato de primera clase a rescatar**, no un campo más: es lo que permite a TKL
+  continuar el envío legítimamente.
+- **Dato de salud sensible (Nivel C** del documento de decisión storage/retención): rescate con
+  **base / retención / acceso propios**, NO como lista de contactos ni CRM comercial.
+- **Track SEPARADO** de adjuntos históricos (ítem ⚠️ 10) y de B6. Requiere su **propia Fase A**:
+  descubrir cómo Emozion guarda los atributos (¿tags? ¿custom attributes?) **y** el opt-in
+  (¿tag? ¿custom attribute? ¿fecha? ¿evidencia conversacional?).
+- **Reloj**: salida de Emozion (no inminente). **Sin reloj de cumplimiento** (hay opt-in).
+- Modelar como **dominio separado** (p. ej. `CustomerContact` / `PatientReminder`), **NO** dentro
+  de `ConversationAttachment` ni como CRM.
+- **NO implementado, NO diseñado.** Solo registrado como track con reloj.
+
+#### 📌 13. Storage R2 — ubicación validada + infra preparada (Track B)
+
+**Ubicación del bucket R2** (Automático → Norteamérica oriental / EE.UU.): **validada por el
+asesor de datos** (vía dueño). Transferencia internacional de datos de salud **avalada**. No
+bloqueante. Anotado para trazabilidad.
+
+**Infra R2 preparada (aún NO cableada al repo):**
+- Bucket **`farmacias-tkl-adjuntos`** creado, **privado** (acceso público deshabilitado), clase Estándar.
+- Token Account "Lectura y escritura de objetos", **scopeado al bucket**, TTL siempre.
+- Credenciales + endpoint guardados **fuera del repo** (gestor de secretos). **NO en el repo, NO
+  en Vercel/GitHub todavía** — eso va en **B6.2**.
+- Provider previsto: **R2 / S3-compatible**.
+
+(B6 sigue sin implementar: esto es solo preparación de infra + trazabilidad de la decisión.)
+
 ---
 
 ## Resumen prioritario
