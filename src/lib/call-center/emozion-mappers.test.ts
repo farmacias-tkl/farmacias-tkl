@@ -194,5 +194,17 @@ test("extra. readEnvelope forma real: account.id vs messages[0].account_id", () 
   assert.equal(cc.message, null);
 });
 
+// Extra C: body whitespace-only → null; contenido real con espacios → preservado sin trim
+test("extra. body: vacío/whitespace → null; contenido real preserva texto original (sin trim)", () => {
+  const mk = (content: unknown) => normalizeMessage({ id: 30, source_id: "m-body", message_type: "incoming", content, created_at: ISO } as any).data?.body;
+  assert.equal(mk(""), null);
+  assert.equal(mk("   "), null);
+  assert.equal(mk("\n\t "), null);
+  assert.equal(mk(123), null);       // no string → null
+  assert.equal(mk(undefined), null); // ausente → null
+  assert.equal(mk("hola"), "hola");
+  assert.equal(mk("  hola  "), "  hola  "); // contenido real → texto ORIGINAL, no recortado
+});
+
 console.log(`\nemozion-mappers: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

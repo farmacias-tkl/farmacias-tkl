@@ -50,6 +50,16 @@ export function parseTimestamp(v: unknown): Date | null {
 const numOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /**
+ * body del mensaje: null si no es string o si es whitespace-puro (sin contenido real). Si hay
+ * contenido, se preserva el texto ORIGINAL sin recortar (el trim solo decide si hay contenido;
+ * la limpieza cosmética, si se quisiera, es de UI, no de persistencia).
+ */
+function normalizeMessageBody(content: unknown): string | null {
+  if (typeof content !== "string") return null;
+  return content.trim().length > 0 ? content : null;
+}
+
+/**
  * ¿id de adjunto usable? Por TIPO, NO truthiness (id 0 es válido).
  *  - number: finito (rechaza NaN/Infinity/-Infinity).
  *  - string: no vacío tras trim (rechaza "" y solo-whitespace).
@@ -250,7 +260,7 @@ export function normalizeMessage(raw: EmozionMessage | null | undefined): Normal
       externalMessageId,
       externalSenderId: raw?.sender?.id != null ? String(raw.sender.id) : null,
       author,
-      body: typeof raw?.content === "string" ? raw.content : null,
+      body: normalizeMessageBody(raw?.content),
       mediaType: att.attachments[0]?.mediaType ?? null, // compat: file_type del primer adjunto; mediaUrl SIEMPRE null en ingesta
       isPrivate: raw?.private === true,
       sentAt: sentAt ?? new Date(0), // sin timestamp → centinela (warning arriba)
