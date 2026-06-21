@@ -43,6 +43,9 @@ const PII_KEYS = new Set([
   "content", "body", "phone_number", "phone", "name", "email", "identifier",
   "custom_attributes", "additional_attributes", "data_url", "thumb_url",
   "source_url", "avatar_url", "thumbnail", "title", "description",
+  // origen transitorio de copia (B6.1) — defensa en profundidad (no son keys del payload
+  // Emozion, pero se listan por si algún objeto interno se mezclara en el capture):
+  "sourceFetchUrl", "source_fetch_url", "sourcefetchurl",
 ]);
 
 function typeOf(v: unknown): string {

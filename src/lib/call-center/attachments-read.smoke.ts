@@ -19,8 +19,20 @@ const ISO = "2026-06-20T13:00:00.000-03:00";
 
 // Keys EXACTAS que el response puede contener (lista blanca = el invariante real de B3-A).
 const EXACT_KEYS = ["id", "conversationId", "messageId", "mediaType", "sizeBytes", "documentType", "status", "source", "createdAt"];
-// Tokens que NUNCA deben aparecer en el response serializado (lista negra complementaria).
-const FORBIDDEN = ["sourceExternalId", "SENTINEL_SRCEXT", "data_url", "thumb_url", "source_url", "http", "https", "active_storage", "originalFileName", "storageKey", "storageProvider"];
+// Tokens que NUNCA deben aparecer en el response serializado (lista negra complementaria al
+// exact-set del test 6, que ya bloquea toda key de más). LOCAL a este smoke a propósito: NO
+// promover a constante compartida — B3-B (preview/download) devolverá legítimamente
+// storageContentType/storageSizeBytes con su propia whitelist, y una FORBIDDEN global pelearía.
+// storageStatus queda FUERA a propósito (estado operativo resumido, posible UI futura por
+// decisión de producto); el exact-set igual lo bloquea hoy.
+const FORBIDDEN = [
+  "sourceExternalId", "SENTINEL_SRCEXT", "data_url", "thumb_url", "source_url", "http", "https",
+  "active_storage", "originalFileName",
+  // storage / origen transitorio (B6.1) — NUNCA en el response metadata-only de B3-A:
+  "sourceFetchUrl", "sourceFetchCapturedAt", "storageProvider", "storageBucket", "storageKey",
+  "storageContentType", "storageSizeBytes", "storageChecksumSha256", "storageCopiedAt",
+  "storageAttemptCount", "storageLastError", "storageNextRetryAt",
+];
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 

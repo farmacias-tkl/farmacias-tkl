@@ -1157,6 +1157,18 @@ enum AttachmentStatus {
   DELETED    // baja lógica
 }
 
+/// Estado de la COPIA a storage privado propio (B6).
+/// EJE DISTINTO de AttachmentStatus (ciclo documental). NO confundir:
+/// AttachmentStatus.PENDING/FAILED/DELETED ≠ StorageStatus.PENDING/FAILED/DELETED.
+enum StorageStatus {
+  PENDING     // metadata existe, falta copiar (default; aplica también a filas históricas)
+  COPYING     // lease de concurrencia del job (evita doble copia)
+  STORED      // copia propia confirmada en storage privado
+  FAILED      // la copia falló (≠ NO_ORIGIN); reintentable hasta umbral
+  NO_ORIGIN   // no hay origen recuperable (histórico sin URL, o el TTL mató la URL). NO auto-recupera.
+  DELETED     // objeto propio borrado por retención (baja del archivo, no del row)
+}
+
 model ConversationAttachment {
   id               String   @id @default(cuid())
 
@@ -1193,6 +1205,55 @@ model ConversationAttachment {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // ── STORAGE PRIVADO (B6.1, expand-only, INERTE) ──────────────────────────────────
+  // Columnas para la copia a storage propio (R2/S3-compatible). En B6.1 NINGÚN código las
+  // lee/escribe: schema inerte aplicado ANTES del código que las use (B6.2 adapter, B6.3
+  // job/captura). Todas nullable o con default seguro → ADD COLUMN no-destructivo sobre
+  // filas existentes (los históricos quedan storageStatus=PENDING; el job los marcará
+  // NO_ORIGIN al no hallar origen).
+
+  /// Estado de copia a storage privado propio. Eje distinto de `status`/AttachmentStatus.
+  storageStatus         StorageStatus @default(PENDING)
+
+  /// Proveedor de storage privado ("R2" inicialmente). NO es URL.
+  storageProvider       String?
+
+  /// Bucket privado donde quedó/queda el objeto. NO es público.
+  storageBucket         String?
+
+  /// Key INTERNA PRIVADA determinística. NO es URL pública; NO se expone.
+  storageKey            String?
+
+  /// Content-Type real observado al copiar el archivo.
+  storageContentType    String?
+
+  /// Tamaño real copiado al storage privado. Int (WhatsApp topa ~100MB, dentro de Int4).
+  storageSizeBytes      Int?
+
+  /// Checksum SHA-256 del objeto copiado, para integridad/idempotencia.
+  storageChecksumSha256 String?
+
+  /// Momento en que la copia propia quedó confirmada.
+  storageCopiedAt       DateTime?
+
+  /// Cantidad de intentos de copia realizados por el job.
+  storageAttemptCount   Int @default(0)
+
+  /// Error técnico saneado del último intento. Nunca URL/PII/bytes.
+  storageLastError      String?
+
+  /// Próximo momento habilitado para retry.
+  storageNextRetryAt    DateTime?
+
+  /// ORIGEN TÉCNICO TRANSITORIO (data_url Emozion, world-readable / exp:null).
+  /// Se NULLEA en el mismo update que marca storageStatus=STORED, y también al agotar
+  /// reintentos o por TTL ruidoso. NUNCA fuente de verdad. NUNCA a UI/API/logs/AuditLog.
+  /// La captura se activa recién con B6.3 + job + guarda compuesta; hasta entonces INERTE/null.
+  sourceFetchUrl        String?
+
+  /// Momento de captura del origen transitorio, usado para TTL/alerta.
+  sourceFetchCapturedAt DateTime?
+
   // PROVENANCE DE CLASIFICACIÓN — decisión explícita de diseño:
   // quién/cuándo setea documentType vive en AuditLog vía el evento ATTACHMENT_CLASSIFIED
   // (action + userId + detail {from,to}), NO como columna de este modelo.
@@ -1204,6 +1265,7 @@ model ConversationAttachment {
   @@index([messageId])
   @@index([documentType])
   @@index([status])
+  @@index([storageStatus, storageNextRetryAt]) // selección de batch del job de copia (B6.3)
 }
 
 // ============================================================================
