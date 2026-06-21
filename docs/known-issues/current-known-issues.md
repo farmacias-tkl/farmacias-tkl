@@ -655,6 +655,61 @@ Encuadre:
 - SÍ debe quedar **resuelto antes de apagar/migrar** fuera de Emozion.
 - El rescate **NO está hecho**; es un esfuerzo proactivo, separado del diseño going-forward.
 
+#### 📌 11. Decisión B6.0 — la captura de `data_url` y el job de copia se activan JUNTOS
+
+B6.0 Fase A concluyó que `data_url` es un **dato tóxico**: URL world-readable de un adjunto
+clínico, `exp:null`. Capturarla sin un job que la consuma maximiza su vida útil y **reintroduce
+a escala la exposición que B2 evitó**. (B6 NO está implementado — esto es decisión de diseño.)
+
+**Modelo de captura:**
+- **P0 (no persistir `data_url`)** — DESCARTADO: no es viable sin acoplar el job al webhook
+  (Modelo A, I/O de red en la ingesta) o sin guardar el `raw` completo (peor, más PII). Ambos rechazados.
+- **P1 (persistencia transitoria mínima)** — ELEGIDO, pero **solo con consumo en ventana corta**:
+  una columna nullable `sourceFetchUrl` que el job consume y nullea.
+
+**Regla dura de secuenciación:**
+- **NO capturar ni una sola URL hasta que exista el job B6.3 que la consuma y la nullee.**
+  Captura sin consumo = acumulación de URLs clínicas world-readable en la DB.
+- El **schema** puede ir antes (es inerte: nadie escribe/lee la columna).
+- La **lógica de captura** se activa **junto con B6.3**, nunca antes.
+- **Guarda compuesta obligatoria** para que la captura escriba algo:
+  `ATTACHMENT_SOURCE_CAPTURE_ENABLED` && `ATTACHMENT_COPY_JOB_ENABLED` && storage config presente.
+
+**Cifrado en reposo:** recomendación actual = **NO cifrar en B6.0**. Preferir columna **en claro
++ vida mínima + no exposición + null post-copia**. La URL ya es world-readable de origen; cifrar
+solo esa columna (mientras el resto de la PII de dominio va en claro) da poca ganancia y agrega
+superficie. Reabrir solo si cambia el modelo de amenaza o si se decide cifrar PII de dominio en general.
+
+**Ciclo de vida de la URL transitoria (precisiones obligatorias):**
+- **Éxito**: `sourceFetchUrl` se nullea en el **MISMO update** que marca `STORED` (atómico —
+  nunca `STORED` con URL).
+- **Fallo definitivo**: al agotar reintentos → `FAILED` **+ URL nulleada**. Implica que un
+  `FAILED` **NO se auto-recupera**: pasa a **rescate manual / re-captura del origen desde
+  Emozion**, igual que los históricos (ítem ⚠️ 10). Explícito para que nadie espere retry
+  automático sobre un `FAILED` sin URL.
+- **TTL de seguridad**: el barrido **NO debe dejar un adjunto en `PENDING` sin URL** (estado
+  zombie: parece procesable pero no tiene origen). Si el TTL mata una URL vieja, **además** marca
+  el adjunto como sin origen (`FAILED` o futuro `NO_ORIGIN`) **y alerta**. Es un evento **visible**
+  ("el job se demoró demasiado y se perdió el origen transitorio"), nunca limpieza silenciosa.
+  Trade-off consciente: borrar el origen vuelve el archivo incopiable → el TTL debe ser ruidoso.
+  Valor exacto del TTL **a confirmar en B6.3**, no se fija ahora.
+
+**Schema/activación:**
+- B6.0 **schema** (`sourceFetchUrl`, `sourceFetchCapturedAt`) va **junto con B6.1** (storage
+  fields + `StorageStatus`).
+- B6.0 **captura** va **junto con B6.3** (job copy/retry).
+
+**Plan B6 actualizado:**
+1. **B6.1** — schema expand-only: storage fields + `StorageStatus` + `sourceFetchUrl` +
+   `sourceFetchCapturedAt`. Inerte, sin capturar todavía.
+2. **B6.2** — adapter R2 / S3-compatible.
+3. **B6.3** — captura + job copy/retry **activados juntos** (guarda compuesta).
+4. **B6.4** — verificación controlada (staging/manual).
+5. **B6.5** — gate de prod.
+6. **Históricos Emozion** — track externo separado (ítem ⚠️ 10).
+
+(NO documentar B6 como implementado.)
+
 ---
 
 ## Resumen prioritario
