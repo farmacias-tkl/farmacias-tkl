@@ -585,19 +585,41 @@ Verificado en producción con dato real (primer `ConversationAttachment` creado)
   huérfano conocido (`conversation_status_changed` sobre conversación inexistente / needsRetry,
   ítem 💡 4), **no relacionado con B2.2**.
 
-Próximos ciclos (NO hechos — solo B1 y B2 están cerrados):
-- **B3 — endpoint seguro de acceso al adjunto — PRÓXIMO, diseño pendiente.**
-- **B4 — auditoría granular** — posterior.
-- **B5 — UI mínima** — posterior.
-- **B6 — storage — BLOQUEADO por decisión de retención/storage (abierta).** Rama **A (copia a
-  storage propio privado) probable** por el hallazgo de exposición (adjuntos Emozion
-  world-readable sin auth, `exp:null`); proxy/referencia a una URL pública permanente no es
-  modelo de privacidad válido.
+Continuación del carril en el ítem ✅ 9 (metadata) y el estado del carril CONTENIDO abajo.
 
-**Nota de UI (esperado, no es bug).** En `/call-center` un adjunto puede seguir apareciendo
-como `[contenido multimedia]`. Es lo esperado: B2 registra la metadata en el dominio, pero la
-UI **todavía no lee `ConversationAttachment`** — la visibilidad en pantalla corresponde a
-**B5**, y el acceso/servicio seguro del archivo dependerá del diseño de **B3/B6**.
+#### ✅ 9. Adjuntos / multimedia — carril METADATA COMPLETO y verificado en prod (2026-06-21)
+
+El carril **metadata** (mostrar QUE existe un adjunto y sus datos, sin servir el archivo) está
+**cerrado de punta a punta**: ingesta (B2) → persistencia → endpoint metadata-only (B3-A) →
+UI metadata (B5).
+
+- **B3-A — endpoint metadata-only** (commit `5af34d3`, deploy verde):
+  `GET /api/call-center/conversations/[id]/attachments`. Gate `canViewCallCenter` (lectura);
+  401/403/404/200 `{ data }` ordenado asc. **`select` whitelist** (sin `sourceExternalId`/URLs/
+  `originalFileName`/`mimeType`/storage) → una columna futura de B6 no se filtra por
+  construcción. SIN audit (listar metadata no es acceso a contenido; audit granular = B4).
+  Nota: B5 NO lo consume (la UI usa SSR directo); queda como **API pública del módulo** para
+  consumidores futuros.
+- **B5 — UI metadata** (commit `dfa4474`, deploy verde, verificado visualmente en prod):
+  el detalle SSR `/call-center/[id]` reemplaza el placeholder mudo `[contenido multimedia]` por
+  metadata textual anclada al mensaje — p. ej. **`Adjunto: Imagen · 113 KB · Sin clasificar`**.
+  Body y adjunto conviven (texto arriba, `Adjunto:` debajo). Carga vía Prisma (SSR directo, no
+  consume B3-A), `select` whitelist. Adjuntos **huérfanos** (`messageId` null por SetNull o sin
+  match) NO desaparecen → bloque **"Adjuntos de la conversación"** como red (Ajuste 3).
+  **Sin preview/thumbnail/link/botón/descarga** — metadata-only, scope respetado.
+- Verificado en prod (captura): placeholder reemplazado por la metadata real; caso adjunto-solo
+  y caso texto+adjunto correctos; bloque de huérfanos **no aparece** (sano, sin huérfanos).
+
+**Carril CONTENIDO (ver/descargar el archivo) — NO hecho, pendiente de ingeniería.**
+Desbloqueado **legalmente** (decisión de storage/retención validada por asesor de datos), pero
+sin implementar:
+- **B6 — storage privado propio — PRÓXIMO.** Rama **A (copia a storage propio privado)**: los
+  adjuntos Emozion son world-readable sin auth (`exp:null`) → proxy/referencia a una URL pública
+  permanente no es modelo de privacidad válido.
+- **B3-B — preview/download seguro** (sirve bytes/stream o signed-URL propia) — posterior, depende de B6.
+- **B4 — auditoría granular** (PREVIEW_OPENED/DOWNLOADED/CLASSIFY/REDACT) — posterior, cuando haya acceso a contenido.
+
+(NO documentar B6/B3-B/B4 como hechos: solo el carril metadata está cerrado.)
 
 ---
 
