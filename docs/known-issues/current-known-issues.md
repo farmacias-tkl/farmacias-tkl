@@ -748,6 +748,31 @@ bloqueante. Anotado para trazabilidad.
 
 (B6 sigue sin implementar: esto es solo preparación de infra + trazabilidad de la decisión.)
 
+#### ✅ 14. B6.1 — schema de storage APLICADO en prod e INERTE (2026-06-22)
+
+Schema expand-only para la copia a storage privado, **aplicado en Neon producción** con
+verificación read-only. **Inerte**: ningún código lee/escribe las columnas nuevas todavía
+(adapter = B6.2, job/captura = B6.3). Commit `22884db`, en `origin/main`.
+
+Verificado en prod (read-only):
+- **13 columnas nuevas** en `ConversationAttachment`: `storageStatus`, `storageProvider`,
+  `storageBucket`, `storageKey`, `storageContentType`, `storageSizeBytes`,
+  `storageChecksumSha256`, `storageCopiedAt`, `storageAttemptCount`, `storageLastError`,
+  `storageNextRetryAt`, `sourceFetchUrl`, `sourceFetchCapturedAt`.
+- Enum **`StorageStatus`**: `PENDING, COPYING, STORED, FAILED, NO_ORIGIN, DELETED` (eje
+  distinto de `AttachmentStatus`).
+- Defaults: `storageStatus = PENDING` (NOT NULL), `storageAttemptCount = 0` (NOT NULL).
+- Índice `ConversationAttachment_storageStatus_storageNextRetryAt_idx` presente.
+- **17 adjuntos históricos intactos**, todos `storageStatus = PENDING`;
+  `sourceFetchUrl`/`sourceFetchCapturedAt` non-null = **0**. `ADD COLUMN` no-destructivo confirmado.
+
+**NO se activó captura de `sourceFetchUrl`** (sigue inerte/null). La captura va recién con B6.3
+(job + guarda compuesta), según el ítem 📌 11. Redes duras puestas en B6.1: `FORBIDDEN` del smoke
+B3-A ampliada con las storage/sourceFetch cols (menos `storageStatus`) + `sourceFetchUrl` en `PII_KEYS`.
+
+**Próximo: B6.2** — adapter R2 / S3-compatible, **con mocks** (sin credenciales reales en tests;
+las credenciales R2 se cablean a Vercel/GitHub recién en B6.2, hoy fuera del repo).
+
 ---
 
 ## Resumen prioritario
