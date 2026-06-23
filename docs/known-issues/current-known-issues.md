@@ -713,8 +713,14 @@ superficie. Reabrir solo si cambia el modelo de amenaza o si se decide cifrar PI
 #### ⚠️ 12. Track C — continuidad de recordatorios de medicación (crónicos/anticonceptivos) atada a Emozion
 
 Hoy se envían **recordatorios de reposición de medicación** (crónicos/anticonceptivos) a
-pacientes por WhatsApp **desde Emozion**. **CONFIRMADO: tienen OPT-IN documentado en Emozion**
-(consentimiento registrado del paciente). Es un flujo **consentido y se seguirá haciendo**.
+pacientes por WhatsApp **desde Emozion**. Emozion registra un campo/flujo rotulado como
+opt-in `(⚠️ ver revisión de licitud más abajo)`, pero queda pendiente verificar si ese
+registro corresponde a un acto explícito del paciente o a una inferencia desde
+`tipo_de_cierre`.
+
+Operativamente el flujo actual existe en Emozion; la continuidad/migración de esos envíos
+desde TKL queda pendiente de resolver la Fase A de licitud — TKL **no debe asumir la
+continuidad propia** hasta entonces.
 
 **El problema:** esos datos viven **SOLO en Emozion** — el contacto, el atributo de medicación
 (CRONICO/ANTICONCEPTIVOS) y, **lo más crítico, la EVIDENCIA DE OPT-IN** (cuándo, vía, qué
@@ -732,6 +738,31 @@ prueba de licitud** del tratamiento.
 - Modelar como **dominio separado** (p. ej. `CustomerContact` / `PatientReminder`), **NO** dentro
   de `ConversationAttachment` ni como CRM.
 - **NO implementado, NO diseñado.** Solo registrado como track con reloj.
+
+**Alimentación desde Track F (ver ítem 🧭 17):** un cierre clínico
+(`clinicalClassification = CRONICO/ANTICONCEPTIVO`) puede crear/actualizar una inscripción de
+recordatorio con intervalo (30/60/90 días según producto). F es el **trigger/cierre**; C es el
+**dominio con estado, opt-in y scheduling propios** — NO son lo mismo, NO mezclar.
+
+Modelo conceptual (NO final):
+`ReminderEnrollment { customerContactId, reminderType: CHRONIC/CONTRACEPTIVE, intervalDays,
+sourceConversationId, sourceCloseOutcomeId, status: ACTIVE/PAUSED/CANCELLED/UNKNOWN,
+optInEvidence, lastPurchaseAt, nextReminderAt }`.
+
+**⚠️ Revisión de licitud CRÍTICA para Fase A.**
+**Esto deja en REVISIÓN el `CONFIRMADO OPT-IN` registrado antes en este ítem.** Ese "confirmado"
+describía que el flujo de recordatorios tiene opt-in documentado en Emozion, pero NO se verificó
+si ese opt-in es un acto explícito del paciente o una inferencia del `tipo_de_cierre` asignado por
+operador/bot. Hasta resolver la pregunta de Fase A de abajo, tratar el opt-in como **NO confirmado**
+a efectos de continuar envíos desde TKL.
+
+Pregunta de Fase A: ¿el opt-in al recordatorio es un acto **SEPARADO y explícito** del paciente, o
+se **INFIERE** de que el operador/bot tildó `Crónico 60 días` al cerrar (`tipo_de_cierre`)?
+**Clasificar a alguien como crónico NO es su consentimiento a recibir recordatorios.** Si el envío
+automático se dispara solo por `tipo_de_cierre` sin un "sí" explícito del paciente, la base de
+licitud es **débil** y hay que resolverla **antes de que TKL continúe los envíos**. Fase A debe
+verificar dónde vive (si existe) la **evidencia de opt-in real** en Emozion, **separada de
+`tipo_de_cierre`**.
 
 #### 📌 13. Storage R2 — ubicación validada + infra preparada (Track B)
 
@@ -772,6 +803,81 @@ B3-A ampliada con las storage/sourceFetch cols (menos `storageStatus`) + `source
 
 **Próximo: B6.2** — adapter R2 / S3-compatible, **con mocks** (sin credenciales reales en tests;
 las credenciales R2 se cablean a Vercel/GitHub recién en B6.2, hoy fuera del repo).
+
+> **Contexto Emozion (inspección de UI, capturas 2026-06-22), base de los tracks D/E/F:**
+> atributos de CONTACTO observados (`dni`, `obra_social`, `numero_afiliado`, `domicilio`, `zona`,
+> `id_sesion_typebot` como posible vínculo a Typebot — a verificar); atributo de CONVERSACIÓN
+> `tipo_de_cierre` (tipo Lista) que **mezcla valores comerciales y clínicos** y hoy dispara
+> recordatorios automáticos. Todo lo de abajo es **intención + Fase A pendiente**, sin diseño
+> final ni implementación.
+
+#### 🧭 15. Track D — identidad operativa Emozion ↔ TKL (riesgo BAJO)
+
+Mapear **operadores** Emozion ↔ usuarios TKL; preservar atribución histórica (quién atendió,
+cerró o reasignó). Habilita Inbox Manual / Sprint 2.
+- **Sin datos de paciente.** Universo **finito** (empleados). Puede avanzar **antes** que E/F.
+- Modelo conceptual (NO final): `OperatorExternalIdentity { source=EMOZION, externalOperatorId,
+  externalName, externalEmail?, userId? (nullable), active }`.
+- **Fase A**: cómo Emozion identifica operadores humanos vs bot; estabilidad de los IDs; qué hacer
+  con mensajes sin match en TKL.
+- NO mezclar con E, F, C ni B6.
+
+#### 🧭 16. Track E — contactos Emozion / Customer Mirror (riesgo MEDIO-ALTO por alcance/finalidad, NO por ilicitud de origen)
+
+Base operativa **legítima**: el contacto escribió a TKL para un pedido/consulta. NO está prohibido;
+tampoco se trata con la ligereza de un CRM común.
+- **Principio de finalidad**: separar **atención operativa** / **continuidad asistencial** (Track C)
+  / **CRM-comercial** (base propia). Que alguien haya consultado por un medicamento **NO habilita
+  automáticamente** campañas futuras.
+- **Mirror MÍNIMO primero**: identidad externa estable (`source=EMOZION`, `externalContactId`),
+  teléfono, nombre, última actividad, y **solo** tags operativos/logísticos.
+- **Filtro de tags OBLIGATORIO**: los tags NO son homogéneos. `ayuda`, `caba`, `casa_central`
+  parecen logísticos; tags clínicos o de frontera con Track C son **Nivel C**. Clasificar
+  **tag-por-tag en Fase A ANTES** de decidir cuáles cruzan.
+- **Tier sensible** (`dni`, `obra_social`, `numero_afiliado`, `domicilio`, `zona`, historial):
+  Fase A propia — clasificación, minimización, base legal, retención, auditoría.
+  `obra_social + numero_afiliado + nombre + teléfono` debe tratarse como **dato de salud por
+  inferencia**.
+- **Dedupe**: Emozion tiene "Combinar" → guardar identidad externa estable para no perder
+  trazabilidad ante merges.
+- **Selección por CANAL DE ORIGEN** vía campo de canal explícito — NO inferir por teléfono ausente.
+  Telegram parece canal de prueba → **fuera del mirror por defecto** hasta verificar; antes
+  confirmar que ninguna conversación clínica/B6/C relevante entró por Telegram.
+- **Typebot** (`id_sesion_typebot`): parte de los atributos los carga un flujo, no humanos. Fase A
+  debe mirar Typebot como **segunda fuente**.
+- NO mezclar con B6, C, D ni F.
+
+#### 🧭 17. Track F — outcomes de conversación / `tipo_de_cierre` (NUEVO)
+
+Emozion usa el atributo de CONVERSACIÓN `tipo_de_cierre` (Lista) para el resultado del cierre. Es
+**metadata de cierre**, NO contacto/CRM. Lo asigna el operador o el bot al cerrar.
+- Valores observados **mezclan dos finalidades** en un solo dropdown:
+  - comerciales: `VENTA CONCRETADA`, `SOLO CONSULTA`, `NO REALIZO UN PEDIDO`,
+    `FALTA DE STOCK/DISCONTINUADO`, `NO TENEMOS LO QUE PIDIO`, `SOLO NAVEGACION POR EL BOT`;
+  - clínicos/asistenciales: `Crónico Mensual`, `Crónico 60 días`, `Anticonceptivos 3 Meses`.
+
+**Corrección de modelado clave — NO copiar el enum único de Emozion como modelo interno final.**
+`rawValueSnapshot` conserva el valor original para trazabilidad, pero el mapeo interno parte en
+**DOS EJES ORTOGONALES**:
+- `commercialOutcome` (nullable/UNKNOWN hasta validar semántica): venta, consulta, sin pedido,
+  sin stock, bot, etc.
+- `clinicalClassification?` (nullable): `CRONICO`, `ANTICONCEPTIVO` o ninguno.
+
+Razón: con un solo campo, cualquier reporte/export **comercial** de conversiones tocaría
+inevitablemente filas **clínicas**. Dos ejes permiten que el reporte comercial filtre por
+`commercialOutcome` **sin leer lo clínico**, y que Track C lea `clinicalClassification` **sin pasar
+por reporting comercial**. **No** inferir que un valor clínico implica `VENTA_CONCRETADA` hasta Fase A.
+
+Modelo conceptual (NO final): `ConversationCloseOutcome { conversationId,
+closedByUserId?/externalOperatorId?, source=EMOZION/TKL/BOT, rawValueSnapshot, commercialOutcome?,
+clinicalClassification?, closedAt }`.
+
+Reglas:
+- Copiar primero el **catálogo de valores + semántica**; mapear a enums internos **recién tras Fase A**.
+- **NO disparar recordatorios** hasta que Track C esté diseñado.
+- Auditar quién asignó/cambió el cierre cuando TKL sea fuente de verdad.
+- Track F **alimenta** Track C (ítem ⚠️ 12), pero **no son lo mismo**.
+- NO mezclar con E ni D.
 
 ---
 
