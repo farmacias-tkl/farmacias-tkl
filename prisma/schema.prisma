@@ -1334,6 +1334,17 @@ enum CashBoxSheetStatus {
   EN_REVISION // oficina revisando/corrigiendo
   APROBADA // oficina aprobó; lista para exportar a Eiffel
   EXPORTADA // ya volcada al CSV Eiffel; no se edita normalmente
+  // La caja fue corregida vía OfficeCashAdjustment DESPUÉS de haber sido
+  // exportada/importada en Eiffel. En Eiffel, corregir una carga importada exige
+  // borrarla/anularla y reimportar, con doble autorización. Los operadores de cajas
+  // no tienen ese permiso. Antes de reimportar, oficina debe confirmar que la carga
+  // previa fue borrada/anulada en Eiffel.
+  // Flujo: EXPORTADA → REQUIERE_REEXPORTACION → EXPORTADA.
+  // La vuelta a EXPORTADA ocurrirá cuando el bloque Export Eiffel regenere/reimporte
+  // el CSV. Diseño posterior.
+  // Nota: Eiffel rechaza duplicados por sucursal+fecha, así que la reexportación se
+  // piensa como CSV COMPLETO de la sucursal/fecha, no como CSV de una sola caja.
+  REQUIERE_REEXPORTACION
   ANULADA // descartada (soft-delete del dominio; nunca hard delete)
 }
 
