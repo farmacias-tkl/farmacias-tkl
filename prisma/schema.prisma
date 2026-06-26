@@ -144,6 +144,11 @@ model Branch {
   vacationRequests     VacationRequest[]
   timeEvents           TimeEvent[]
 
+  // Control de Cajas (Administración) — back-relations
+  cashBoxSheets         CashBoxSheet[]         @relation("CashBoxSheetBranch")
+  branchDailyCashCloses BranchDailyCashClose[] @relation("BranchDailyCashCloseBranch")
+  cashWithdrawals       CashWithdrawal[]       @relation("CashWithdrawalBranch")
+
   @@index([active])
   @@index([showInExecutive])
   @@index([showInOperative])
@@ -452,6 +457,16 @@ model User {
   assignedConversations     Conversation[]             @relation("ConversationAssignedTo")
   sentMessages              ConversationMessage[]      @relation("ConversationMessageSender")
   conversationStateChanges  ConversationStateHistory[] @relation("ConversationStateChangedBy")
+
+  // Control de Cajas (Administración) — actores de workflow (histórico-actor, Restrict).
+  cashBoxSheetsClosed      CashBoxSheet[]                     @relation("CashBoxSheetClosedBy")
+  cashBoxSheetsReviewed    CashBoxSheet[]                     @relation("CashBoxSheetReviewedBy")
+  cashBoxSheetsApproved    CashBoxSheet[]                     @relation("CashBoxSheetApprovedBy")
+  cashBoxSheetStateChanges CashBoxSheetStateHistory[]         @relation("CashBoxSheetStateChangedBy")
+  officeCashAdjustments    OfficeCashAdjustment[]             @relation("OfficeCashAdjustedBy")
+  dailyCashSubmitted       BranchDailyCashClose[]             @relation("BranchDailyCashSubmittedBy")
+  dailyCashReviewed        BranchDailyCashClose[]             @relation("BranchDailyCashReviewedBy")
+  dailyCashStateChanges    BranchDailyCashCloseStateHistory[] @relation("BranchDailyCashStateChangedBy")
 
   // Acceso granular al módulo ejecutivo (independiente del rol).
   // OWNER tiene acceso siempre via canViewExecutive; los demás roles
@@ -1306,3 +1321,282 @@ model WebhookEvent {
   @@index([status, receivedAt])
   @@index([externalConversationId])
 }
+
+// ============================================================================
+// CONTROL DE CAJAS (Administración) — captura + consolidación
+// Tablas NUEVAS. Expand-only: no toca ninguna entidad existente.
+// Montos SIEMPRE Decimal @db.Decimal(14,2). Es módulo contable (cuadra a cero).
+// ============================================================================
+
+enum CashBoxSheetStatus {
+  BORRADOR // cargando en sucursal, editable
+  CERRADA // sucursal cerró; calculatedTotal/differenceAmount congelados
+  EN_REVISION // oficina revisando/corrigiendo
+  APROBADA // oficina aprobó; lista para exportar a Eiffel
+  EXPORTADA // ya volcada al CSV Eiffel; no se edita normalmente
+  ANULADA // descartada (soft-delete del dominio; nunca hard delete)
+}
+
+// El cierre diario es CONTROL INTERNO TKL: NO alimenta el CSV Eiffel.
+// Por eso NO tiene estado EXPORTADO (la exportación bifurca desde CashBoxSheet).
+enum BranchDailyCashCloseStatus {
+  PENDIENTE
+  EN_REVISION
+  APROBADO
+  ANULADO
+}
+
+enum CardLotType {
+  CREDIT
+  DEBIT
+}
+
+enum CardLotSource {
+  BRANCH // lote cargado por la sucursal (excepción)
+  OFFICE // lote completado por oficina desde el cierre de posnet (caso normal)
+}
+
+// ---------------------------------------------------------------------------
+// CAPTURA
+// ---------------------------------------------------------------------------
+
+model CashBoxSheet {
+  id String @id @default(cuid())
+
+  branchId String
+  branch   Branch @relation("CashBoxSheetBranch", fields: [branchId], references: [id], onDelete: Restrict)
+
+  date          DateTime @db.Date
+  cashBoxNumber Int // número de caja física dentro de la sucursal
+  shift         String? // turno opcional (texto libre)
+
+  // La cajera puede NO ser usuaria del sistema → snapshot de texto, no FK.
+  cashierNameSnapshot String
+
+  // Actor del workflow (cierre en sucursal) — FK a User. Restrict: no perder quién cerró.
+  closedByUserId String?
+  closedBy       User?   @relation("CashBoxSheetClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+
+  // Actores de OFICINA (no depender solo del StateHistory: lectura directa en el panel).
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("CashBoxSheetReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  reviewedAt       DateTime?
+  approvedByUserId String?
+  approvedBy       User?     @relation("CashBoxSheetApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  approvedAt       DateTime?
+
+  // --- Montos de entrada (default 0: borrador parcial válido y suma bien;
+  //     NUNCA null en módulo contable, evita ambigüedad null-vs-cero) ---
+  siafTotalSales    Decimal @default(0) @db.Decimal(14, 2)
+  creditCardTotal   Decimal @default(0) @db.Decimal(14, 2)
+  debitCardTotal    Decimal @default(0) @db.Decimal(14, 2)
+  cashTotal         Decimal @default(0) @db.Decimal(14, 2)
+  transfersTotal    Decimal @default(0) @db.Decimal(14, 2)
+  mercadoPagoTotal  Decimal @default(0) @db.Decimal(14, 2)
+  surchargesTotal   Decimal @default(0) @db.Decimal(14, 2)
+  deliveryDebtTotal Decimal @default(0) @db.Decimal(14, 2)
+  ticketDebtTotal   Decimal @default(0) @db.Decimal(14, 2)
+  remainingCash     Decimal @default(0) @db.Decimal(14, 2)
+
+  // --- Montos calculados (se congelan en CERRADA; nullable en BORRADOR) ---
+  calculatedTotal  Decimal? @db.Decimal(14, 2)
+  differenceAmount Decimal? @db.Decimal(14, 2) // calculatedTotal - esperado; null hasta cierre
+
+  status       CashBoxSheetStatus @default(BORRADOR)
+  closedAt     DateTime?
+  observations String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Hijas + auditoría
+  expenses       CashBoxExpense[]
+  cashDeliveries CashBoxCashDelivery[]
+  cardLots       CashBoxCardLot[]
+  adjustments    OfficeCashAdjustment[]
+  stateHistory   CashBoxSheetStateHistory[]
+
+  // INVARIANTE DE NEGOCIO: una caja física + sucursal + fecha = una sola planilla.
+  // El slot (branchId+date+cashBoxNumber) NO se reutiliza:
+  //  - Una caja mal cargada se CORRIGE sobre la misma fila vía OfficeCashAdjustment
+  //    (auditado), NO se anula y recarga.
+  //  - ANULADA NO libera la combinación (queda para casos excepcionales: caja cargada
+  //    por error / que no correspondía), pero el número no se reusa en MVP.
+  // El @@unique compuesto ya cubre las búsquedas por (branchId, date) — por eso NO
+  // se agrega un @@index([branchId, date]) redundante.
+  @@unique([branchId, date, cashBoxNumber])
+  @@index([status])
+}
+
+model CashBoxExpense {
+  id             String       @id @default(cuid())
+  cashBoxSheetId String
+  cashBoxSheet   CashBoxSheet @relation(fields: [cashBoxSheetId], references: [id], onDelete: Cascade)
+  description    String
+  amount         Decimal      @db.Decimal(14, 2)
+  createdAt      DateTime     @default(now())
+
+  @@index([cashBoxSheetId])
+}
+
+model CashBoxCashDelivery {
+  id             String       @id @default(cuid())
+  cashBoxSheetId String
+  cashBoxSheet   CashBoxSheet @relation(fields: [cashBoxSheetId], references: [id], onDelete: Cascade)
+  amount         Decimal      @db.Decimal(14, 2)
+  note           String?
+  createdAt      DateTime     @default(now())
+
+  @@index([cashBoxSheetId])
+}
+
+model CashBoxCardLot {
+  id             String        @id @default(cuid())
+  cashBoxSheetId String
+  cashBoxSheet   CashBoxSheet  @relation(fields: [cashBoxSheetId], references: [id], onDelete: Cascade)
+  type           CardLotType
+  cardName       String
+  lotNumber      String // String: puede tener ceros a la izquierda / ser alfanumérico
+  amount         Decimal       @db.Decimal(14, 2)
+  source         CardLotSource @default(OFFICE) // caso normal: oficina completa lotes desde el cierre de posnet
+  createdAt      DateTime      @default(now())
+
+  // SIN @@unique dura: puede haber lote partido/repetido por corrección (decisión 1A).
+  // Banco/cuotas/vencimiento NO se guardan: Eiffel los autocompleta.
+  @@index([cashBoxSheetId, type])
+  @@index([lotNumber])
+}
+
+// ---------------------------------------------------------------------------
+// CONSOLIDACIÓN
+// ---------------------------------------------------------------------------
+
+model BranchDailyCashClose {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation("BranchDailyCashCloseBranch", fields: [branchId], references: [id], onDelete: Restrict)
+
+  date DateTime @db.Date
+
+  previousPendingCash   Decimal @default(0) @db.Decimal(14, 2) // remanente del día anterior
+  totalNetCashFromBoxes Decimal @default(0) @db.Decimal(14, 2)
+  // Total de retiros que impactan el pendiente rodante en PESOS.
+  // Supuesto MVP: el pendiente del cierre diario se calcula en pesos.
+  // amountDollars y amountCheck se registran en CashWithdrawal, pero no impactan
+  // este saldo sin una regla de conversión definida.
+  // Confirmar con administración si el pendiente acumula dólares/cheques.
+  totalWithdrawalsPesos Decimal @default(0) @db.Decimal(14, 2)
+  totalDeposits         Decimal @default(0) @db.Decimal(14, 2)
+  resultingPendingCash  Decimal @default(0) @db.Decimal(14, 2)
+
+  status BranchDailyCashCloseStatus @default(PENDIENTE)
+
+  submittedByUserId String?
+  submittedBy       User?     @relation("BranchDailyCashSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  submittedAt       DateTime?
+  reviewedByUserId  String?
+  reviewedBy        User?     @relation("BranchDailyCashReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  reviewedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  withdrawals  CashWithdrawal[]
+  stateHistory BranchDailyCashCloseStateHistory[]
+
+  @@unique([branchId, date]) // un cierre consolidado por sucursal por día
+  @@index([status])
+  @@index([date])
+}
+
+model CashWithdrawal {
+  id       String @id @default(cuid())
+  branchId String
+  branch   Branch @relation("CashWithdrawalBranch", fields: [branchId], references: [id], onDelete: Restrict)
+
+  date DateTime @db.Date
+
+  // NO cuelga de CashBoxSheet. Opcionalmente se asocia al cierre diario.
+  branchDailyCashCloseId String?
+  branchDailyCashClose   BranchDailyCashClose? @relation(fields: [branchDailyCashCloseId], references: [id], onDelete: SetNull)
+
+  withdrawalNumber String? // texto: puede ser alfanumérico
+  time             String? // "HH:MM" snapshot (alt futura: DateTime @db.Time)
+  amountPesos      Decimal @default(0) @db.Decimal(14, 2)
+  amountDollars    Decimal @default(0) @db.Decimal(14, 2)
+  amountCheck      Decimal @default(0) @db.Decimal(14, 2)
+  performedBy      String? // snapshot de texto, no FK
+  receivedBy       String? // snapshot de texto, no FK
+  observations     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([branchId, date])
+  @@index([branchDailyCashCloseId])
+}
+
+model OfficeCashAdjustment {
+  id             String       @id @default(cuid())
+  cashBoxSheetId String
+  // Restrict: es AUDITORÍA contable, no debe desaparecer en cascada.
+  // Coherente con "las cajas se anulan (ANULADA), no se hard-deletean".
+  cashBoxSheet   CashBoxSheet @relation(fields: [cashBoxSheetId], references: [id], onDelete: Restrict)
+
+  adjustedByUserId String
+  adjustedBy       User     @relation("OfficeCashAdjustedBy", fields: [adjustedByUserId], references: [id], onDelete: Restrict)
+  adjustedAt       DateTime @default(now())
+
+  fieldChanged String // nombre del campo corregido (ej. "creditCardTotal")
+  fieldType    String? // "decimal" | "string" | "status" | "int" — hace legible el Json
+  oldValue     Json? // valor previo tipado (Decimal-as-string/String/status/Int)
+  newValue     Json?
+  reason       String // OBLIGATORIO — por qué se corrigió
+
+  createdAt DateTime @default(now())
+
+  @@index([cashBoxSheetId])
+  @@index([adjustedByUserId])
+}
+
+// ---------------------------------------------------------------------------
+// HISTORIAL DE ESTADOS (espejo de VacationStateHistory)
+// fromStatus NULLABLE para registrar la transición inicial null → BORRADOR/PENDIENTE.
+// ---------------------------------------------------------------------------
+
+model CashBoxSheetStateHistory {
+  id              String              @id @default(cuid())
+  cashBoxSheetId  String
+  cashBoxSheet    CashBoxSheet        @relation(fields: [cashBoxSheetId], references: [id], onDelete: Cascade)
+  fromStatus      CashBoxSheetStatus?
+  toStatus        CashBoxSheetStatus
+  changedByUserId String
+  changedBy       User                @relation("CashBoxSheetStateChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict)
+  changedAt       DateTime            @default(now())
+  note            String?
+
+  @@index([cashBoxSheetId])
+  @@index([changedAt])
+}
+
+model BranchDailyCashCloseStateHistory {
+  id                     String                      @id @default(cuid())
+  branchDailyCashCloseId String
+  branchDailyCashClose   BranchDailyCashClose        @relation(fields: [branchDailyCashCloseId], references: [id], onDelete: Cascade)
+  fromStatus             BranchDailyCashCloseStatus?
+  toStatus               BranchDailyCashCloseStatus
+  changedByUserId        String
+  changedBy              User                        @relation("BranchDailyCashStateChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict)
+  changedAt              DateTime                    @default(now())
+  note                   String?
+
+  @@index([branchDailyCashCloseId])
+  @@index([changedAt])
+}
+
+// ---------------------------------------------------------------------------
+// EXPORT EIFFEL — DISEÑO DIFERIDO (pendiente catálogos Gauss).
+// NO diseñar campos finales todavía. Boceto conceptual:
+//   model EiffelExportBatch { id, createdByUserId, createdAt, status, ... }
+//   model EiffelExportLine  { id, batchId, cashBoxSheetId, ...mapeo a códigos Gauss... }
+// La exportación bifurca desde CashBoxSheet (APROBADA → EXPORTADA), NO desde el cierre diario.
+// ---------------------------------------------------------------------------
