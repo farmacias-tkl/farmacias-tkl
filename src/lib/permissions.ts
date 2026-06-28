@@ -127,6 +127,10 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/admin":         ["ADMIN"],
   "/api/owner":         ["OWNER"],
   "/api/permissions":   ["OWNER","ADMIN"],
+  // Permisos por usuario (refactor permisos-por-usuario, Fase 2C-B). Árbol neutral
+  // que sirve a OWNER y ADMIN; la autorización fina (target, scope, críticos) vive
+  // en el servicio user-permissions-admin. Esto es defensa-en-profundidad en el edge.
+  "/api/users":         ["OWNER","ADMIN"],
   // /api/dashboard: gate via canViewExecutive en middleware (no por rol).
   "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
