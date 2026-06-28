@@ -6,7 +6,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { ROLE_LABELS } from "@/lib/permissions";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { UserPermissionsPanel } from "@/components/users/user-permissions-panel";
 import type { UserRole } from "@prisma/client";
+
+const USER_PERMISSIONS_PANEL_ENABLED =
+  process.env.NEXT_PUBLIC_USER_PERMISSIONS_PANEL_ENABLED === "true";
 
 const ROLES: UserRole[] = ["OWNER","ADMIN","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
 
@@ -154,6 +158,17 @@ export function EditarUsuarioClient({ userId, currentUserId }: { userId: string;
           </select>
         </div>
       </div>
+
+      {USER_PERMISSIONS_PANEL_ENABLED && (
+        <UserPermissionsPanel
+          actorContext="owner"
+          actorUserId={currentUserId}
+          targetUserId={u.id}
+          targetBranchId={u.branchId}
+          targetRole={u.role}
+          targetActive={u.active}
+        />
+      )}
 
       <div className="flex gap-2 justify-end">
         <Link href="/owner/usuarios" className="btn-secondary">Cancelar</Link>
