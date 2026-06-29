@@ -182,16 +182,23 @@ export function canAdministerUsers(actor: MinimalUser | null | undefined): boole
 }
 
 /**
- * ¿Puede entrar a gestionar permisos de este usuario?
- * OWNER → cualquier target. ADMIN → operativos y a sí mismo (los helpers finos
- * grant/revoke bloquean los críticos del propio ADMIN); NO OWNER ni otro ADMIN.
+ * ¿Este actor activo tiene AUTORIDAD DE GOBIERNO sobre este target?
+ *
+ * Autoridad PURA (2C-C): NO mira `targetUser.active`. La inactividad del target NO
+ * relaja ni concede autoridad; es un gate APARTE que aplican grant (exige activo) y
+ * el servicio admin — no este helper. Así, list/revoke operan sobre usuarios
+ * inactivos con la MISMA autoridad que sobre activos.
+ *
+ * OWNER → cualquier target. ADMIN → operativos y a sí mismo; NUNCA OWNER ni otro ADMIN.
+ * La inactividad del target tampoco relaja estas reglas de gobierno (un OWNER/ADMIN
+ * inactivo sigue intocable para un ADMIN).
  */
 export function canManageUserPermissions(
   actor: MinimalUser | null | undefined,
   targetUser: MinimalUser | null | undefined,
 ): boolean {
   if (!actor || !targetUser) return false;
-  if (actor.active === false || targetUser.active === false) return false;
+  if (actor.active === false) return false;
   if (actor.role === "OWNER") return true;
   if (actor.role === "ADMIN") {
     if (targetUser.role === "OWNER") return false;
@@ -202,40 +209,45 @@ export function canManageUserPermissions(
 }
 
 /**
- * ¿Puede ASIGNAR este permiso a este usuario?
- * OWNER → cualquiera. ADMIN → normal/crítico a operativos; a sí mismo solo NORMAL
- * (crítico propio lo otorga OWNER); nunca a OWNER ni a otro ADMIN.
+ * ¿Puede ASIGNAR o CAMBIAR SCOPE de este permiso a este usuario?
+ *
+ * Parte de la autoridad de gobierno (canManageUserPermissions) y AGREGA dos gates
+ * propios de grant/scope-change (2C-C):
+ *  - el target DEBE estar activo (otorgar/ampliar sobre un inactivo está bloqueado);
+ *  - críticos: ADMIN a sí mismo solo NORMAL (otorgarse un crítico = posible escalada;
+ *    lo administra OWNER). A operativos, ADMIN sí puede crítico.
+ * Otorgar/ampliar críticos PUEDE ser escalada → la restricción de críticos vive acá,
+ * NO en revoke.
  */
 export function canGrantUserPermission(
   actor: MinimalUser | null | undefined,
   targetUser: MinimalUser | null | undefined,
   permissionKey: string,
 ): boolean {
-  if (!actor || !targetUser) return false;
-  if (actor.active === false || targetUser.active === false) return false;
+  if (!canManageUserPermissions(actor, targetUser)) return false;
+  if (!actor || !targetUser) return false;       // narrowing (canManage ya lo garantiza)
+  if (targetUser.active === false) return false;  // grant/scope-change exige target activo
   if (actor.role === "OWNER") return true;
-  if (actor.role === "ADMIN") {
-    if (targetUser.role === "OWNER") return false;
-    if (targetUser.role === "ADMIN") {
-      if (targetUser.id !== actor.id) return false;        // otro ADMIN → no
-      return !isCriticalPermission(permissionKey);          // a sí mismo → solo normal
-    }
-    return true; // operativo: normal o crítico
-  }
-  return false;
+  // ADMIN con autoridad: a sí mismo solo NORMAL; a operativos, normal o crítico.
+  if (targetUser.id === actor.id) return !isCriticalPermission(permissionKey);
+  return true; // operativo
 }
 
 /**
- * ¿Puede REVOCAR este permiso a este usuario?
- * Misma regla que grant (por simplicidad y seguridad): un crítico propio de ADMIN
- * lo administra OWNER, así que ADMIN tampoco puede auto-revocárselo.
+ * ¿Puede REVOCAR este permiso de este usuario?
+ *
+ * Revocar es DE-ESCALADA, no escalada (2C-C): basta la autoridad de gobierno.
+ * A diferencia de grant, NO exige target activo (limpieza sobre inactivos OK) y NO
+ * aplica la restricción de críticos (un ADMIN PUEDE auto-revocarse un crítico).
+ *
+ * Conserva `permissionKey` en la firma por simetría con grant, pero no lo usa.
  */
 export function canRevokeUserPermission(
   actor: MinimalUser | null | undefined,
   targetUser: MinimalUser | null | undefined,
-  permissionKey: string,
+  _permissionKey: string,
 ): boolean {
-  return canGrantUserPermission(actor, targetUser, permissionKey);
+  return canManageUserPermissions(actor, targetUser);
 }
 
 /** ¿Puede crear un usuario con este rol? OWNER → cualquiera; ADMIN → solo no-OWNER/no-ADMIN. */

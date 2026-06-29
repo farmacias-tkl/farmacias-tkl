@@ -148,7 +148,9 @@ const aAdminInact: MinimalUser = { id: "a-admin-x", role: "ADMIN", active: false
 const aAdmin2: MinimalUser = { id: "a-admin2", role: "ADMIN", active: true };
 const aSup: MinimalUser = { id: "a-sup", role: "SUPERVISOR", active: true };
 const tOwner: MinimalUser = { id: "t-owner", role: "OWNER", active: true };
+const tOwnerInact: MinimalUser = { id: "t-owner-x", role: "OWNER", active: false };
 const tAdmin: MinimalUser = { id: "t-admin", role: "ADMIN", active: true };
+const tAdminInact: MinimalUser = { id: "t-admin-x", role: "ADMIN", active: false };
 const tOp: MinimalUser = { id: "t-op", role: "BRANCH_MANAGER", active: true };
 const tOpInact: MinimalUser = { id: "t-op-x", role: "BRANCH_MANAGER", active: false };
 
@@ -166,7 +168,8 @@ assert("OWNER inactive => false", canAdministerUsers(aOwnerInact) === false);
 assert("ADMIN inactive => false", canAdministerUsers(aAdminInact) === false);
 assert("null => false", canAdministerUsers(null) === false);
 
-console.log("\n=== canManageUserPermissions ===");
+// 2C-C: AUTORIDAD DE GOBIERNO PURA — no mira target.active.
+console.log("\n=== canManageUserPermissions (autoridad pura, 2C-C) ===");
 assert("OWNER → target OWNER", canManageUserPermissions(aOwner, tOwner) === true);
 assert("OWNER → target ADMIN", canManageUserPermissions(aOwner, tAdmin) === true);
 assert("OWNER → target operativo", canManageUserPermissions(aOwner, tOp) === true);
@@ -174,11 +177,19 @@ assert("ADMIN → target operativo", canManageUserPermissions(aAdmin, tOp) === t
 assert("ADMIN → self (mismo ADMIN)", canManageUserPermissions(aAdmin, aAdmin) === true);
 assert("ADMIN → target OWNER => false", canManageUserPermissions(aAdmin, tOwner) === false);
 assert("ADMIN → otro ADMIN => false", canManageUserPermissions(aAdmin, aAdmin2) === false);
-assert("actor inactive => false", canManageUserPermissions(aAdminInact, tOp) === false);
-assert("target inactive => false", canManageUserPermissions(aAdmin, tOpInact) === false);
 assert("SUPERVISOR => false", canManageUserPermissions(aSup, tOp) === false);
+// 2C-C: target inactivo NO bloquea la autoridad (gate de actividad vive en grant/servicio).
+assert("OWNER → operativo INACTIVO => true", canManageUserPermissions(aOwner, tOpInact) === true);
+assert("OWNER → OWNER INACTIVO => true", canManageUserPermissions(aOwner, tOwnerInact) === true);
+assert("ADMIN → operativo INACTIVO => true", canManageUserPermissions(aAdmin, tOpInact) === true);
+// 2C-C: la inactividad del target NO relaja las reglas de gobierno.
+assert("ADMIN → OWNER INACTIVO => false", canManageUserPermissions(aAdmin, tOwnerInact) === false);
+assert("ADMIN → otro ADMIN INACTIVO => false", canManageUserPermissions(aAdmin, tAdminInact) === false);
+// actor inactivo: bloqueado siempre.
+assert("actor inactive => false", canManageUserPermissions(aAdminInact, tOp) === false);
 
-console.log("\n=== canGrantUserPermission ===");
+// 2C-C: GRANT/SCOPE-CHANGE = autoridad + target activo + restricción de críticos.
+console.log("\n=== canGrantUserPermission (autoridad + activo + críticos, 2C-C) ===");
 assert("OWNER → crítico a operativo", canGrantUserPermission(aOwner, tOp, CRIT) === true);
 assert("OWNER → crítico a ADMIN", canGrantUserPermission(aOwner, tAdmin, CRIT) === true);
 assert("ADMIN → normal a operativo", canGrantUserPermission(aAdmin, tOp, NORMAL) === true);
@@ -190,16 +201,31 @@ assert("ADMIN → crítico a otro ADMIN => false", canGrantUserPermission(aAdmin
 assert("ADMIN → normal a OWNER => false", canGrantUserPermission(aAdmin, tOwner, NORMAL) === false);
 assert("ADMIN → crítico a OWNER => false", canGrantUserPermission(aAdmin, tOwner, CRIT) === false);
 assert("actor inactive => false", canGrantUserPermission(aAdminInact, tOp, NORMAL) === false);
-assert("target inactive => false", canGrantUserPermission(aAdmin, tOpInact, NORMAL) === false);
+// 2C-C: grant SIEMPRE exige target activo (otorgar/ampliar sobre inactivo = bloqueado).
+assert("OWNER → operativo INACTIVO => false", canGrantUserPermission(aOwner, tOpInact, NORMAL) === false);
+assert("ADMIN → operativo INACTIVO => false", canGrantUserPermission(aAdmin, tOpInact, NORMAL) === false);
+assert("ADMIN → OWNER INACTIVO => false", canGrantUserPermission(aAdmin, tOwnerInact, NORMAL) === false);
+assert("ADMIN → otro ADMIN INACTIVO => false", canGrantUserPermission(aAdmin, tAdminInact, NORMAL) === false);
 
-console.log("\n=== canRevokeUserPermission (misma regla que grant) ===");
+// 2C-C: REVOKE = solo autoridad. NO exige target activo, NO aplica críticos (de-escalada).
+console.log("\n=== canRevokeUserPermission (solo autoridad, de-escalada, 2C-C) ===");
 assert("OWNER → crítico a operativo", canRevokeUserPermission(aOwner, tOp, CRIT) === true);
 assert("ADMIN → normal a operativo", canRevokeUserPermission(aAdmin, tOp, NORMAL) === true);
 assert("ADMIN → crítico a operativo", canRevokeUserPermission(aAdmin, tOp, CRIT) === true);
 assert("ADMIN → auto-revoca normal", canRevokeUserPermission(aAdmin, aAdmin, NORMAL) === true);
-assert("ADMIN → auto-revoca crítico => false", canRevokeUserPermission(aAdmin, aAdmin, CRIT) === false);
+// 2C-C FLIP: ADMIN-self revoke crítico AHORA permitido (de-escalada, no escalada).
+assert("ADMIN → auto-revoca crítico => true", canRevokeUserPermission(aAdmin, aAdmin, CRIT) === true);
 assert("ADMIN → otro ADMIN => false", canRevokeUserPermission(aAdmin, aAdmin2, NORMAL) === false);
 assert("ADMIN → OWNER => false", canRevokeUserPermission(aAdmin, tOwner, CRIT) === false);
+// 2C-C: revoke permitido sobre target INACTIVO si hay autoridad, incluso crítico.
+assert("OWNER → crítico a operativo INACTIVO => true", canRevokeUserPermission(aOwner, tOpInact, CRIT) === true);
+assert("ADMIN → crítico a operativo INACTIVO => true", canRevokeUserPermission(aAdmin, tOpInact, CRIT) === true);
+// 2C-C: inactividad NO relaja gobierno tampoco en revoke.
+assert("ADMIN → OWNER INACTIVO => false", canRevokeUserPermission(aAdmin, tOwnerInact, CRIT) === false);
+assert("ADMIN → otro ADMIN INACTIVO => false", canRevokeUserPermission(aAdmin, tAdminInact, NORMAL) === false);
+// actor inactivo / SUPERVISOR: bloqueado siempre.
+assert("actor inactive => false", canRevokeUserPermission(aAdminInact, tOp, NORMAL) === false);
+assert("SUPERVISOR => false", canRevokeUserPermission(aSup, tOp, NORMAL) === false);
 
 console.log("\n=== canCreateUserWithRole ===");
 assert("OWNER → OWNER", canCreateUserWithRole(aOwner, "OWNER") === true);
