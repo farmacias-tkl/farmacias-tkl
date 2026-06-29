@@ -37,7 +37,9 @@ const bm: Target = { id: "bm", role: "BRANCH_MANAGER", active: true, branchId: "
 const bmNoBranch: Target = { id: "bm2", role: "BRANCH_MANAGER", active: true, branchId: null };
 const bmInactive: Target = { id: "bm3", role: "BRANCH_MANAGER", active: false, branchId: "tekiel" };
 const ownerTarget: Target = { id: "owner-t", role: "OWNER", active: true, branchId: null };
+const ownerTargetInactive: Target = { id: "owner-t", role: "OWNER", active: false, branchId: null };
 const otherAdminTarget: Target = { id: "admin2", role: "ADMIN", active: true, branchId: null };
+const otherAdminInactive: Target = { id: "admin2", role: "ADMIN", active: false, branchId: null };
 const adminSelfTarget: Target = { id: "admin", role: "ADMIN", active: true, branchId: "tekiel" }; // mismo id que adminA
 
 const permNormal = { id: "p-view", key: NORMAL, module: "caja", description: "Ver", active: true };
@@ -141,7 +143,27 @@ async function main() {
   {
     const { client, calls } = makeClient({ target: bmInactive, permission: permNormal, existing: null });
     const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bmInactive.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", client });
-    assert("Target inactive → 400 'Usuario inactivo' + 0 escrituras + sin tx", res.status === 400 && (res.body as any).error === "Usuario inactivo" && noWrites(calls) && calls.txOpened === 0);
+    assert("GRANT target inactivo (OWNER autorizado) → 400 'Usuario inactivo' + 0 escrituras + sin tx", res.status === 400 && (res.body as any).error === "Usuario inactivo" && noWrites(calls) && calls.txOpened === 0);
+  }
+
+  console.log("\n=== GRANT 2C-C: autoridad (403) ANTES de inactividad (400) ===");
+  {
+    // ADMIN sin autoridad sobre OWNER inactivo: debe ser 403 (autoridad), NO 400 (inactividad).
+    const { client, calls } = makeClient({ target: ownerTargetInactive, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: adminA, targetUserId: ownerTargetInactive.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", client });
+    assert("GRANT ADMIN→OWNER inactivo → 403 (no 400) + 0 escrituras + sin tx", res.status === 403 && noWrites(calls) && calls.txOpened === 0);
+  }
+  {
+    // ADMIN sin autoridad sobre otro ADMIN inactivo: 403, NO 400.
+    const { client, calls } = makeClient({ target: otherAdminInactive, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: adminA, targetUserId: otherAdminInactive.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", client });
+    assert("GRANT ADMIN→otro ADMIN inactivo → 403 (no 400) + 0 escrituras + sin tx", res.status === 403 && noWrites(calls) && calls.txOpened === 0);
+  }
+  {
+    // SCOPE_CHANGE sobre target inactivo (OWNER autorizado, existe grant con otro scope) → 400, no toca el existing.
+    const { client, calls } = makeClient({ target: bmInactive, permission: permNormal, existing: { id: "up1", scope: "OWN_BRANCH", permission: { key: NORMAL } } });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bmInactive.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", client });
+    assert("SCOPE_CHANGE target inactivo (OWNER autorizado) → 400 'Usuario inactivo' + 0 escrituras + sin tx", res.status === 400 && (res.body as any).error === "Usuario inactivo" && noWrites(calls) && calls.txOpened === 0);
   }
   {
     const { client, calls } = makeClient({ target: bm, permission: null, existing: null });
@@ -184,10 +206,10 @@ async function main() {
     assert("Revoke OK → 1 delete + 1 audit REVOKED dentro de tx", calls.upDelete === 1 && committed.audits.length === 1 && committed.audits[0].action === "USER_PERMISSION_REVOKED" && calls.txOpened === 1);
   }
   {
-    // ADMIN auto-revoca crítico → 403
-    const { client, calls } = makeClient({ target: adminSelfTarget, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: CRIT } } });
+    // 2C-C FLIP: ADMIN auto-revoca crítico → AHORA 200 (de-escalada, no escalada).
+    const { client, calls, committed } = makeClient({ target: adminSelfTarget, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: CRIT } } });
     const res = await revokeUserPermissionFromTarget({ actor: adminA, targetUserId: adminA.id, permissionId: "p-export", client });
-    assert("Revoke self-admin crítico → 403 + 0 escrituras", res.status === 403 && noWrites(calls) && calls.txOpened === 0);
+    assert("Revoke self-admin crítico → 200 + audit (de-escalada permitida)", res.status === 200 && calls.upDelete === 1 && committed.audits.length === 1 && committed.audits[0].action === "USER_PERMISSION_REVOKED" && calls.txOpened === 1);
   }
   {
     const { client, calls } = makeClient({ target: bm, existing: null });
@@ -195,15 +217,48 @@ async function main() {
     assert("Revoke inexistente → 404 + 0 escrituras", res.status === 404 && noWrites(calls) && calls.txOpened === 0);
   }
   {
-    const { client, calls } = makeClient({ target: bmInactive, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
-    const res = await revokeUserPermissionFromTarget({ actor: ownerA, targetUserId: bmInactive.id, permissionId: "p-view", client });
-    assert("Revoke target inactive → 400 + 0 escrituras", res.status === 400 && noWrites(calls) && calls.txOpened === 0);
-  }
-  {
     // ADMIN revoke de OWNER → guard falla → 403, sin escrituras
     const { client, calls } = makeClient({ target: ownerTarget, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
     const res = await revokeUserPermissionFromTarget({ actor: adminA, targetUserId: ownerTarget.id, permissionId: "p-view", client });
     assert("Revoke ADMIN→OWNER → 403 + 0 escrituras (no writes si guard falla)", res.status === 403 && noWrites(calls) && calls.txOpened === 0);
+  }
+
+  console.log("\n=== REVOKE 2C-C: target inactivo permitido si hay autoridad (de-escalada) ===");
+  {
+    // 2C-C FLIP: OWNER revoke sobre operativo inactivo → 200 (antes 400).
+    const { client, calls, committed } = makeClient({ target: bmInactive, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
+    const res = await revokeUserPermissionFromTarget({ actor: ownerA, targetUserId: bmInactive.id, permissionId: "p-view", client });
+    assert("REVOKE OWNER→operativo inactivo → 200 + audit", res.status === 200 && calls.upDelete === 1 && committed.audits.length === 1 && calls.txOpened === 1);
+  }
+  {
+    // ADMIN revoke sobre operativo inactivo → 200.
+    const { client, calls, committed } = makeClient({ target: bmInactive, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
+    const res = await revokeUserPermissionFromTarget({ actor: adminA, targetUserId: bmInactive.id, permissionId: "p-view", client });
+    assert("REVOKE ADMIN→operativo inactivo → 200 + audit", res.status === 200 && calls.upDelete === 1 && committed.audits.length === 1 && calls.txOpened === 1);
+  }
+  {
+    // ADMIN revoke CRÍTICO sobre operativo inactivo → 200 (revoke no aplica críticos).
+    const { client, calls, committed } = makeClient({ target: bmInactive, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: CRIT } } });
+    const res = await revokeUserPermissionFromTarget({ actor: adminA, targetUserId: bmInactive.id, permissionId: "p-export", client });
+    assert("REVOKE ADMIN→crítico a operativo inactivo → 200 + audit", res.status === 200 && calls.upDelete === 1 && committed.audits.length === 1 && calls.txOpened === 1);
+  }
+  {
+    // ADMIN sin autoridad sobre OWNER inactivo → 403 (la inactividad no relaja gobierno).
+    const { client, calls } = makeClient({ target: ownerTargetInactive, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
+    const res = await revokeUserPermissionFromTarget({ actor: adminA, targetUserId: ownerTargetInactive.id, permissionId: "p-view", client });
+    assert("REVOKE ADMIN→OWNER inactivo → 403 + 0 escrituras + sin tx", res.status === 403 && noWrites(calls) && calls.txOpened === 0);
+  }
+  {
+    // ADMIN sin autoridad sobre otro ADMIN inactivo → 403.
+    const { client, calls } = makeClient({ target: otherAdminInactive, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
+    const res = await revokeUserPermissionFromTarget({ actor: adminA, targetUserId: otherAdminInactive.id, permissionId: "p-view", client });
+    assert("REVOKE ADMIN→otro ADMIN inactivo → 403 + 0 escrituras + sin tx", res.status === 403 && noWrites(calls) && calls.txOpened === 0);
+  }
+  {
+    // revoke inexistente sobre target inactivo AUTORIZADO → 404 (autoridad pasa, grant no existe).
+    const { client, calls } = makeClient({ target: bmInactive, existing: null });
+    const res = await revokeUserPermissionFromTarget({ actor: ownerA, targetUserId: bmInactive.id, permissionId: "nope", client });
+    assert("REVOKE inexistente sobre inactivo autorizado → 404 + 0 escrituras", res.status === 404 && noWrites(calls) && calls.txOpened === 0);
   }
 
   // ======================= LIST =======================
@@ -238,6 +293,32 @@ async function main() {
     const { client, calls } = makeClient({ target: bm });
     const res = await listUserPermissionsForTarget({ actor: adminInactive, targetUserId: bm.id, client });
     assert("List actor inactive → 403 + sin tx", res.status === 403 && calls.txOpened === 0);
+  }
+
+  console.log("\n=== LIST 2C-C: target inactivo permitido si hay autoridad ===");
+  {
+    // 2C-C: OWNER lista permisos de operativo inactivo → 200 (autoridad pura, no mira target.active).
+    const { client } = makeClient({ target: bmInactive, listRows: [] });
+    const res = await listUserPermissionsForTarget({ actor: ownerA, targetUserId: bmInactive.id, client });
+    assert("LIST OWNER→operativo inactivo → 200", res.status === 200);
+  }
+  {
+    // ADMIN lista permisos de operativo inactivo → 200.
+    const { client } = makeClient({ target: bmInactive, listRows: [] });
+    const res = await listUserPermissionsForTarget({ actor: adminA, targetUserId: bmInactive.id, client });
+    assert("LIST ADMIN→operativo inactivo → 200", res.status === 200);
+  }
+  {
+    // ADMIN sin autoridad sobre OWNER inactivo → 403 (gobierno no se relaja por inactividad).
+    const { client, calls } = makeClient({ target: ownerTargetInactive, listRows: [] });
+    const res = await listUserPermissionsForTarget({ actor: adminA, targetUserId: ownerTargetInactive.id, client });
+    assert("LIST ADMIN→OWNER inactivo → 403 + sin tx", res.status === 403 && calls.txOpened === 0);
+  }
+  {
+    // ADMIN sin autoridad sobre otro ADMIN inactivo → 403.
+    const { client, calls } = makeClient({ target: otherAdminInactive, listRows: [] });
+    const res = await listUserPermissionsForTarget({ actor: adminA, targetUserId: otherAdminInactive.id, client });
+    assert("LIST ADMIN→otro ADMIN inactivo → 403 + sin tx", res.status === 403 && calls.txOpened === 0);
   }
 
   // ======================= ATOMICIDAD =======================
