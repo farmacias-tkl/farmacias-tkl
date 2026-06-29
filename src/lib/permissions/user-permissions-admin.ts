@@ -331,18 +331,19 @@ export async function revokeUserPermissionFromTarget(args: RevokeArgs): Promise<
   const target = await loadTarget(client, targetUserId);
   if (!target) return r404("Usuario no encontrado");
 
+  // 2C-C — AUTORIDAD primero (403), ANTES de leer el grant, para no filtrar existencia.
+  // canRevokeUserPermission IGNORA el permissionKey (delega en canManageUserPermissions),
+  // así que el argumento es irrelevante. Revoke = de-escalada: NO exige target activo
+  // (limpieza sobre inactivos OK) y NO aplica críticos. Por eso NO hay un 400 "Usuario
+  // inactivo" en revoke; un target inactivo con actor autorizado revoca normalmente.
+  if (!canRevokeUserPermission(actor as MinimalUser, target, "")) {
+    return r403("Sin permisos para esta accion");
+  }
+
   const existing = await client.userPermission.findUnique({
     where: { userId_permissionId: { userId: targetUserId, permissionId } },
     select: { id: true, scope: true, permission: { select: { key: true } } },
   });
-
-  // 2C-C — AUTORIDAD primero (403), ANTES del 404, para no filtrar existencia.
-  // Revoke = de-escalada: canRevokeUserPermission NO exige target activo (limpieza
-  // sobre inactivos OK) y NO aplica críticos. Por eso NO hay un 400 "Usuario inactivo"
-  // en revoke; un target inactivo con actor autorizado revoca normalmente.
-  if (!canRevokeUserPermission(actor as MinimalUser, target, existing?.permission.key ?? "")) {
-    return r403("Sin permisos para esta accion");
-  }
   if (!existing) return r404("Asignacion no encontrada");
 
   const permissionKey = existing.permission.key;
