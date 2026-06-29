@@ -468,6 +468,9 @@ model User {
   dailyCashReviewed        BranchDailyCashClose[]             @relation("BranchDailyCashReviewedBy")
   dailyCashStateChanges    BranchDailyCashCloseStateHistory[] @relation("BranchDailyCashStateChangedBy")
 
+  // Permisos operativos por usuario (refactor permisos-por-usuario, Fase 1A).
+  permissions               UserPermission[]           @relation("UserPermissionUser")
+
   // Acceso granular al módulo ejecutivo (independiente del rol).
   // OWNER tiene acceso siempre via canViewExecutive; los demás roles
   // necesitan este flag = true. Default false: usuarios nuevos no tienen
@@ -757,6 +760,7 @@ model Permission {
   createdAt   DateTime @default(now())
 
   positions   PositionPermission[]
+  users       UserPermission[]
 
   @@index([module, active])
 }
@@ -775,6 +779,36 @@ model PositionPermission {
   @@unique([positionId, permissionId])
   @@index([positionId])
   @@index([permissionId])
+}
+
+// ============================================================================
+// USER PERMISSION — permiso operativo asignado DIRECTAMENTE a un usuario.
+//
+// Refactor "permisos por usuario" (Fase 1A): reemplaza a PositionPermission como
+// fuente de permisos efectivos. Expand-only: PositionPermission/Position.permissions
+// se conservan inertes durante la transición y se eliminan en una fase posterior.
+//
+// scope OWN_BRANCH/ALL_BRANCHES se conserva (PermissionScope). La sucursal propia
+// canónica futura es User.branchId (Employee.currentBranchId solo fallback transitorio).
+//
+// grantedByUserId: snapshot PLANO sin FK (espeja PositionPermission.grantedByUserId
+// y User.callCenterAccessGrantedBy). Los usuarios se desactivan (active), no se borran.
+// ============================================================================
+model UserPermission {
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation("UserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  permissionId    String
+  permission      Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  scope           PermissionScope @default(OWN_BRANCH)
+  grantedByUserId String?         // snapshot de auditoría (quién otorgó: OWNER o ADMIN), sin FK
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([userId, permissionId])
+  @@index([userId])
+  @@index([permissionId])
+  @@index([grantedByUserId])
 }
 
 // ============================================================================

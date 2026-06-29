@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,8 +8,12 @@ import { z } from "zod";
 import Link from "next/link";
 import { ArrowLeft, KeyRound, CheckCircle2, XCircle, Copy } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
+import { UserPermissionsPanel } from "@/components/users/user-permissions-panel";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
+
+const USER_PERMISSIONS_PANEL_ENABLED =
+  process.env.NEXT_PUBLIC_USER_PERMISSIONS_PANEL_ENABLED === "true";
 
 const ROLES: UserRole[] = ["SUPERVISOR","OWNER","BRANCH_MANAGER","HR","MAINTENANCE","ADMIN"];
 
@@ -23,6 +28,7 @@ type EditForm = z.infer<typeof editSchema>;
 
 export default function UsuarioDetailPage({ params }: { params: { id: string } }) {
   const qc = useQueryClient();
+  const { data: session } = useSession();
   const [resetResult, setResetResult] = useState<string | null>(null);
   const [copied,      setCopied]      = useState(false);
   const [saveOk,      setSaveOk]      = useState(false);
@@ -249,6 +255,17 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
           </button>
         </div>
       </div>
+
+      {USER_PERMISSIONS_PANEL_ENABLED && session?.user?.id && (
+        <UserPermissionsPanel
+          actorContext="admin"
+          actorUserId={session.user.id}
+          targetUserId={params.id}
+          targetBranchId={user.branchId ?? null}
+          targetRole={user.role as UserRole}
+          targetActive={user.active}
+        />
+      )}
 
       {/* Info vinculación a empleado */}
       {user.employee && (

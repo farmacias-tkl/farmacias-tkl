@@ -894,6 +894,57 @@ Si tuviera que priorizar fixes para los próximos sprints:
 
 ---
 
+## Refactor de permisos por usuario — deudas abiertas
+
+### 🔒 Drift de ramas/schema entre Neon prod, Cajas y permisos — ABIERTA (bloquea merge)
+
+**Detectada:** 2026-06-28 (Gate Neon 2E del refactor `refactor/permisos-por-usuario`).
+
+**Descripción.** Neon prod contiene el schema de **Cajas** aplicado desde
+`feature/administracion-cajas-eiffel`. La rama `refactor/permisos-por-usuario` **no**
+contiene esos modelos. Por eso `prisma migrate diff --from-url` desde esta rama propuso:
+- `DROP TABLE` de **9 tablas** de Cajas;
+- `DROP TYPE` de **4 enums** de Cajas;
+- `DROP CONSTRAINT` de **18 FKs** de Cajas.
+El gate de seguridad (host-check + dry-run + scan destructivo) **frenó correctamente**
+antes de cualquier write; 2E se aplicó con **SQL acotado vía `psql`** (solo el delta
+aditivo de `UserPermission`), no con `db push`.
+
+**Riesgo.** Mientras ninguna rama refleje el schema completo real de prod, **`prisma db push`
+es inseguro desde ramas parciales**: un push desde una rama sin Cajas puede intentar
+**borrar Cajas de prod**, incluso sin pedir `--accept-data-loss` (las tablas están vacías,
+así que Prisma puede no detectar "pérdida de datos"). El riesgo es de **drift declarativo**
+entre `schema.prisma` y Neon, no solo de datos actuales.
+
+**Estado.** 2E resuelto con SQL acotado (correcto para ese gate), pero la deuda estructural
+sigue. **La rama `refactor/permisos-por-usuario` NO es mergeable a main hasta resolver el drift.**
+
+**Decisión pendiente (a evaluar antes de 2F/backfill o cualquier gate Neon con schema):**
+1. Rama de integración que contenga Cajas + permisos + estado real de prod.
+2. Mergear Cajas a main primero (si Cajas está lista) y luego rebasear permisos.
+3. Seguir con SQL acotado por gate (más frágil; exige scan destructivo en cada write).
+
+**Regla temporal hasta resolver:**
+- No usar `db push` desde ramas que no reflejen todo el schema de prod.
+- Preferir SQL acotado para cambios aditivos inevitables.
+- Todo cambio de schema requiere: host-check · dry-run contra Neon · scan destructivo ·
+  aprobación humana · rollback claro.
+
+### ⚠️ 2C-C — política de `UserPermission` sobre usuarios inactivos — ABIERTA
+
+**Detectada:** Fase 2C/2D del refactor.
+
+Hoy hay **asimetría** cuando el target está inactivo: `list` → 403 (vía `canManageUserPermissions`),
+mientras `grant`/`revoke` → 400 ("Usuario inactivo"). Falta decidir la política:
+- permitir `list`/`revoke` sobre usuarios inactivos para **limpieza administrativa**; o
+- **bloquear todo** con status/mensaje coherente.
+
+**Debe decidirse antes de 2F/backfill** (cuando existan grants reales sobre usuarios
+existentes, la política deja de ser latente). No resuelto; no se toca código en la fase
+documental de cierre 2E.
+
+---
+
 ## Cómo reportar un bug nuevo
 
 1. Verificar si ya está acá listado.
