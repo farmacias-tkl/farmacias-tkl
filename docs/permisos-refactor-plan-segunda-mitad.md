@@ -206,3 +206,53 @@ Recién entonces los endpoints de Cajas pueden autorizar con `loadUserWithUserPe
 
 ## 9. Confirmaciones (al redactar este plan)
 - Documento de planificación; sin código, sin schema, sin Neon, sin tests, sin commit/push.
+
+---
+
+## 10. Cierre Fase 2E — Neon UserPermission (aplicado y verificado)
+
+**Fecha de cierre:** 2026-06-28. **Rama:** `refactor/permisos-por-usuario`, HEAD `60ddb34`.
+
+### Estado 2E
+- `UserPermission` **ya existe en Neon prod**.
+- La tabla se creó con **SQL acotado vía `psql`** (BEGIN/COMMIT, ON_ERROR_STOP=1), **NO** con `prisma db push`.
+- **Por qué no `db push`:** Neon prod contiene las tablas de **Cajas**; esta rama **no** contiene los modelos de Cajas; `migrate diff --from-url` desde esta rama mostró **DROP destructivos de Cajas** (9 tablas + 4 enums + 18 constraints). Por eso `db push` desde esta rama es **inseguro** → se aplicó solo el delta aditivo de `UserPermission`.
+
+### Estructura verificada (read-only post-apply)
+- `UserPermission_pkey` (PK); 3 índices normales (`userId`, `permissionId`, `grantedByUserId`); unique `(userId, permissionId)`.
+- FK `UserPermission_userId_fkey → User(id)` y `UserPermission_permissionId_fkey → Permission(id)`, ambas **ON DELETE CASCADE / ON UPDATE CASCADE**.
+- `scope` default `'OWN_BRANCH'::"PermissionScope"`. `COUNT(*) = 0` al cierre.
+
+### Prueba funcional 2E (servicio real 2C-A, no SQL manual)
+list inicial vacío → `grant caja.view / OWN_BRANCH` = **GRANTED** → list 1 fila → repetir mismo scope = **NOOP** → `grant ALL_BRANCHES` = **SCOPE_CHANGED** → list 1 fila ALL_BRANCHES → `revoke` = **ok=true** → list final vacío → **`UserPermission count final = 0`**.
+
+### Auditoría
+- `AuditLog` global **56 → 59**; `entity='UserPermission'` **0 → 3**.
+- Acciones: `USER_PERMISSION_GRANTED`, `USER_PERMISSION_SCOPE_CHANGED`, `USER_PERMISSION_REVOKED`. **NOOP no auditó.**
+- Las entradas de `AuditLog` quedan **persistentes por diseño** (la limpieza revoca la fila, no borra la traza).
+
+### Resultado operativo
+- Schema de `UserPermission` listo en prod; servicio 2C-A validado funcionalmente contra tabla real.
+- **UI sigue oculta** (feature flag `NEXT_PUBLIC_USER_PERMISSIONS_PANEL_ENABLED` apagado).
+- Endpoints `/api/users/[id]/permissions` **ya operativos** contra tabla real para OWNER/ADMIN.
+- No se activó Cajas, no se activó UI, no se tocó Vercel.
+
+### Estado de mergeabilidad tras 2E
+```
+Estado de mergeabilidad tras 2E:
+La tabla UserPermission existe en prod, pero la rama refactor/permisos-por-usuario
+NO es mergeable a main todavía. El gate Neon 2E se completó por SQL acotado,
+NO por db push, justamente porque el schema de esta rama no refleja prod: le falta
+Cajas. Mergear esta rama a main dejaría main con un schema parcial que, ante
+cualquier db push manual o de pipeline, propondría dropear Cajas. El merge queda
+bloqueado hasta resolver el drift de ramas/schema, no hasta cerrar 2E.
+```
+*(Ver deudas registradas en `docs/known-issues/current-known-issues.md`: "drift de ramas/schema" y "2C-C".)*
+
+### Próximo orden recomendado (no presentar 2F como inmediato)
+1. **2E documentado y cerrado** (esta sección).
+2. **Resolver el drift de ramas/schema** o definir una rama de integración que refleje prod (Cajas + permisos).
+3. **Resolver 2C-C** (política de `UserPermission` sobre usuarios inactivos).
+4. **Recién después: 2F** (defaults a usuarios nuevos + backfill a operativos existentes = gate de Cajas).
+5. Feature flag / UI controlada.
+6. Retiro gradual de `PositionPermission`, si aplica.
