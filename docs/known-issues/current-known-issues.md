@@ -937,18 +937,67 @@ rollback) para cualquier write real a Neon.
 *(Decisión original entre opciones: se eligió la Opción A — "Cajas a main primero, luego permisos".
 Las opciones B/C quedaron descartadas. Se conserva la descripción del problema arriba para trazabilidad.)*
 
-### ⚠️ 2C-C — política de `UserPermission` sobre usuarios inactivos — ABIERTA
+### 🧪 2C-C — política de `UserPermission` sobre usuarios inactivos — IMPLEMENTADA Y VERIFICADA EN RAMA (2026-06-29) — pendiente de merge a main
 
 **Detectada:** Fase 2C/2D del refactor.
 
-Hoy hay **asimetría** cuando el target está inactivo: `list` → 403 (vía `canManageUserPermissions`),
-mientras `grant`/`revoke` → 400 ("Usuario inactivo"). Falta decidir la política:
-- permitir `list`/`revoke` sobre usuarios inactivos para **limpieza administrativa**; o
-- **bloquear todo** con status/mensaje coherente.
+**Problema (histórico, se conserva).** Había **asimetría** cuando el target estaba inactivo:
+`list` → 403 (vía `canManageUserPermissions`), mientras `grant`/`revoke` → 400 ("Usuario
+inactivo"). Además, el 400 por inactividad se evaluaba **antes** que la autoridad, de modo que
+un actor **sin autoridad** sobre un target inactivo recibía 400 en vez de 403 (mezcla de motivos),
+y `canRevokeUserPermission` era **idéntico** a `canGrantUserPermission` (revocar heredaba la
+restricción de críticos, impidiendo de-escalada legítima).
 
-**Debe decidirse antes de 2F/backfill** (cuando existan grants reales sobre usuarios
-existentes, la política deja de ser latente). No resuelto; no se toca código en la fase
-documental de cierre 2E.
+**Riesgo.** Sin una política única, la limpieza administrativa sobre usuarios dados de baja
+quedaba bloqueada o devolvía códigos inconsistentes; y al llegar grants reales (2F/backfill)
+la ambigüedad dejaba de ser latente. Debía resolverse **antes de 2F/backfill**.
+
+**Política final (decidida y aplicada).**
+```txt
+Target inactivo:
+- list: permitido si el actor tiene autoridad sobre el target.
+- revoke: permitido si el actor tiene autoridad sobre el target, incluso permisos críticos.
+- grant / scope-change: bloqueado siempre.
+- actor sin autoridad: 403 antes de cualquier 400 por inactividad.
+- actor inactivo: bloqueado siempre.
+```
+
+**Decisiones explícitas sobre críticos (ADMIN-self).**
+```txt
+ADMIN-self grant crítico: bloqueado.
+ADMIN-self scope-change crítico: bloqueado.
+ADMIN-self revoke crítico: permitido.   (revocar = de-escalada, no escalada)
+```
+
+**Implementación (rama `fix/2c-c-userpermission-inactive-policy`).**
+```txt
+c34ffad — helpers (src/lib/permissions/user-permissions.ts):
+  canManage  = autoridad pura, ya NO bloquea por target.active.
+  canGrant   = autoridad + target activo + restricción de críticos.
+  canRevoke  = autoridad pura, sin críticos y sin exigir target activo.
+
+29bc945 — servicio (src/lib/permissions/user-permissions-admin.ts):
+  autoridad ANTES que inactividad.
+  list/revoke permitidos sobre inactivos si el actor tiene autoridad.
+  grant/scope-change sobre inactivo bloqueado con 400 (tras pasar autoridad).
+  actor sin autoridad sobre inactivo recibe 403 antes que 400.
+
+56649dd — microfix (servicio):
+  guard de autoridad antes del findUnique del grant en revoke.
+  sin cambio funcional (status/escrituras idénticos).
+```
+
+**Evidencia.**
+```txt
+helper-tests:  101/101
+service-tests:  50/50
+tsc:            exit 0
+build:          exit 0
+```
+
+**Estado.** Implementado y verificado en la rama `fix/2c-c-userpermission-inactive-policy`.
+**Pendiente de merge a `main`/deploy** para quedar cerrado en producción — **NO** cerrado en
+producción todavía. **2F queda habilitada recién después del merge de esta rama a `main`.**
 
 ---
 

@@ -20,6 +20,17 @@ import {
   type MinimalUser,
 } from "./user-permissions";
 
+// 2C-C — política sobre usuarios INACTIVOS (target inactivo):
+//  - list   : permitido si el actor tiene AUTORIDAD (canManageUserPermissions).
+//  - revoke : permitido si el actor tiene autoridad, incluso permisos críticos
+//             (de-escalada). NO exige target activo.
+//  - grant / scope-change : SIEMPRE bloqueado sobre target inactivo (400), pero la
+//             AUTORIDAD se evalúa ANTES: actor sin autoridad → 403 antes que el 400.
+//  - actor sin autoridad : 403 antes de cualquier 400 por inactividad.
+//  - actor inactivo : bloqueado siempre (checkActor → 403).
+// Por eso grant separa canManageUserPermissions (autoridad pura → 403) del gate de
+// actividad (target.active === false → 400) y de canGrantUserPermission (críticos → 403).
+
 // ============================================================================
 // Resultado uniforme (sin NextResponse).
 // ============================================================================
@@ -182,6 +193,15 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
 
   const target = await loadTarget(client, targetUserId);
   if (!target) return r404("Usuario no encontrado");
+
+  // 2C-C — AUTORIDAD PURA primero: actor sin autoridad → 403 ANTES de cualquier 400
+  // por inactividad. canManageUserPermissions NO mira target.active, así que el 403
+  // significa exclusivamente "sin autoridad de gobierno", no "target inactivo".
+  if (!canManageUserPermissions(actor as MinimalUser, target)) {
+    return r403("Sin permisos para esta accion");
+  }
+  // 2C-C — GATE DE ACTIVIDAD: grant/scope-change SIEMPRE bloqueado sobre inactivo (400),
+  // pero solo se llega acá si el actor TENÍA autoridad.
   if (target.active === false) return r400("Usuario inactivo");
 
   const permission = await client.permission.findUnique({
@@ -198,6 +218,8 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
     return r400("Un permiso OWN_BRANCH requiere que el usuario tenga sucursal asignada");
   }
 
+  // 2C-C — RESTRICCIÓN FINA DE GRANT (críticos / ADMIN-self). La autoridad y la
+  // actividad ya se resolvieron arriba; acá solo aplica la regla de críticos.
   if (!canGrantUserPermission(actor as MinimalUser, target, permission.key)) {
     return r403("Sin permisos para esta accion");
   }
@@ -308,7 +330,15 @@ export async function revokeUserPermissionFromTarget(args: RevokeArgs): Promise<
 
   const target = await loadTarget(client, targetUserId);
   if (!target) return r404("Usuario no encontrado");
-  if (target.active === false) return r400("Usuario inactivo");
+
+  // 2C-C — AUTORIDAD primero (403), ANTES de leer el grant, para no filtrar existencia.
+  // canRevokeUserPermission IGNORA el permissionKey (delega en canManageUserPermissions),
+  // así que el argumento es irrelevante. Revoke = de-escalada: NO exige target activo
+  // (limpieza sobre inactivos OK) y NO aplica críticos. Por eso NO hay un 400 "Usuario
+  // inactivo" en revoke; un target inactivo con actor autorizado revoca normalmente.
+  if (!canRevokeUserPermission(actor as MinimalUser, target, "")) {
+    return r403("Sin permisos para esta accion");
+  }
 
   const existing = await client.userPermission.findUnique({
     where: { userId_permissionId: { userId: targetUserId, permissionId } },
@@ -317,9 +347,6 @@ export async function revokeUserPermissionFromTarget(args: RevokeArgs): Promise<
   if (!existing) return r404("Asignacion no encontrada");
 
   const permissionKey = existing.permission.key;
-  if (!canRevokeUserPermission(actor as MinimalUser, target, permissionKey)) {
-    return r403("Sin permisos para esta accion");
-  }
 
   const auditMeta = buildAuditMeta(ip, userAgent);
 

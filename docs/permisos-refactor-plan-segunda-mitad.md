@@ -260,12 +260,18 @@ seguro como línea canónica. (Ver detalle de cierre en
 `docs/known-issues/current-known-issues.md` → "Drift de ramas/schema … RESUELTA".)
 
 *(Ver deudas registradas en `docs/known-issues/current-known-issues.md`: "drift de ramas/schema" —
-ahora **RESUELTA** — y "2C-C" — sigue **ABIERTA**.)*
+ahora **RESUELTA** — y "2C-C" — **implementada y verificada en rama
+`fix/2c-c-userpermission-inactive-policy`, pendiente de merge a main**.)*
+
+**Actualización 2C-C (2026-06-29).** La política de `UserPermission` sobre usuarios inactivos
+fue **implementada y verificada en rama** (helpers `c34ffad`, servicio `29bc945`, microfix
+`56649dd`; tests 101/50 verdes, tsc/build OK). **Sigue pendiente de merge a `main`/deploy.**
+**2F queda habilitada recién después del merge/deploy de 2C-C** — no antes.
 
 ### Próximo orden recomendado (no presentar 2F como inmediato)
 1. **2E documentado y cerrado** (esta sección).
 2. **Resolver el drift de ramas/schema** o definir una rama de integración que refleje prod (Cajas + permisos).
-3. **Resolver 2C-C** (política de `UserPermission` sobre usuarios inactivos).
-4. **Recién después: 2F** (defaults a usuarios nuevos + backfill a operativos existentes = gate de Cajas).
+3. **2C-C** (política de `UserPermission` sobre usuarios inactivos) — **implementada y verificada en rama; pendiente de merge a main**.
+4. **Recién después del merge/deploy de 2C-C: 2F** (defaults a usuarios nuevos + backfill a operativos existentes = gate de Cajas).
 5. Feature flag / UI controlada.
 6. Retiro gradual de `PositionPermission`, si aplica.
