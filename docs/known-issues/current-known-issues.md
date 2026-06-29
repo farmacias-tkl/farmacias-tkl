@@ -896,9 +896,10 @@ Si tuviera que priorizar fixes para los próximos sprints:
 
 ## Refactor de permisos por usuario — deudas abiertas
 
-### 🔒 Drift de ramas/schema entre Neon prod, Cajas y permisos — ABIERTA (bloquea merge)
+### ✅ Drift de ramas/schema entre Neon prod, Cajas y permisos — RESUELTA (2026-06-29)
 
 **Detectada:** 2026-06-28 (Gate Neon 2E del refactor `refactor/permisos-por-usuario`).
+**Resuelta:** 2026-06-29 (Opción A, en dos pasos — ver "Cierre" abajo).
 
 **Descripción.** Neon prod contiene el schema de **Cajas** aplicado desde
 `feature/administracion-cajas-eiffel`. La rama `refactor/permisos-por-usuario` **no**
@@ -916,19 +917,25 @@ es inseguro desde ramas parciales**: un push desde una rama sin Cajas puede inte
 así que Prisma puede no detectar "pérdida de datos"). El riesgo es de **drift declarativo**
 entre `schema.prisma` y Neon, no solo de datos actuales.
 
-**Estado.** 2E resuelto con SQL acotado (correcto para ese gate), pero la deuda estructural
-sigue. **La rama `refactor/permisos-por-usuario` NO es mergeable a main hasta resolver el drift.**
+**Cierre (RESUELTA — 2026-06-29).** Se eligió la **Opción A en dos pasos**:
+1. **Paso 2** — schema Cajas → `main` (merge `40b3c9d`, **schema-only + doc, sin código funcional**).
+2. **Paso 3** — refactor permisos → `main` sobre Cajas (merge `e8cf8ad`); el único conflicto
+   (textual, en `model User` por las back-relations) se resolvió **conservando ambos bloques**
+   (las de Cajas + `permissions UserPermission[]`).
 
-**Decisión pendiente (a evaluar antes de 2F/backfill o cualquier gate Neon con schema):**
-1. Rama de integración que contenga Cajas + permisos + estado real de prod.
-2. Mergear Cajas a main primero (si Cajas está lista) y luego rebasear permisos.
-3. Seguir con SQL acotado por gate (más frágil; exige scan destructivo en cada write).
+**Evidencia de cierre.** `prisma migrate diff --from-url` desde `main` (`e8cf8ad`) contra Neon
+prod → **`-- This is an empty migration.`** (`DROP=0 · CREATE=0 · ALTER=0`). Es decir
+**`main` = Cajas + UserPermission = Neon prod**. Deploy de producción `e8cf8ad` Ready, smoke
+runtime OK, panel de permisos oculto verificado (flag `=== "true"`, ausente → apagado).
 
-**Regla temporal hasta resolver:**
-- No usar `db push` desde ramas que no reflejen todo el schema de prod.
-- Preferir SQL acotado para cambios aditivos inevitables.
-- Todo cambio de schema requiere: host-check · dry-run contra Neon · scan destructivo ·
-  aprobación humana · rollback claro.
+**Consecuencia.** `prisma db push` desde `main` **vuelve a ser seguro** como línea canónica:
+`main` refleja prod, así que un `db push` no propondría DROPs. El **SQL acotado por gate** queda
+como **herramienta disponible** (para cambios aislados / extra cuidado), **no como única vía**.
+Igual se conserva la disciplina de gate (host-check · dry-run · scan destructivo · aprobación ·
+rollback) para cualquier write real a Neon.
+
+*(Decisión original entre opciones: se eligió la Opción A — "Cajas a main primero, luego permisos".
+Las opciones B/C quedaron descartadas. Se conserva la descripción del problema arriba para trazabilidad.)*
 
 ### ⚠️ 2C-C — política de `UserPermission` sobre usuarios inactivos — ABIERTA
 

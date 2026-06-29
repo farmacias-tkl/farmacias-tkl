@@ -247,7 +247,20 @@ Cajas. Mergear esta rama a main dejaría main con un schema parcial que, ante
 cualquier db push manual o de pipeline, propondría dropear Cajas. El merge queda
 bloqueado hasta resolver el drift de ramas/schema, no hasta cerrar 2E.
 ```
-*(Ver deudas registradas en `docs/known-issues/current-known-issues.md`: "drift de ramas/schema" y "2C-C".)*
+
+**Actualización (2026-06-29 — drift RESUELTO, lo de arriba quedó como contexto histórico).**
+El drift se resolvió con la **Opción A en dos pasos** y la rama `refactor/permisos-por-usuario`
+**fue mergeada a `main`**:
+- **Paso 2**: schema Cajas → `main` (`40b3c9d`, schema-only + doc).
+- **Paso 3**: refactor permisos → `main` sobre Cajas (`e8cf8ad`; conflicto de `model User`
+  resuelto conservando ambos bloques).
+`migrate diff` desde `main` (`e8cf8ad`) contra Neon prod → **diff vacío** (0 DROP/CREATE/ALTER):
+**`main` ahora refleja Neon prod** (Cajas + UserPermission). `db push` desde `main` vuelve a ser
+seguro como línea canónica. (Ver detalle de cierre en
+`docs/known-issues/current-known-issues.md` → "Drift de ramas/schema … RESUELTA".)
+
+*(Ver deudas registradas en `docs/known-issues/current-known-issues.md`: "drift de ramas/schema" —
+ahora **RESUELTA** — y "2C-C" — sigue **ABIERTA**.)*
 
 ### Próximo orden recomendado (no presentar 2F como inmediato)
 1. **2E documentado y cerrado** (esta sección).
