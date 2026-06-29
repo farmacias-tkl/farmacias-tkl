@@ -937,7 +937,7 @@ rollback) para cualquier write real a Neon.
 *(Decisión original entre opciones: se eligió la Opción A — "Cajas a main primero, luego permisos".
 Las opciones B/C quedaron descartadas. Se conserva la descripción del problema arriba para trazabilidad.)*
 
-### 🧪 2C-C — política de `UserPermission` sobre usuarios inactivos — IMPLEMENTADA Y VERIFICADA EN RAMA (2026-06-29) — pendiente de merge a main
+### ✅ 2C-C — política de `UserPermission` sobre usuarios inactivos — RESUELTA EN PRODUCCIÓN (2026-06-29)
 
 **Detectada:** Fase 2C/2D del refactor.
 
@@ -995,9 +995,53 @@ tsc:            exit 0
 build:          exit 0
 ```
 
-**Estado.** Implementado y verificado en la rama `fix/2c-c-userpermission-inactive-policy`.
-**Pendiente de merge a `main`/deploy** para quedar cerrado en producción — **NO** cerrado en
-producción todavía. **2F queda habilitada recién después del merge de esta rama a `main`.**
+**Cierre en producción (2026-06-29).**
+- Merge a main: `ffe43b5` — merge: política 2C-C UserPermission sobre usuarios inactivos.
+- Vercel Production: **Ready**.
+- Verificación funcional post-deploy contra servicio real + Neon prod (`neondb`): **OK**.
+
+**Evidencia post-deploy (casos verificados contra el servicio real, ids reales).**
+```txt
+- OWNER list operativo inactivo → 200.
+- ADMIN list operativo inactivo → 200.
+- OWNER grant operativo inactivo → 400 "Usuario inactivo".
+- OWNER revoke inexistente operativo inactivo → 404 "Asignacion no encontrada".
+- Actor operativo activo sin autoridad → operativo inactivo, grant → 403, no 400.
+- ADMIN grant OWNER activo → 403.
+```
+
+**Canario de orden (autoridad antes que inactividad).**
+```txt
+- D' verificó "autoridad antes que inactividad" SIN tocar el OWNER inactivo
+  (actor operativo activo sin autoridad → operativo inactivo, grant → 403, no 400).
+- Los casos directos contra OWNER inactivo quedaron SKIPPED por decisión operativa.
+- La cobertura directa ADMIN→OWNER inactivo queda cubierta por los service-tests (50/50)
+  y por el canario equivalente D'.
+```
+
+**Nivel 2 (diferido).**
+```txt
+- Revoke EXISTENTE + AuditLog real NO se ejerció contra prod (requiere operación persistente).
+- Ese camino queda cubierto por service-tests 50/50 y se confirmará naturalmente en 2F,
+  cuando existan grants reales creados por backfill/defaults.
+```
+
+**Cero escrituras (verificado).**
+```txt
+- UserPermission count: 0 → 0.
+- AuditLog USER_PERMISSION_* count: 3 → 3.
+- No grants creados. No grants revocados. No AuditLog nuevo.
+```
+
+**Validación complementaria.**
+```txt
+helpers: 101/101
+service: 50/50
+tsc:     exit 0
+```
+
+**2F.** Queda **habilitada formalmente** tras este cierre, pero **NO iniciada** en este commit
+(defaults a nuevos + backfill a existentes = gate de Cajas, con su propio gate).
 
 ---
 
