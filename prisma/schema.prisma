@@ -793,22 +793,38 @@ model PositionPermission {
 //
 // grantedByUserId: snapshot PLANO sin FK (espeja PositionPermission.grantedByUserId
 // y User.callCenterAccessGrantedBy). Los usuarios se desactivan (active), no se borran.
+//
+// source/batchId (2F): ORIGEN del grant, para distinguir manual de default/backfill y
+// permitir rollback por lote. source es SIEMPRE explícito (MANUAL nunca es null) para no
+// mezclar manual/legado/bug. batchId identifica una CORRIDA específica (rollback dirigido);
+// la lógica de aplicación (2F-C) lo exige para DEFAULT_BACKFILL aunque el schema lo permita
+// nullable (expand-only).
 // ============================================================================
+enum UserPermissionSource {
+  MANUAL
+  DEFAULT_BACKFILL
+  DEFAULT_NEW_USER
+}
+
 model UserPermission {
-  id              String          @id @default(cuid())
+  id              String               @id @default(cuid())
   userId          String
-  user            User            @relation("UserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  user            User                 @relation("UserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
   permissionId    String
-  permission      Permission      @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  scope           PermissionScope @default(OWN_BRANCH)
-  grantedByUserId String?         // snapshot de auditoría (quién otorgó: OWNER o ADMIN), sin FK
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  permission      Permission           @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  scope           PermissionScope      @default(OWN_BRANCH)
+  grantedByUserId String?              // snapshot de auditoría (quién otorgó: OWNER o ADMIN), sin FK
+  source          UserPermissionSource @default(MANUAL) // origen del grant (2F); MANUAL explícito, nunca null
+  batchId         String?              // corrida específica de backfill (2F); único por ejecución, no constante
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@unique([userId, permissionId])
   @@index([userId])
   @@index([permissionId])
   @@index([grantedByUserId])
+  @@index([source])
+  @@index([batchId])
 }
 
 // ============================================================================
