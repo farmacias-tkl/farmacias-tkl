@@ -31,8 +31,8 @@ export interface DefaultPermissionGrant {
 // Defaults por rol. Solo caja.* en esta fase (ver "Alcance" arriba).
 // - BRANCH_MANAGER: ve / carga-cierra / adjunta en SU sucursal (OWN_BRANCH).
 // - SUPERVISOR:     ve / carga-cierra / adjunta en TODAS las sucursales (ALL_BRANCHES).
-// - ADMIN:          solo VISUALIZA cajas de todas las sucursales (caja.view ALL_BRANCHES).
-//                   No recibe create_close/attach_doc/edit_close/export por default.
+// - ADMIN:          sin defaults (2F-C0). ADMIN gobierna el sistema; NO opera Cajas por
+//                   default. Si llegara a necesitar Cajas, se le otorga por grant explícito.
 // - OWNER:          sin defaults (tiene override operativo superior).
 // - HR / MAINTENANCE: sin permisos de Cajas por default.
 // caja.edit_close y caja.export (críticos) NO son default de ningún rol.
@@ -47,9 +47,7 @@ const ROLE_DEFAULTS_INTERNAL: Record<UserRole, readonly DefaultPermissionGrant[]
     { key: "caja.create_close", scope: "ALL_BRANCHES" },
     { key: "caja.attach_doc", scope: "ALL_BRANCHES" },
   ],
-  ADMIN: [
-    { key: "caja.view", scope: "ALL_BRANCHES" },
-  ],
+  ADMIN: [], // ADMIN gobierna el sistema; no opera Cajas por default (decisión 2F-C0, no olvido). Operativos por grant explícito.
   OWNER: [],
   HR: [],
   MAINTENANCE: [],

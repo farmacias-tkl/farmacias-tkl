@@ -62,17 +62,15 @@ assert("SUPERVISOR NO tiene caja.export", hasDefaultPermission("SUPERVISOR", "ca
 assert("SUPERVISOR solo usa ALL_BRANCHES",
   getDefaultPermissionsForRole("SUPERVISOR").every((g) => g.scope === "ALL_BRANCHES"));
 
-console.log("\n=== ADMIN ===");
-assert("ADMIN defaults exactos (solo caja.view ALL_BRANCHES)", sameGrants(
-  getDefaultPermissionsForRole("ADMIN"),
-  [{ key: "caja.view", scope: "ALL_BRANCHES" }],
-));
+console.log("\n=== ADMIN → [] (2F-C0: no opera Cajas por default) ===");
+// ADMIN no tiene permisos operativos por default; se le otorgan por grant explícito si corresponde.
+assert("ADMIN => [] (sin defaults)", getDefaultPermissionsForRole("ADMIN").length === 0);
+assert("ADMIN defaults vacíos exactos", sameGrants(getDefaultPermissionsForRole("ADMIN"), []));
+assert("ADMIN NO tiene caja.view", hasDefaultPermission("ADMIN", "caja.view") === false);
 assert("ADMIN NO tiene caja.create_close", hasDefaultPermission("ADMIN", "caja.create_close") === false);
 assert("ADMIN NO tiene caja.attach_doc", hasDefaultPermission("ADMIN", "caja.attach_doc") === false);
 assert("ADMIN NO tiene caja.edit_close", hasDefaultPermission("ADMIN", "caja.edit_close") === false);
 assert("ADMIN NO tiene caja.export", hasDefaultPermission("ADMIN", "caja.export") === false);
-assert("ADMIN solo usa ALL_BRANCHES",
-  getDefaultPermissionsForRole("ADMIN").every((g) => g.scope === "ALL_BRANCHES"));
 
 console.log("\n=== OWNER / HR / MAINTENANCE → [] ===");
 assert("OWNER => []", getDefaultPermissionsForRole("OWNER").length === 0);
