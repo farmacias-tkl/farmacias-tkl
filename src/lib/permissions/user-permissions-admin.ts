@@ -12,7 +12,7 @@
  *  - Regla 1: un grant OWN_BRANCH exige target.branchId poblado, o 400 sin escribir.
  *  - No se usa PositionPermission.
  */
-import type { UserRole, PermissionScope } from "@prisma/client";
+import type { UserRole, PermissionScope, UserPermissionSource } from "@prisma/client";
 import {
   canManageUserPermissions,
   canGrantUserPermission,
@@ -110,6 +110,10 @@ export interface ListArgs {
 export interface GrantArgs extends BaseArgs {
   permissionKey: string;
   scope: string; // se valida a PermissionScope
+  // 2F (C1-C): origen del grant. Opcionales → retrocompatibles. Si no vienen, el
+  // servicio normaliza source a MANUAL (los callers manuales no pasan source a propósito).
+  source?: UserPermissionSource;
+  batchId?: string | null;
 }
 export interface RevokeArgs extends BaseArgs {
   permissionId: string;
@@ -191,6 +195,18 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
   const actorErr = checkActor(actor);
   if (actorErr) return actorErr;
 
+  // 2F (C1-C) — ORIGEN del grant. source normaliza a MANUAL si no viene; batchId a null
+  // si viene vacío. La coherencia de origen (DEFAULT_BACKFILL exige batchId) se valida ACÁ,
+  // antes de cualquier lectura DB: args mal formados se rechazan sin inspeccionar estado, así
+  // que DEFAULT_BACKFILL sin batchId da 400 aun cuando por scope hubiera terminado en NOOP.
+  // Esto NO toca el orden 2C-C (authority-before-inactivity sigue debajo) ni la idempotencia
+  // del backfill real (un re-run legítimo pasa batchId y, si ya existe mismo scope, cae en NOOP).
+  const source: UserPermissionSource = args.source ?? "MANUAL";
+  const batchId = args.batchId?.trim() ? args.batchId.trim() : null;
+  if (source === "DEFAULT_BACKFILL" && !batchId) {
+    return r400("batchId requerido para DEFAULT_BACKFILL");
+  }
+
   const target = await loadTarget(client, targetUserId);
   if (!target) return r404("Usuario no encontrado");
 
@@ -252,6 +268,8 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
           permissionId: permission.id,
           scope,
           grantedByUserId: (actor as MinimalUser).id,
+          source,   // 2F: origen de CREACIÓN del grant (explícito, no solo default DB)
+          batchId,  // 2F: corrida de backfill (null para grants manuales)
         },
         select: { id: true },
       });
@@ -264,11 +282,15 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
           action: "USER_PERMISSION_GRANTED",
           entity: "UserPermission",
           entityId: up.id,
+          // ...auditMeta queda a nivel `data` (columnas ip/userAgent de AuditLog), como antes.
+          // source/batchId van DENTRO de detail (objeto Json distinto), así que auditMeta no los toca.
           detail: {
             targetUserId,
             permissionKey: permission.key,
             scope,
             actorRole: (actor as MinimalUser).role,
+            source,
+            batchId,
           },
           ...auditMeta,
         },
@@ -287,6 +309,8 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
   // existing con scope distinto → UPDATE + AuditLog SCOPE_CHANGED, atómico.
   const oldScope = existing.scope;
   const updated = await client.$transaction(async (tx) => {
+    // 2F: NO se tocan source/batchId en update.data → la fila PRESERVA su origen de
+    // creación. grantedByUserId sí se re-estampa (último actor), como hoy.
     const up = await tx.userPermission.update({
       where: { userId_permissionId: { userId: targetUserId, permissionId: permission.id } },
       data: { scope, grantedByUserId: (actor as MinimalUser).id },
@@ -298,12 +322,15 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
         action: "USER_PERMISSION_SCOPE_CHANGED",
         entity: "UserPermission",
         entityId: up.id,
+        // source/batchId acá = origen de ESTA operación de cambio de scope (no el de la fila).
         detail: {
           targetUserId,
           permissionKey: permission.key,
           oldScope,
           newScope: scope,
           actorRole: (actor as MinimalUser).role,
+          source,
+          batchId,
         },
         ...auditMeta,
       },
