@@ -1040,8 +1040,79 @@ service: 50/50
 tsc:     exit 0
 ```
 
-**2F.** Queda **habilitada formalmente** tras este cierre, pero **NO iniciada** en este commit
-(defaults a nuevos + backfill a existentes = gate de Cajas, con su propio gate).
+**2F.** Fue **habilitada** tras este cierre y su **backfill de existentes ya se aplicó en
+producción** (ver la entrada "2F — Backfill de permisos default" abajo). **Corrección de
+premisa:** 2F es el **gate de DATOS de permisos**, no el interruptor funcional de Cajas —
+Cajas todavía no consume `UserPermission` (ver esa entrada).
+
+---
+
+### ✅ 2F — Backfill de permisos default (usuarios existentes) — APLICADO EN PRODUCCIÓN (2026-07-01)
+
+**BatchId:** `2f-default-backfill-20260701-0124`. **Estado:** aplicado y verificado **15/15**.
+
+**Qué se aplicó.**
+```txt
+- 15 UserPermission creados (UserPermission 0 → 15).
+- source  = DEFAULT_BACKFILL (15/15).
+- batchId = 2f-default-backfill-20260701-0124 (15/15).
+- 3 BRANCH_MANAGER activos → caja.view / caja.create_close / caja.attach_doc  (OWN_BRANCH).
+- 2 SUPERVISOR activos     → caja.view / caja.create_close / caja.attach_doc  (ALL_BRANCHES).
+- caja.edit_close NO otorgado. caja.export NO otorgado (críticos nunca default).
+- AuditLog USER_PERMISSION_*        subió 3 → 18.
+- AuditLog USER_PERMISSION_GRANTED  subió 1 → 16.
+- User y Permission sin cambios.
+- Escritura SOLO vía servicio real (applyDefaultPermissionsForUser → grantUserPermissionToTarget).
+```
+
+**Rollback (referencia futura, NO ejecutado).**
+```ts
+await prisma.userPermission.deleteMany({
+  where: { batchId: "2f-default-backfill-20260701-0124" }
+});
+```
+Borra **solo** `UserPermission` del lote (por `batchId`); **conserva AuditLog**; es escritura
+**destructiva**; **no se ejecutó**; requiere **OK explícito** de Daniel si alguna vez hiciera falta.
+
+**Capacidad 2F construida (infraestructura de permisos, lista).**
+```txt
+- schema UserPermission.source / batchId + enum UserPermissionSource.
+- servicio grantUserPermissionToTarget con source/batchId.
+- motor applyDefaultPermissionsForUser (única vía de escritura = el servicio).
+- role-defaults sin ADMIN (ADMIN: []).
+- backfill DEFAULT_BACKFILL aplicado a los operativos existentes.
+```
+Esto **completa la capacidad de permisos para usuarios existentes**. **No** implica que Cajas
+ya tenga consumidor funcional (ver abajo).
+
+### ⚠️ Corrección de premisa: el backfill NO destrabó funcionalmente Cajas
+
+Durante 2F se usó parcialmente el framing "el backfill destraba Cajas". **La verificación
+read-only 2F-D1 lo corrigió** (clasificación **Categoría B**):
+```txt
+- Cajas NO consume UserPermission hoy. Más fuerte: Cajas está SCHEMA-ONLY.
+- No hay endpoints productivos de Cajas en src/ (los modelos existen solo en prisma/schema.prisma).
+- No hay UI/rutas productivas de Cajas.
+- Las keys caja.* aparecen solo en la infraestructura de permisos, seeds, docs y tests.
+- Los helpers loadUserWithUserPermissions / requireUserPermission / canPerformOperationalAction
+  existen, pero tienen 0 consumidores productivos.
+- Ejercitar esos helpers probaría la LIBRERÍA, no Cajas.
+```
+Por lo tanto: el backfill era **necesario** y dejó los datos listos, pero **no es suficiente**
+para declarar Cajas funcionalmente destrabado.
+
+**Frase canónica:** *"El gate de datos de permisos quedó levantado; el consumidor funcional de
+Cajas todavía no existe."*
+
+**Próximos pasos reales (frentes separados, sin decidir cuál va primero):**
+```txt
+1. DEFAULT_NEW_USER — enganchar applyDefaultPermissionsForUser en la creación de usuarios
+   (POST /api/owner/users, POST /api/admin/users), source = DEFAULT_NEW_USER.
+   Completa la simetría: existentes por backfill, nuevos por creación.
+2. Cajas funcional — construir/integrar endpoints + UI de Cajas que autoricen con
+   loadUserWithUserPermissions + requireUserPermission/canPerformOperationalAction.
+   Recién ahí los 15 grants tendrán consumidor funcional.
+```
 
 ---
 

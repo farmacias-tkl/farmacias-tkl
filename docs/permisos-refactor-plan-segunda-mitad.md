@@ -68,7 +68,7 @@ pantalla/endpoint que lea o escriba una tabla inexistente.
 | **2C** | Endpoints `UserPermission` (`grant`/`revoke`/`list`) + tests mockeados. Sin Neon. |
 | **2D** | UI de asignación de permisos en Usuarios, integrada a esos endpoints. Sin Neon real. |
 | **2E** | Gate Neon aditivo de `UserPermission` + primera verificación real `grant/list/revoke` end-to-end. |
-| **2F** | Defaults para usuarios nuevos + estrategia/backfill para existentes. **Gate de Cajas.** |
+| **2F** | Defaults para usuarios nuevos + estrategia/backfill para existentes. **Gate de DATOS de permisos** (no destraba Cajas por sí solo). |
 | **2G** | Quitar permisos de Puestos: modal + endpoints `positions/[id]/permissions/*`. |
 | **2H** | Desacoplar Call Center de `/owner/accesos`. |
 | **2I** | Dashboard Ejecutivo OWNER-only. Último, aislado, con tests/verificaciones antes y después. |
@@ -111,12 +111,17 @@ pantalla/endpoint que lea o escriba una tabla inexistente.
 6. **Riesgo:** aplicar algo no-aditivo (mitiga el gate de conteos del dry-run).
 7. **Merge a main:** habilita el merge de 2C/2D después de esta fase.
 
-### 2F — Defaults a nuevos + backfill a existentes (Gate de Cajas)
+### 2F — Defaults a nuevos + backfill a existentes (Gate de DATOS de permisos)
+> **Estado (2026-07-01):** **backfill de existentes APLICADO en prod** (batchId
+> `2f-default-backfill-20260701-0124`, 15/15; ver `current-known-issues.md` → "2F — Backfill de
+> permisos default"). **Pendiente:** DEFAULT_NEW_USER (defaults a usuarios nuevos).
+> **Corrección:** 2F es el **gate de DATOS de permisos**, NO el interruptor funcional de Cajas —
+> Cajas está schema-only y no consume `UserPermission` todavía (2F-D1, Categoría B).
 1. **Objetivo:** aplicar defaults de 1C al crear usuarios y backfillear/asignar permisos a los operativos existentes.
 2. **Precondición:** 2E (tabla real).
 3. **Neon:** **SÍ** — escritura controlada (apply-defaults/backfill), con dry-run de conteos y verificación.
 4. **Entrada:** 2E cerrada; defaults de 1C revisados; lista de usuarios operativos objetivo.
-5. **Salida:** usuarios nuevos nacen con defaults; operativos existentes con filas `UserPermission` efectivas; verificación de que `BRANCH_MANAGER` resuelven OWN_BRANCH y `SUPERVISOR` ALL_BRANCHES; **Cajas desbloqueable**.
+5. **Salida:** operativos existentes con filas `UserPermission` efectivas (hecho); usuarios nuevos nacen con defaults (pendiente, DEFAULT_NEW_USER); verificación de que `BRANCH_MANAGER` resuelven OWN_BRANCH y `SUPERVISOR` ALL_BRANCHES. **Deja los DATOS listos para Cajas; NO desbloquea Cajas por sí solo** (Cajas necesita endpoints/UI que consuman `UserPermission`).
 6. **Riesgo:** backfill incorrecto (scope equivocado, o `OWN_BRANCH` a usuario sin `branchId`) → re-aplica Regla 1 en el backfill.
 7. **Merge a main:** sí, una vez verificado.
 
@@ -154,7 +159,7 @@ pantalla/endpoint que lea o escriba una tabla inexistente.
 ## 5. Grafo de dependencias
 
 ```
-2C → 2D → 2E → 2F   (cadena UserPermission; 2F = gate de Cajas)
+2C → 2D → 2E → 2F   (cadena UserPermission; 2F = gate de DATOS de permisos, no destraba Cajas por sí solo)
 2G        (independiente; se ubica DESPUÉS de 2C–2F por orden, no por dependencia)
 2H        (independiente; NO toca Ejecutivo)
 2I        (último, aislado, verificación de data antes)
@@ -163,7 +168,10 @@ pantalla/endpoint que lea o escriba una tabla inexistente.
 - 2D crea UI integrada, sin uso real en prod.
 - 2E aplica schema a Neon y verifica el primer flujo real `grant/list/revoke`.
 - 2F depende de 2E (necesita tabla real para asignar/backfillear a existentes).
-- 2F es **prerequisito para reanudar Cajas**.
+- 2F es **prerequisito de DATOS para Cajas** (deja los grants listos), pero **no** el interruptor
+  funcional: Cajas requiere una fase posterior de endpoints/UI que consuman `UserPermission`
+  (`loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`).
+  Hoy Cajas es schema-only (2F-D1, Categoría B).
 - 2G y 2H son independientes entre sí y de la cadena; 2H no debe tocar el Dashboard Ejecutivo.
 - 2I va último, con verificación de data justo antes.
 
@@ -270,6 +278,9 @@ tsc OK). **2F queda habilitada como próximo paso, pero aún NO iniciada** (tien
 ### Próximo orden recomendado
 1. **Drift de ramas/schema:** **RESUELTA**.
 2. **2C-C** (política de `UserPermission` sobre usuarios inactivos): **RESUELTA EN PRODUCCIÓN**.
-3. **Próximo: 2F** (defaults a usuarios nuevos + backfill a operativos existentes = gate de Cajas), con su propio gate. **Aún no iniciada.**
-4. Feature flag / UI controlada.
-5. Retiro gradual de `PositionPermission`, si aplica.
+3. **2F — backfill a operativos existentes:** **APLICADO EN PRODUCCIÓN (2026-07-01)** (batchId `2f-default-backfill-20260701-0124`, 15/15). Gate de **datos** de permisos.
+4. **Próximo (frentes separados, sin decidir cuál primero):**
+   - **DEFAULT_NEW_USER** — enganchar `applyDefaultPermissionsForUser` en creación de usuarios (`POST /api/owner/users`, `POST /api/admin/users`), `source = DEFAULT_NEW_USER`. Completa simetría existentes/nuevos.
+   - **Cajas funcional** — construir/integrar endpoints + UI de Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`. Recién ahí los 15 grants tienen consumidor funcional.
+5. Feature flag / UI controlada.
+6. Retiro gradual de `PositionPermission`, si aplica.
