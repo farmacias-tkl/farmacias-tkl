@@ -197,6 +197,62 @@ async function main() {
     assert("SCOPE_CHANGED → audit con oldScope/newScope", committed.audits[0].action === "USER_PERMISSION_SCOPE_CHANGED" && committed.audits[0].detail.oldScope === "OWN_BRANCH" && committed.audits[0].detail.newScope === "ALL_BRANCHES");
   }
 
+  console.log("\n=== GRANT 2F: source / batchId (origen del grant) ===");
+  {
+    // T1 — CREATE sin source → normaliza a MANUAL / batchId null (retrocompat).
+    const { client, calls, committed } = makeClient({ target: bm, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", client });
+    assert("T1 CREATE sin source → 200 GRANTED", res.status === 200 && (res.body as any).change === "GRANTED");
+    assert("T1 create.data.source === MANUAL", committed.ups[0].args.data.source === "MANUAL");
+    assert("T1 create.data.batchId === null", committed.ups[0].args.data.batchId === null);
+    assert("T1 audit.detail.source === MANUAL", committed.audits[0].detail.source === "MANUAL");
+    assert("T1 audit.detail.batchId === null", committed.audits[0].detail.batchId === null);
+    assert("T1 sin regresión de escrituras (1 create + 1 audit)", calls.upCreate === 1 && committed.audits.length === 1);
+  }
+  {
+    // T2 — CREATE DEFAULT_BACKFILL + batchId → persiste origen en fila y audit.
+    const BATCH = "2f-c1-test-backfill-001";
+    const { client, committed } = makeClient({ target: bm, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", source: "DEFAULT_BACKFILL", batchId: BATCH, client });
+    assert("T2 CREATE backfill → 200 GRANTED", res.status === 200 && (res.body as any).change === "GRANTED");
+    assert("T2 create.data.source === DEFAULT_BACKFILL", committed.ups[0].args.data.source === "DEFAULT_BACKFILL");
+    assert("T2 create.data.batchId === batchId", committed.ups[0].args.data.batchId === BATCH);
+    assert("T2 audit.detail.source === DEFAULT_BACKFILL", committed.audits[0].detail.source === "DEFAULT_BACKFILL");
+    assert("T2 audit.detail.batchId === batchId", committed.audits[0].detail.batchId === BATCH);
+  }
+  {
+    // T3 — DEFAULT_BACKFILL sin batchId → 400 ANTES de leer estado (cero writes, sin tx).
+    const { client, calls } = makeClient({ target: bm, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", source: "DEFAULT_BACKFILL", client });
+    assert("T3 backfill sin batchId → 400 + mensaje", res.status === 400 && /batchId/i.test((res.body as any).error));
+    assert("T3 backfill sin batchId → 0 escrituras + sin tx", noWrites(calls) && calls.txOpened === 0);
+  }
+  {
+    // T3b — batchId vacío/whitespace → tratado como ausente → 400.
+    const { client, calls } = makeClient({ target: bm, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", source: "DEFAULT_BACKFILL", batchId: "   ", client });
+    assert("T3b backfill batchId vacío → 400 + 0 escrituras", res.status === 400 && noWrites(calls) && calls.txOpened === 0);
+  }
+  {
+    // T4 — SCOPE_CHANGED preserva source/batchId de la fila (NO en update.data); audita la operación.
+    const BATCH = "2f-c1-test-backfill-002";
+    const { client, calls, committed } = makeClient({ target: bm, permission: permNormal, existing: { id: "up1", scope: "OWN_BRANCH", permission: { key: NORMAL } } });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", source: "DEFAULT_BACKFILL", batchId: BATCH, client });
+    assert("T4 → 200 SCOPE_CHANGED", res.status === 200 && (res.body as any).change === "SCOPE_CHANGED");
+    assert("T4 update.data incluye scope + grantedByUserId", committed.ups[0].args.data.scope === "ALL_BRANCHES" && committed.ups[0].args.data.grantedByUserId === "owner");
+    assert("T4 update.data NO incluye source", committed.ups[0].args.data.source === undefined);
+    assert("T4 update.data NO incluye batchId", committed.ups[0].args.data.batchId === undefined);
+    assert("T4 audit.detail.source/batchId = origen de la operación", committed.audits[0].detail.source === "DEFAULT_BACKFILL" && committed.audits[0].detail.batchId === BATCH);
+    assert("T4 audit.detail.oldScope/newScope intactos", committed.audits[0].detail.oldScope === "OWN_BRANCH" && committed.audits[0].detail.newScope === "ALL_BRANCHES" && calls.upUpdate === 1);
+  }
+  {
+    // T5 — NOOP no toca source/batchId aunque venga origen (inerte; D5 ya pasó por tener batchId).
+    const { client, calls, committed } = makeClient({ target: bm, permission: permNormal, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: NORMAL } } });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", source: "DEFAULT_BACKFILL", batchId: "2f-c1-test-backfill-003", client });
+    assert("T5 NOOP → 200 NOOP", res.status === 200 && (res.body as any).change === "NOOP");
+    assert("T5 NOOP → 0 writes, 0 audit, 0 tx", noWrites(calls) && calls.txOpened === 0 && committed.ups.length === 0);
+  }
+
   // ======================= REVOKE =======================
   console.log("\n=== REVOKE ===");
   {
