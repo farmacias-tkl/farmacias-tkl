@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireCan, can } from "@/lib/permissions";
+import { applyNewUserDefaults } from "@/lib/permissions/apply-new-user-defaults";
 import { generatePassword } from "@/lib/passwords";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -141,10 +142,32 @@ export async function POST(req: NextRequest) {
     },
   }).catch(() => {});
 
+  // Defaults por rol para el usuario nuevo (2F, DEFAULT_NEW_USER). Paso ADITIVO best-effort:
+  // el helper es TOTAL (nunca lanza), así que un fallo de defaults NO revierte el alta ni la
+  // convierte en 500. Los grants (si el rol tiene defaults) los crea el servicio real.
+  const ip = req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? null;
+  const userAgent = req.headers.get("user-agent") ?? null;
+  const defaults = await applyNewUserDefaults({
+    actorId: session!.user.id,
+    targetUser: { id: user.id, role: user.role, branchId: user.branch?.id ?? null },
+    client: prisma,
+    ip,
+    userAgent,
+  });
+
+  const responseBody: {
+    data: typeof user;
+    initialPassword: string;
+    defaults?: Omit<typeof defaults, "warning">;
+    defaultsWarning?: { message: string; failed: number };
+  } = { data: user, initialPassword: plainPassword };
+  if (defaults.totalDefaults > 0 || defaults.warning) {
+    const { warning, ...summary } = defaults;
+    responseBody.defaults = summary;
+    if (warning) responseBody.defaultsWarning = warning;
+  }
+
   // Devolver contraseña en claro UNA SOLA VEZ
-  return NextResponse.json({
-    data: user,
-    initialPassword: plainPassword,
-  }, { status: 201 });
+  return NextResponse.json(responseBody, { status: 201 });
 }
 
