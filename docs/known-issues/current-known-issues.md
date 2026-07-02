@@ -1104,14 +1104,81 @@ para declarar Cajas funcionalmente destrabado.
 **Frase canónica:** *"El gate de datos de permisos quedó levantado; el consumidor funcional de
 Cajas todavía no existe."*
 
-**Próximos pasos reales (frentes separados, sin decidir cuál va primero):**
+**Próximos pasos reales (actualizado 2026-07-02):**
 ```txt
-1. DEFAULT_NEW_USER — enganchar applyDefaultPermissionsForUser en la creación de usuarios
-   (POST /api/owner/users, POST /api/admin/users), source = DEFAULT_NEW_USER.
-   Completa la simetría: existentes por backfill, nuevos por creación.
-2. Cajas funcional — construir/integrar endpoints + UI de Cajas que autoricen con
-   loadUserWithUserPermissions + requireUserPermission/canPerformOperationalAction.
+1. DEFAULT_NEW_USER — HECHO (ver entrada de cierre abajo). Completa la simetría:
+   existentes por backfill, nuevos por creación.
+2. Cajas funcional — PENDIENTE. Construir/integrar endpoints + UI de Cajas que autoricen
+   con loadUserWithUserPermissions + requireUserPermission/canPerformOperationalAction.
    Recién ahí los 15 grants tendrán consumidor funcional.
+```
+
+---
+
+### ✅ 2F — DEFAULT_NEW_USER validado en producción y cierre completo de 2F (2026-07-02)
+
+**Implementación.**
+```txt
+- Helper applyNewUserDefaults (src/lib/permissions/apply-new-user-defaults.ts).
+- Helper TOTAL: nunca lanza hacia el endpoint (ante actor ausente/inactivo, throw de carga
+  o del motor → devuelve ok=false + warning; un alta ya creada nunca se vuelve 500).
+- Wiring ADITIVO en: POST /api/owner/users y POST /api/admin/users.
+- Feature commit 06fec37 · merge commit cb7c4ab · Vercel Production Ready.
+```
+
+**Diseño operativo.**
+```txt
+- best-effort / híbrido; sin rollback del usuario si fallan defaults.
+- source = DEFAULT_NEW_USER; batchId = null/omitido.
+- actor cargado desde DB (el JWT no trae `active`, y el servicio 2C-C lo exige).
+- ip/userAgent propagados al motor cuando vienen del request.
+- response agrega defaults/defaultsWarning SOLO si corresponde.
+- roles sin defaults → respuesta idéntica a antes: { data, initialPassword }.
+```
+
+**Validación real en producción (detectada por E0, read-only).**
+```txt
+DEFAULT_NEW_USER ya se ejerció en producción sobre un alta REAL (no de prueba):
+- usuario real BRANCH_MANAGER `cmr31nwf…`, sucursal San Agustín, creado vía admin/users;
+- actor ADMIN;
+- recibió exactamente 3 grants: caja.view, caja.create_close, caja.attach_doc;
+- scope = OWN_BRANCH; source = DEFAULT_NEW_USER; batchId = null;
+- AuditLog USER_PERMISSION_GRANTED +3, con ip/userAgent PRESENTES (redactados acá) —
+  el marcador observable que distingue DEFAULT_NEW_USER del backfill (que tenía ip/ua null);
+- securityUserCreated = 0, consistente con el camino admin/users (no emite SecurityEvent).
+```
+*(Datos sensibles redactados a propósito: no se registran IP/userAgent completos, email real,
+ni userId/actorId completos. El objetivo es dejar constancia de que la trazabilidad funciona.)*
+
+**Decisión sobre E1.** No se creó usuario de prueba adicional; **E1 no se ejecutó**; no se
+limpió nada. Motivo: el alta real ya verificó end-to-end el flujo que E1 iba a probar; crear
+un usuario de prueba agregaría datos reales + limpieza sin beneficio.
+**Ese usuario (`cmr31nwf…`) es producción real y NO debe tocarse ni limpiarse como si fuera un
+usuario de prueba.**
+
+**Matiz de cobertura.** Validado end-to-end en producción: **camino `admin/users`**.
+`owner/users` **comparte el mismo helper** `applyNewUserDefaults` (probado como total con tests)
+y su wiring fue aditivo/revisado por diff, pero **todavía no fue ejercido por un alta real
+observada**. No bloquea el cierre de 2F; se ejercerá naturalmente con la primera alta vía
+`owner/users`.
+
+**Cierre completo de 2F (capacidad de permisos).**
+```txt
+- Usuarios existentes: DEFAULT_BACKFILL aplicado en prod (batchId 2f-default-backfill-20260701-0124, 15/15).
+- Usuarios nuevos:      DEFAULT_NEW_USER implementado, deployado y validado en prod vía alta real.
+- Mecanismo único:      getDefaultPermissionsForRole → applyDefaultPermissionsForUser → grantUserPermissionToTarget.
+- Orígenes diferenciados: DEFAULT_BACKFILL (existentes) · DEFAULT_NEW_USER (nuevos).
+```
+Esto **completa la capacidad de permisos**. **Cajas sigue sin consumidor funcional de
+`UserPermission`** (schema-only). Frase canónica vigente: *"El gate de datos de permisos quedó
+levantado; el consumidor funcional de Cajas todavía no existe."*
+
+**Pendiente menor — labels visibles de roles (solo display/UI):**
+```txt
+- BRANCH_MANAGER → Encargado/a
+- SUPERVISOR     → Supervisor/a
+Alcance: SOLO display/UI. NO crear roles nuevos, NO tocar enum UserRole, NO Prisma/schema,
+NO permisos, NO role-defaults, NO DEFAULT_NEW_USER, NO Cajas.
 ```
 
 ---
