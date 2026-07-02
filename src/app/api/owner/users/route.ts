@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
   const data = parsed.data;
 
   if (data.role === "BRANCH_MANAGER" && !data.branchId) {
-    return NextResponse.json({ error: "El rol Encargada requiere una sucursal asignada" }, { status: 400 });
+    return NextResponse.json({ error: "El rol Encargado/a requiere una sucursal asignada" }, { status: 400 });
   }
 
   const existing = await prisma.user.findUnique({ where: { email: data.email } });

@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
   // BRANCH_MANAGER requiere sucursal
   if (data.role === "BRANCH_MANAGER" && !data.branchId) {
     return NextResponse.json(
-      { error: "El rol Encargada requiere una sucursal asignada" },
+      { error: "El rol Encargado/a requiere una sucursal asignada" },
       { status: 400 }
     );
   }

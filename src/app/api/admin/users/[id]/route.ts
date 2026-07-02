@@ -106,7 +106,7 @@ export async function PATCH(
   const newBranch = "branchId" in parsed.data ? parsed.data.branchId : user.branchId;
   if (newRole === "BRANCH_MANAGER" && !newBranch) {
     return NextResponse.json(
-      { error: "El rol Encargada requiere una sucursal asignada" },
+      { error: "El rol Encargado/a requiere una sucursal asignada" },
       { status: 400 }
     );
   }
