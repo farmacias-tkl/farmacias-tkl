@@ -71,7 +71,7 @@ export function EditarUsuarioClient({ userId, currentUserId }: { userId: string;
     setError("");
     if (!name.trim() || name.trim().length < 2) { setError("Nombre obligatorio"); return; }
     if (!email.trim()) { setError("Email obligatorio"); return; }
-    if (requiresBranch && !branchId) { setError("Encargada requiere sucursal"); return; }
+    if (requiresBranch && !branchId) { setError("Encargado/a requiere sucursal"); return; }
 
     setSubmitting(true);
     const res = await fetch(`/api/owner/users/${userId}`, {

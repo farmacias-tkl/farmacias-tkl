@@ -234,11 +234,11 @@ export function requireAuth(
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
-  SUPERVISOR:     "Supervisor",
-  BRANCH_MANAGER: "Encargada",
+  SUPERVISOR:     "Supervisor/a",
+  BRANCH_MANAGER: "Encargado/a",
   HR:             "RRHH",
   MAINTENANCE:    "Mantenimiento",
-  OWNER:          "Direccion",
+  OWNER:          "Dirección",
   ADMIN:          "Administrador",
 };
 

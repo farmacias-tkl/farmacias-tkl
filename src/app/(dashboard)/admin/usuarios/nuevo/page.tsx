@@ -173,7 +173,7 @@ export default function NuevoUsuarioPage() {
                 {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
               {needsBranch && (
-                <p className="text-xs text-amber-600 mt-0.5">Obligatorio para el rol Encargada.</p>
+                <p className="text-xs text-amber-600 mt-0.5">Obligatorio para el rol Encargado/a.</p>
               )}
             </div>
 
