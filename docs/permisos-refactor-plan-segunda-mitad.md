@@ -112,16 +112,17 @@ pantalla/endpoint que lea o escriba una tabla inexistente.
 7. **Merge a main:** habilita el merge de 2C/2D después de esta fase.
 
 ### 2F — Defaults a nuevos + backfill a existentes (Gate de DATOS de permisos)
-> **Estado (2026-07-01):** **backfill de existentes APLICADO en prod** (batchId
-> `2f-default-backfill-20260701-0124`, 15/15; ver `current-known-issues.md` → "2F — Backfill de
-> permisos default"). **Pendiente:** DEFAULT_NEW_USER (defaults a usuarios nuevos).
+> **Estado (2026-07-02): COMPLETA.** DEFAULT_BACKFILL aplicado y verificado para existentes
+> (batchId `2f-default-backfill-20260701-0124`, 15/15). DEFAULT_NEW_USER implementado, deployado
+> (merge `cb7c4ab`) y **validado en producción vía alta real** (ver `current-known-issues.md` →
+> "2F — DEFAULT_NEW_USER validado en producción y cierre completo de 2F").
 > **Corrección:** 2F es el **gate de DATOS de permisos**, NO el interruptor funcional de Cajas —
 > Cajas está schema-only y no consume `UserPermission` todavía (2F-D1, Categoría B).
 1. **Objetivo:** aplicar defaults de 1C al crear usuarios y backfillear/asignar permisos a los operativos existentes.
 2. **Precondición:** 2E (tabla real).
 3. **Neon:** **SÍ** — escritura controlada (apply-defaults/backfill), con dry-run de conteos y verificación.
 4. **Entrada:** 2E cerrada; defaults de 1C revisados; lista de usuarios operativos objetivo.
-5. **Salida:** operativos existentes con filas `UserPermission` efectivas (hecho); usuarios nuevos nacen con defaults (pendiente, DEFAULT_NEW_USER); verificación de que `BRANCH_MANAGER` resuelven OWN_BRANCH y `SUPERVISOR` ALL_BRANCHES. **Deja los DATOS listos para Cajas; NO desbloquea Cajas por sí solo** (Cajas necesita endpoints/UI que consuman `UserPermission`).
+5. **Salida:** operativos existentes con filas `UserPermission` efectivas (hecho, DEFAULT_BACKFILL); usuarios nuevos nacen con defaults (hecho, DEFAULT_NEW_USER — validado en prod vía alta real); verificación de que `BRANCH_MANAGER` resuelven OWN_BRANCH y `SUPERVISOR` ALL_BRANCHES. **Deja los DATOS listos para Cajas; NO desbloquea Cajas por sí solo** (Cajas necesita endpoints/UI que consuman `UserPermission`).
 6. **Riesgo:** backfill incorrecto (scope equivocado, o `OWN_BRANCH` a usuario sin `branchId`) → re-aplica Regla 1 en el backfill.
 7. **Merge a main:** sí, una vez verificado.
 
@@ -278,9 +279,8 @@ tsc OK). **2F queda habilitada como próximo paso, pero aún NO iniciada** (tien
 ### Próximo orden recomendado
 1. **Drift de ramas/schema:** **RESUELTA**.
 2. **2C-C** (política de `UserPermission` sobre usuarios inactivos): **RESUELTA EN PRODUCCIÓN**.
-3. **2F — backfill a operativos existentes:** **APLICADO EN PRODUCCIÓN (2026-07-01)** (batchId `2f-default-backfill-20260701-0124`, 15/15). Gate de **datos** de permisos.
-4. **Próximo (frentes separados, sin decidir cuál primero):**
-   - **DEFAULT_NEW_USER** — enganchar `applyDefaultPermissionsForUser` en creación de usuarios (`POST /api/owner/users`, `POST /api/admin/users`), `source = DEFAULT_NEW_USER`. Completa simetría existentes/nuevos.
-   - **Cajas funcional** — construir/integrar endpoints + UI de Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`. Recién ahí los 15 grants tienen consumidor funcional.
-5. Feature flag / UI controlada.
-6. Retiro gradual de `PositionPermission`, si aplica.
+3. **2F — COMPLETA.** DEFAULT_BACKFILL aplicado y verificado para existentes (batchId `2f-default-backfill-20260701-0124`, 15/15). DEFAULT_NEW_USER implementado, deployado y **validado en producción vía alta real** (merge `cb7c4ab`). Gate de **datos** de permisos.
+4. **Próximo frente mayor: Cajas funcional** — construir/integrar endpoints + UI de Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`. Recién ahí los grants tienen consumidor funcional. **Cajas sigue schema-only / sin consumidor funcional de `UserPermission`.**
+5. **Pendiente menor separado — labels visibles de roles (solo display):** `BRANCH_MANAGER → Encargado/a`, `SUPERVISOR → Supervisor/a`. No toca enum/schema/permisos.
+6. Feature flag / UI controlada.
+7. Retiro gradual de `PositionPermission`, si aplica.
