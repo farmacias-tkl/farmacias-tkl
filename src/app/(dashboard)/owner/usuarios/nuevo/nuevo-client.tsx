@@ -35,7 +35,7 @@ export function NuevoUsuarioClient() {
     setError("");
     if (!name.trim() || name.trim().length < 2) { setError("Nombre obligatorio (min 2 caracteres)"); return; }
     if (!email.trim()) { setError("Email obligatorio"); return; }
-    if (requiresBranch && !branchId) { setError("Encargada requiere sucursal"); return; }
+    if (requiresBranch && !branchId) { setError("Encargado/a requiere sucursal"); return; }
 
     setSubmitting(true);
     const res = await fetch("/api/owner/users", {
@@ -139,7 +139,7 @@ export function NuevoUsuarioClient() {
             <option value="">Sin sucursal</option>
             {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
-          {requiresBranch && <p className="text-xs text-gray-500 mt-1">Encargada requiere sucursal asignada.</p>}
+          {requiresBranch && <p className="text-xs text-gray-500 mt-1">Encargado/a requiere sucursal asignada.</p>}
         </div>
       </div>
 
