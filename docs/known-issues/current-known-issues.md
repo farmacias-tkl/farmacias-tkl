@@ -1173,13 +1173,58 @@ Esto **completa la capacidad de permisos**. **Cajas sigue sin consumidor funcion
 `UserPermission`** (schema-only). Frase canónica vigente: *"El gate de datos de permisos quedó
 levantado; el consumidor funcional de Cajas todavía no existe."*
 
-**Pendiente menor — labels visibles de roles (solo display/UI):**
+**Labels visibles de roles — ✅ CERRADO (merge `ffd266f`).**
 ```txt
-- BRANCH_MANAGER → Encargado/a
-- SUPERVISOR     → Supervisor/a
-Alcance: SOLO display/UI. NO crear roles nuevos, NO tocar enum UserRole, NO Prisma/schema,
-NO permisos, NO role-defaults, NO DEFAULT_NEW_USER, NO Cajas.
+- ROLE_LABELS.BRANCH_MANAGER → Encargado/a
+- ROLE_LABELS.SUPERVISOR     → Supervisor/a
+- ROLE_LABELS.OWNER          → Dirección
+- Copys client + backend alineados en alta y edición (owner y admin).
+- rg "Encargada" src = cero al cierre de labels (ffd266f).
 ```
+Fue **display/copy only**: no enum, no schema, no permisos, no role-defaults, no DEFAULT_NEW_USER, no Cajas.
+
+---
+
+### ✅ 2G — Desacople funcional de permisos legacy de Puestos (2026-07-03)
+
+**Qué se hizo.**
+```txt
+- /puestos dejó de mostrar/gestionar permisos por puesto.
+- Se retiró la columna PERMISOS y el badge "0 permisos".
+- PermissionsModal quedó DESMONTADO desde /puestos (no borrado).
+- Endpoints positions/[id]/permissions/* DESHABILITADOS con 410 Gone:
+  GET/POST/DELETE devuelven 410 DESPUÉS de preservar el guard managePositionPermissions.
+```
+Mensaje 410 exacto: *"Los permisos por Puesto están deshabilitados; gestionar permisos desde Usuarios/Roles."*
+
+**Por qué.** `PositionPermission` era **escribible-pero-ilegible**: el modal escribía (upsert/delete),
+pero el helper de lectura tenía **0 importers productivos** y ningún flujo lo leía para autorizar
+→ la pantalla permitía crear **datos muertos**.
+
+**Dato de producción.** `PositionPermission count = 0` al momento del desacople (verificado
+read-only con host-check) → **no hizo falta cleanup de datos ni migración**.
+
+**Qué NO se tocó.** schema PositionPermission · DB · catálogo de Puestos · `/api/positions`
+principal · `/api/positions/[id]` principal · UserPermission · role-defaults · Cajas.
+
+**Valor operativo de Puestos (se queda).** catálogo: cobertura, alcance por sucursal, notas,
+puestos críticos, rotativas, estado.
+
+**Commits.** feature `bf2e89d` · merge `decfd21` · Vercel Ready · verificación visual OK.
+
+**Residuales de cleanup posterior (no bloqueantes).**
+```txt
+- src/app/(dashboard)/puestos/permissions-modal.tsx queda huérfano/desmontado.
+- src/lib/permissions/position-permissions.ts tiene 0 importers productivos.
+- _count.permissions puede seguir en la respuesta de /api/positions como campo muerto/no renderizado.
+- Retiro eventual de PositionPermission del schema = último ítem del plan, con gate Neon propio (count=0).
+```
+
+**Gap posterior a 2G.** Se retiró la **fuente FALSA** de permisos (por Puesto), pero la
+**fuente VERDADERA todavía no es visible/gestionable**: `UserPermission` desde Usuarios/Roles.
+Este frente **NO debe llamarse 2H** (2H ya existe en el plan = desacoplar Call Center de
+`/owner/accesos`; 2I = Ejecutivo OWNER-only). Nombre provisional: **UI-UserPermission / 2D-bis**,
+hasta que el relevamiento confirme si es completar/exponer la UI construida en 2D.
 
 ---
 
