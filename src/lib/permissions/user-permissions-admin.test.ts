@@ -336,6 +336,34 @@ async function main() {
     assert("List mapea key/scope/permissionActive", data[0].key === NORMAL && data[0].scope === "OWN_BRANCH" && data[1].permissionActive === false);
   }
   {
+    // 2D-bis: el list DEBE exponer source y batchId por grant (los 3 orígenes; batchId string|null).
+    const rows = [{
+      permissionId: "p-view", scope: "ALL_BRANCHES" as PermissionScope, grantedByUserId: "owner",
+      source: "MANUAL", batchId: null,
+      createdAt: new Date(0), updatedAt: new Date(0),
+      permission: { key: NORMAL, module: "caja", description: "Ver", active: true },
+    }, {
+      permissionId: "p-create", scope: "OWN_BRANCH" as PermissionScope, grantedByUserId: "owner",
+      source: "DEFAULT_BACKFILL", batchId: "2f-default-backfill-20260701-0124",
+      createdAt: new Date(0), updatedAt: new Date(0),
+      permission: { key: "caja.create_close", module: "caja", description: "Crear cierre", active: true },
+    }, {
+      permissionId: "p-attach", scope: "OWN_BRANCH" as PermissionScope, grantedByUserId: "admin",
+      source: "DEFAULT_NEW_USER", batchId: null,
+      createdAt: new Date(0), updatedAt: new Date(0),
+      permission: { key: "caja.attach_doc", module: "caja", description: "Adjuntar", active: true },
+    }];
+    const { client } = makeClient({ target: bm, listRows: rows });
+    const res = await listUserPermissionsForTarget({ actor: ownerA, targetUserId: bm.id, client });
+    const data = (res.body as any)?.data;
+    assert("List expone source MANUAL", data[0].source === "MANUAL");
+    assert("List expone batchId null (MANUAL)", data[0].batchId === null);
+    assert("List expone source DEFAULT_BACKFILL", data[1].source === "DEFAULT_BACKFILL");
+    assert("List expone batchId string (DEFAULT_BACKFILL)", data[1].batchId === "2f-default-backfill-20260701-0124");
+    assert("List expone source DEFAULT_NEW_USER", data[2].source === "DEFAULT_NEW_USER");
+    assert("List expone batchId null (DEFAULT_NEW_USER)", data[2].batchId === null);
+  }
+  {
     const { client, calls } = makeClient({ target: bm, listRows: [] });
     const res = await listUserPermissionsForTarget({ actor: supervisorA, targetUserId: bm.id, client });
     assert("List actor sin permiso (SUPERVISOR) → 403 + sin tx", res.status === 403 && calls.txOpened === 0);
