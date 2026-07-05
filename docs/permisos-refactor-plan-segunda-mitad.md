@@ -127,13 +127,18 @@ pantalla/endpoint que lea o escriba una tabla inexistente.
 7. **Merge a main:** sí, una vez verificado.
 
 ### 2G — Quitar permisos de Puestos
+> **Estado (2026-07-03): DESACOPLE FUNCIONAL HECHO en main/prod** (merge `decfd21`, feature
+> `bf2e89d`; Vercel Ready + verificación visual OK). `/puestos` ya no gestiona permisos por
+> puesto (columna PERMISOS + badge + modal retirados); endpoints `positions/[id]/permissions/*`
+> → **410 Gone** (guard preservado); schema/DB **intactos**; `PositionPermission count = 0` al
+> momento del desacople. **Pendiente solo cleanup opcional** (ver known-issues → "2G — Desacople…").
 1. **Objetivo:** remover/ocultar `permissions-modal.tsx` y endpoints `positions/[id]/permissions/*`; Puestos vuelve a ser solo RRHH/organigrama.
 2. **Precondición:** ninguna técnica (inerte), pero se hace **después** de 2C–2F para no mezclar remoción con introducción.
 3. **Neon:** NO (data `PositionPermission` = 0; opcional limpiar después, fase aparte).
 4. **Entrada:** confirmar 0 consumers runtime (ya confirmado en 2A) y 0 asignaciones.
-5. **Salida:** Puestos sin gestión de permisos; sin endpoints de PositionPermission; `position-permissions.ts` marcado deprecado (su borrado y el del modelo es fase separada explícita, no acá).
-6. **Riesgo:** romper la pantalla de Puestos al sacar el botón/modal.
-7. **Merge a main:** sí (independiente).
+5. **Salida:** Puestos sin gestión de permisos; endpoints legacy en 410; `position-permissions.ts` + `permissions-modal.tsx` quedan como residual de cleanup (su borrado y el del modelo es fase separada explícita, no acá).
+6. **Riesgo:** romper la pantalla de Puestos al sacar el botón/modal. *(Mitigado: catálogo operativo intacto, build/tsc verdes.)*
+7. **Merge a main:** hecho (`decfd21`).
 
 ### 2H — Desacoplar Call Center de `/owner/accesos`
 1. **Objetivo:** desacople de superficie/perímetro: sacar Call Center de `/owner/accesos` sin tocar el Dashboard Ejecutivo y sin cambiar Call Center funcional.
@@ -280,7 +285,26 @@ tsc OK). **2F queda habilitada como próximo paso, pero aún NO iniciada** (tien
 1. **Drift de ramas/schema:** **RESUELTA**.
 2. **2C-C** (política de `UserPermission` sobre usuarios inactivos): **RESUELTA EN PRODUCCIÓN**.
 3. **2F — COMPLETA.** DEFAULT_BACKFILL aplicado y verificado para existentes (batchId `2f-default-backfill-20260701-0124`, 15/15). DEFAULT_NEW_USER implementado, deployado y **validado en producción vía alta real** (merge `cb7c4ab`). Gate de **datos** de permisos.
-4. **Próximo frente mayor: Cajas funcional** — construir/integrar endpoints + UI de Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`. Recién ahí los grants tienen consumidor funcional. **Cajas sigue schema-only / sin consumidor funcional de `UserPermission`.**
-5. **Pendiente menor separado — labels visibles de roles (solo display):** `BRANCH_MANAGER → Encargado/a`, `SUPERVISOR → Supervisor/a`. No toca enum/schema/permisos.
-6. Feature flag / UI controlada.
-7. Retiro gradual de `PositionPermission`, si aplica.
+4. **Labels visibles de roles — CERRADO** (merge `ffd266f`): BRANCH_MANAGER → Encargado/a, SUPERVISOR → Supervisor/a, OWNER → Dirección. Display/copy only.
+5. **2G — desacople de permisos legacy en Puestos: HECHO** (merge `decfd21`). `/puestos` sin gestión de permisos; endpoints legacy → 410; schema/DB intactos. Pendiente solo cleanup opcional.
+
+**Reorden real (deliberado).** Tras cerrar 2F, en vez de saltar directo a Cajas funcional se
+priorizó: (a) **labels visibles** y (b) **2G**, para **cerrar la ambigüedad visual de permisos**
+y **quitar la superficie legacy** que permitía crear datos muertos, antes de construir Cajas.
+
+**Próximo frente recomendado: UI-UserPermission / 2D-bis** — relevar y **exponer/completar la UI
+de gestión de `UserPermission`** en Usuarios/Roles. Motivo: Puestos ya no gestiona permisos (2G),
+pero Usuarios/Roles todavía no muestra claramente la UI para otorgar/revocar `UserPermission`.
+> **No usar "2H"/"2I"** para este frente: **2H ya está ocupado** (desacoplar Call Center de
+> `/owner/accesos`) y **2I** (Dashboard Ejecutivo OWNER-only). De ahí el nombre provisional 2D-bis.
+>
+> **Hipótesis para ese relevamiento (NO validada acá):** 2D habría construido UI de asignación de
+> permisos en Usuarios integrada a `/api/users/[id]/permissions`. Verificar dónde quedó: si existe
+> y está oculta, detrás de feature flag, vive en `/owner/accesos`, fue mergeada pero no enlazada, o
+> quedó incompleta.
+
+**Después de UI-UserPermission / 2D-bis: Cajas funcional** — construir/integrar endpoints + UI de
+Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`.
+Recién ahí los grants tienen consumidor funcional. **Cajas sigue schema-only.**
+
+Luego: Feature flag / UI controlada · Retiro gradual de `PositionPermission` (con gate Neon propio, count=0).
