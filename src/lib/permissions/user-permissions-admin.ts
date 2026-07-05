@@ -62,6 +62,8 @@ interface UserPermissionListRow {
   permissionId: string;
   scope: PermissionScope;
   grantedByUserId: string | null;
+  source: UserPermissionSource;
+  batchId: string | null;
   createdAt: Date;
   updatedAt: Date;
   permission: { key: string; module: string; description: string; active: boolean };
@@ -178,6 +180,8 @@ export async function listUserPermissionsForTarget(args: ListArgs): Promise<User
         description: r.permission.description,
         permissionActive: r.permission.active, // NO se filtra; se reporta
         scope: r.scope,
+        source: r.source,      // 2D-bis: origen del grant (MANUAL / DEFAULT_BACKFILL / DEFAULT_NEW_USER)
+        batchId: r.batchId,    // 2D-bis: corrida de backfill (o null); no se muestra como badge
         grantedByUserId: r.grantedByUserId,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,

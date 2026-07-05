@@ -42,6 +42,7 @@ interface CatalogGroup {
   module: string;
   permissions: CatalogPerm[];
 }
+type GrantSource = "MANUAL" | "DEFAULT_BACKFILL" | "DEFAULT_NEW_USER";
 interface GrantRow {
   permissionId: string;
   key: string;
@@ -49,6 +50,8 @@ interface GrantRow {
   description: string;
   permissionActive: boolean;
   scope: Scope;
+  source: GrantSource;
+  batchId: string | null; // 2D-bis: trazabilidad; no se renderiza como badge
   grantedByUserId: string | null;
 }
 
@@ -56,6 +59,25 @@ const SCOPE_LABEL: Record<Scope, string> = {
   OWN_BRANCH: "Sucursal propia",
   ALL_BRANCHES: "Todas las sucursales",
 };
+
+/** Badge de ORIGEN del grant (2D-bis): distingue Manual vs Default (backfill/alta nueva). */
+function OriginBadge({ source }: { source: GrantSource }) {
+  if (source === "MANUAL") {
+    return (
+      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+        Manual
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700"
+      title="Permiso asignado automáticamente por rol"
+    >
+      Default
+    </span>
+  );
+}
 
 export function UserPermissionsPanel(props: UserPermissionsPanelProps) {
   const { actorContext, actorUserId, targetUserId, targetBranchId, targetRole, targetActive } = props;
@@ -226,6 +248,7 @@ export function UserPermissionsPanel(props: UserPermissionsPanelProps) {
                             crítico
                           </span>
                         )}
+                        {g && <OriginBadge source={g.source} />}
                       </p>
                       <p className="text-[11px] text-gray-400 font-mono">
                         {p.key}{g ? ` · asignado (${SCOPE_LABEL[g.scope]})` : ""}
@@ -293,6 +316,7 @@ export function UserPermissionsPanel(props: UserPermissionsPanelProps) {
                             permiso inactivo
                           </span>
                         )}
+                        <OriginBadge source={g.source} />
                       </p>
                       <p className="text-[11px] text-gray-400 font-mono">
                         {g.key} · {g.module} · {SCOPE_LABEL[g.scope]}
