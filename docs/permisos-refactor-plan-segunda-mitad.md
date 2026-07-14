@@ -302,6 +302,13 @@ pero Usuarios/Roles todavía no muestra claramente la UI para otorgar/revocar `U
 > permisos en Usuarios integrada a `/api/users/[id]/permissions`. Verificar dónde quedó: si existe
 > y está oculta, detrás de feature flag, vive en `/owner/accesos`, fue mergeada pero no enlazada, o
 > quedó incompleta.
+>
+> **Actualización (2026-07-17).** Relevado: la UI (`UserPermissionsPanel`) **existe y está montada**
+> en el editar de usuario (owner+admin), detrás del flag `NEXT_PUBLIC_USER_PERMISSIONS_PANEL_ENABLED`
+> (habilitado en prod). Se expuso `source/badge` de origen. Se limitó el fino a **Caja** (hardening
+> del servicio). **Deuda JWT-vs-DB** documentada (una sesión OWNER de prueba inactiva explicó una
+> falla observada). **Pendiente: verificación positiva del panel con un OWNER válido activo** — 2D-bis
+> OWNER **NO** se cierra como verificado. Detalle en `current-known-issues.md` → "UI-UserPermission / 2D-bis".
 
 **Después de UI-UserPermission / 2D-bis: Cajas funcional** — construir/integrar endpoints + UI de
 Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`.
