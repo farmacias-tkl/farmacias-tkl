@@ -231,6 +231,14 @@ export async function grantUserPermissionToTarget(args: GrantArgs): Promise<User
   if (!permission) return r404("Permiso no encontrado");
   if (!permission.active) return r400("Permiso inactivo");
 
+  // UI-D — Alcance de los grants finos: por ahora SOLO módulo Caja. Se valida sobre el
+  // Permission cargado de DB (no el payload del cliente). Evita crear nuevos grants no-Caja
+  // que ningún runtime lee todavía. NO afecta LIST ni REVOKE (funciones aparte): los grants
+  // no-Caja existentes se siguen listando y se pueden revocar para limpieza.
+  if (permission.module !== "caja") {
+    return r400("Solo se pueden asignar permisos finos del módulo Caja");
+  }
+
   if (!isValidScope(scope)) return r400("Scope invalido");
 
   // REGLA 1 — backend, antes de canGrant: OWN_BRANCH exige target.branchId poblado.

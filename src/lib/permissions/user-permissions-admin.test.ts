@@ -45,6 +45,7 @@ const adminSelfTarget: Target = { id: "admin", role: "ADMIN", active: true, bran
 const permNormal = { id: "p-view", key: NORMAL, module: "caja", description: "Ver", active: true };
 const permCrit = { id: "p-export", key: CRIT, module: "caja", description: "Exportar", active: true };
 const permInactive = { id: "p-x", key: "caja.attach_doc", module: "caja", description: "Adj", active: false };
+const permNonCaja = { id: "p-planes", key: "planes.create", module: "planes", description: "Crear plan", active: true };
 
 // ── stub client con $transaction atómico ─────────────────────────────────────
 function makeClient(seed: {
@@ -195,6 +196,45 @@ async function main() {
     assert("Duplicado distinto scope → 200 SCOPE_CHANGED", res.status === 200 && (res.body as any).change === "SCOPE_CHANGED");
     assert("SCOPE_CHANGED → 1 update + 1 audit dentro de tx", calls.upUpdate === 1 && committed.audits.length === 1 && calls.txOpened === 1);
     assert("SCOPE_CHANGED → audit con oldScope/newScope", committed.audits[0].action === "USER_PERMISSION_SCOPE_CHANGED" && committed.audits[0].detail.oldScope === "OWN_BRANCH" && committed.audits[0].detail.newScope === "ALL_BRANCHES");
+  }
+
+  console.log("\n=== UI-D: grants finos SOLO módulo Caja (validado sobre Permission de DB) ===");
+  {
+    // GRANT no-Caja (OWNER autorizado, permiso activo) → RECHAZADO, 0 escrituras, sin tx.
+    const { client, calls } = makeClient({ target: bm, permission: permNonCaja, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: permNonCaja.key, scope: "ALL_BRANCHES", client });
+    assert("GRANT no-Caja → 400 (rechazado) + 0 escrituras + sin tx", res.status === 400 && noWrites(calls) && calls.txOpened === 0);
+    assert("GRANT no-Caja → mensaje menciona Caja", /caja/i.test((res.body as any).error));
+  }
+  {
+    // SCOPE_CHANGE de un grant no-Caja existente → RECHAZADO antes de cualquier update.
+    const { client, calls } = makeClient({ target: bm, permission: permNonCaja, existing: { id: "up1", scope: "OWN_BRANCH", permission: { key: permNonCaja.key } } });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: permNonCaja.key, scope: "ALL_BRANCHES", client });
+    assert("SCOPE_CHANGE no-Caja → 400 + 0 update + sin tx", res.status === 400 && calls.upUpdate === 0 && calls.txOpened === 0);
+  }
+  {
+    // GRANT Caja sigue OK (no-regresión).
+    const { client, calls, committed } = makeClient({ target: bm, permission: permNormal, existing: null });
+    const res = await grantUserPermissionToTarget({ actor: ownerA, targetUserId: bm.id, permissionKey: NORMAL, scope: "ALL_BRANCHES", client });
+    assert("GRANT Caja sigue → 200 GRANTED + 1 create", res.status === 200 && (res.body as any).change === "GRANTED" && calls.upCreate === 1 && committed.ups.length === 1);
+  }
+  {
+    // REVOKE de un grant no-Caja EXISTENTE sigue permitido (limpieza de residuo).
+    const { client, calls, committed } = makeClient({ target: bm, existing: { id: "up1", scope: "ALL_BRANCHES", permission: { key: permNonCaja.key } } });
+    const res = await revokeUserPermissionFromTarget({ actor: ownerA, targetUserId: bm.id, permissionId: permNonCaja.id, client });
+    assert("REVOKE no-Caja existente → 200 + delete + audit (limpieza permitida)", res.status === 200 && calls.upDelete === 1 && committed.audits.length === 1);
+  }
+  {
+    // LIST sigue mostrando grants no-Caja existentes (no se ocultan residuos).
+    const rows = [{
+      permissionId: "p-planes", scope: "ALL_BRANCHES" as PermissionScope, grantedByUserId: "owner",
+      source: "MANUAL", batchId: null, createdAt: new Date(0), updatedAt: new Date(0),
+      permission: { key: permNonCaja.key, module: "planes", description: "Crear plan", active: true },
+    }];
+    const { client } = makeClient({ target: bm, listRows: rows });
+    const res = await listUserPermissionsForTarget({ actor: ownerA, targetUserId: bm.id, client });
+    const data = (res.body as any)?.data;
+    assert("LIST muestra grant no-Caja existente", res.status === 200 && data.length === 1 && data[0].key === permNonCaja.key && data[0].module === "planes");
   }
 
   console.log("\n=== GRANT 2F: source / batchId (origen del grant) ===");
