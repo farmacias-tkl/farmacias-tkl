@@ -1228,6 +1228,68 @@ hasta que el relevamiento confirme si es completar/exponer la UI construida en 2
 
 ---
 
+### 🧩 UI-UserPermission / 2D-bis — estado, alcance fino "solo Caja" y deuda OWNER stale (2026-07-17)
+
+**Estado real de `UserPermission` (relevado en este ciclo).**
+```txt
+- Catálogo Permission: 49 keys / 11 módulos. 5 caja.* · 44 no-Caja.
+- NINGUNA key UserPermission tiene consumer runtime de enforcement hoy.
+- caja.* está en estado "C": grants almacenables (panel/backfill), pero ningún runtime
+  los lee todavía (Cajas sigue schema-only, sin endpoints).
+- Los módulos no-Caja autorizan por ROL (can.* + ROUTE_PERMISSIONS), NO por UserPermission.
+- El panel NO debe entenderse como enforcement todavía.
+```
+
+**Política y hardening (commit `fix(permissions): restringir grants finos a caja`).**
+```txt
+- UserPermission fino LIMITADO a Caja por ahora.
+- El servicio (grantUserPermissionToTarget) RECHAZA con 400 nuevos grant/scope-change cuyo
+  Permission.module !== "caja" (validado sobre el Permission cargado de DB, no el payload).
+- Mensaje: "Solo se pueden asignar permisos finos del módulo Caja".
+- LIST y REVOKE siguen permitidos para CUALQUIER grant existente (incl. no-Caja) → se pueden
+  listar y limpiar residuos; no se ocultan ni se bloquea su revocación.
+- Defaults caja.* (DEFAULT_BACKFILL / DEFAULT_NEW_USER) siguen pasando (módulo caja).
+```
+
+**Incidente OWNER (sesión de prueba) / divergencia JWT-vs-DB — SIN sobrecerrar.**
+```txt
+- Falla observada: desde una sesión móvil VIEJA de un usuario OWNER de PRUEBA, el panel montó
+  pero GET /api/users/<id>/permissions devolvió {"error":"Sin permisos para esta accion"};
+  GET /api/me devolvió {"error":"No encontrado"}.
+- Explicación: esa cuenta OWNER de prueba hoy está INACTIVA en DB. La sesión vieja aún permitía
+  abrir superficies OWNER (el JWT lleva role congelado del login y no lleva/revalida active),
+  pero los endpoints sensibles rehidratan el actor desde DB (loadActor) y rechazaron correctamente.
+- NO se comprobó bug de panel / catálogo / middleware / path / guard en esa falla.
+- Según SELECT manual informado por Daniel (fuera de CC): existe un OWNER activo real en prod
+  y un OWNER de prueba/institucional inactivo. NO hay lockout de OWNER.
+- PENDIENTE: verificación POSITIVA del panel con un OWNER válido ACTIVO. La falla observada
+  quedó explicada, pero 2D-bis OWNER NO se cierra como verificado hasta probar con un OWNER activo.
+```
+
+**Deuda JWT/session (registrada, NO se corrige acá).**
+```txt
+- role queda en el JWT/session y puede quedar stale (congelado al login; OWNER sin cap de 8h).
+- active NO viaja ni se revalida en las superficies (solo se chequea al login).
+- Servicios sensibles rehidratan de DB (loadActor) y pueden rechazar.
+- Riesgo/UX: un usuario desactivado/con rol cambiado puede VER superficie pero no OPERAR
+  acciones sensibles → estado inconsistente hasta relogin.
+- Deuda futura: revalidar role/active en middleware/superficies, o invalidar/refrescar sesión
+  ante cambios críticos. Mecanismo idéntico al ya conocido de executiveAccess stale en JWT.
+```
+
+**Rechazos de lectura sin rastro (deuda).**
+```txt
+- El rechazo (403) de LECTURA de UserPermission no deja SecurityEvent/AuditLog/logger.
+- Las MUTACIONES (grant/revoke) sí se auditan.
+- Deuda futura: evaluar auditoría/log de rechazos sensibles.
+```
+
+**Nota metodológica.** En gates read-only/diagnóstico, la memoria previa NO cuenta como
+evidencia. Solo cuentan: el repo inspeccionado en el gate, el output observado e informado por
+Daniel, las consultas explícitas del gate, y logs/DB solo si fueron autorizados explícitamente.
+
+---
+
 ## Cómo reportar un bug nuevo
 
 1. Verificar si ya está acá listado.
