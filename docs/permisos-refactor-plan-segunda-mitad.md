@@ -309,6 +309,13 @@ pero Usuarios/Roles todavía no muestra claramente la UI para otorgar/revocar `U
 > del servicio). **Deuda JWT-vs-DB** documentada (una sesión OWNER de prueba inactiva explicó una
 > falla observada). **Pendiente: verificación positiva del panel con un OWNER válido activo** — 2D-bis
 > OWNER **NO** se cierra como verificado. Detalle en `current-known-issues.md` → "UI-UserPermission / 2D-bis".
+>
+> **Cierre D (2026-07-17).** Hardening mergeado a main (SHA `1b37801`). **ADMIN VERIFICADO en
+> producción** sobre `1b37801` (deployment confirmado en Vercel; circuito grant → persistencia →
+> revoke → estado restaurado, sin residuos). **OWNER BLOQUEADO** por falta de acceso/mecanismo
+> autorizado (no por fallo detectado del panel); la sesión OWNER inactiva no cuenta como evidencia.
+> **2D-bis sigue ABIERTO y NO está "verificado en ambas superficies".** Detalle y deuda operativa
+> recurrente de verificación OWNER en `current-known-issues.md` → "Cierre D + estado de verificación".
 
 **Después de UI-UserPermission / 2D-bis: Cajas funcional** — construir/integrar endpoints + UI de
 Cajas que autoricen con `loadUserWithUserPermissions` + `requireUserPermission`/`canPerformOperationalAction`.

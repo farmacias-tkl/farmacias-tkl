@@ -1288,6 +1288,41 @@ hasta que el relevamiento confirme si es completar/exponer la UI construida en 2
 evidencia. Solo cuentan: el repo inspeccionado en el gate, el output observado e informado por
 Daniel, las consultas explícitas del gate, y logs/DB solo si fueron autorizados explícitamente.
 
+**Cierre D + estado de verificación — 2026-07-17.** (extiende esta misma entrada 2D-bis)
+```txt
+- Hardening MERGEADO a main en SHA 1b37801 (commit fix `7f6fc56`): el servicio rechaza nuevos
+  grant/scope-change no-Caja; LIST/REVOKE siguen habilitados para cualquier grant existente;
+  defaults caja.* intactos. Ver el bloque "Política y hardening" arriba en esta entrada.
+
+- ADMIN — VERIFICADO en Production sobre 1b37801:
+  * Deployment confirmado VISUALMENTE en la UI de Vercel (SHA 1b37801 servido en Production).
+  * Un usuario ADMIN asignó permisos del MÓDULO CAJA a un usuario objetivo; se confirmó la
+    persistencia tras recarga; luego se revocaron; el estado quedó restaurado sin grants de
+    prueba residuales.
+  * Circuito verificado end-to-end: UI → grant → persistencia → revoke → estado restaurado.
+  * Se verificó el CIRCUITO, no una key puntual: la key caja.* del smoke NO quedó registrada
+    y NO se documenta una key específica (omisión deliberada y correcta).
+
+- OWNER — BLOQUEADO, sin fallo detectado:
+  * No hay acceso a la cuenta OWNER activa real ni existe hoy una cuenta OWNER técnica de testing.
+  * La verificación POSITIVA del panel en superficie OWNER queda pendiente por falta de mecanismo
+    autorizado, NO por un problema detectado del panel.
+  * La sesión OWNER inactiva (usuario de prueba, active=false) NO cuenta como evidencia en ningún
+    sentido, ni positivo ni negativo.
+  * 2D-bis NO se cierra como "verificado en ambas superficies": ADMIN verificado, OWNER pendiente.
+
+- Deuda operativa recurrente (nueva): el desarrollador NO tiene vía de verificación de superficies
+  OWNER en producción. No es exclusivo de 2D-bis: toda feature futura con superficie OWNER hereda
+  la misma imposibilidad. A resolver con el product owner mediante decisión operativa —cuenta OWNER
+  técnica con acceso controlado, o sesión de verificación pactada cuando haga falta, u otro mecanismo
+  explícitamente autorizado. A definir con el product owner (mecanismo de verificación de superficies
+  OWNER) en la próxima conversación de producto.
+
+- Referencias cruzadas (deudas YA registradas en esta entrada, no reabiertas acá): JWT stale de
+  role/active (bloque "Deuda JWT/session" arriba) y rechazos de LECTURA de UserPermission sin
+  SecurityEvent/AuditLog (bloque "Rechazos de lectura sin rastro" arriba).
+```
+
 ---
 
 ## Cómo reportar un bug nuevo
