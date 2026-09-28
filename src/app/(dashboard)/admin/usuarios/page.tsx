@@ -16,6 +16,13 @@ import type { UserRole } from "@prisma/client";
 
 const ROLES: UserRole[] = ["ADMIN","OWNER","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
 
+// Solo UX: refleja los rechazos del server (403 OWNER/ADMIN, 400 inactivo), que sigue siendo la fuente de verdad.
+function resetBlockedReason(u: { role: UserRole; active: boolean }): string | null {
+  if (u.role === "OWNER" || u.role === "ADMIN") return "Solo el OWNER puede resetear contraseñas de usuarios Dirección o Administrador";
+  if (!u.active) return "Usuario inactivo — no se puede resetear";
+  return null;
+}
+
 export default function UsuariosPage() {
   const { data: session, status } = useSession();
   const qc = useQueryClient();
@@ -154,7 +161,9 @@ export default function UsuariosPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {users.map((u: any) => (
+              {users.map((u: any) => {
+                const resetBlocked = resetBlockedReason(u);
+                return (
                 <tr key={u.id} className={cn("hover:bg-gray-50 transition-colors", !u.active && "opacity-60")}>
                   <td className="px-4 py-3">
                     <div>
@@ -192,8 +201,8 @@ export default function UsuariosPage() {
                         Editar
                       </Link>
                       <button onClick={() => setConfirmReset({ id: u.id, name: u.name })}
-                        disabled={resettingId !== null}
-                        title={resettingId === u.id ? "Reseteando..." : "Resetear contraseña"}
+                        disabled={!!resetBlocked || resettingId !== null}
+                        title={resetBlocked ?? (resettingId === u.id ? "Reseteando..." : "Resetear contraseña")}
                         className="btn-secondary text-xs py-1 px-2 text-amber-700 border-amber-300 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed">
                         {resettingId === u.id
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -210,7 +219,8 @@ export default function UsuariosPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

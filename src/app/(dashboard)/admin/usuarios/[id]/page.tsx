@@ -135,6 +135,14 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   if (isLoading) return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
   if (!user)     return <div className="card p-10 text-center text-sm text-gray-400">Usuario no encontrado.</div>;
 
+  // Solo UX: refleja los rechazos del server (403 OWNER/ADMIN, 400 inactivo), que sigue siendo la fuente de verdad.
+  const resetBlocked =
+    user.role === "OWNER" || user.role === "ADMIN"
+      ? "Solo el OWNER puede resetear contraseñas de usuarios Dirección o Administrador"
+      : !user.active
+        ? "Usuario inactivo — no se puede resetear"
+        : null;
+
   return (
     <div className="max-w-lg mx-auto space-y-4">
       <div>
@@ -224,7 +232,8 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
             <p className="text-sm text-gray-700">Resetear contraseña</p>
             <p className="text-xs text-gray-400">Genera una contraseña temporal. El usuario deberá cambiarla.</p>
           </div>
-          <button onClick={() => setConfirmReset(true)} disabled={!user.active || resetting}
+          <button onClick={() => setConfirmReset(true)} disabled={!!resetBlocked || resetting}
+            title={resetBlocked ?? undefined}
             className="btn-secondary text-sm text-amber-700 border-amber-300 hover:bg-amber-50 disabled:opacity-40">
             {resetting
               ? <><Loader2 className="w-4 h-4 animate-spin" />Reseteando...</>
