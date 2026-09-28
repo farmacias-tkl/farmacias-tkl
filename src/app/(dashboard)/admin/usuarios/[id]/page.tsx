@@ -6,9 +6,10 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, CheckCircle2, XCircle, Copy } from "lucide-react";
+import { ArrowLeft, KeyRound, CheckCircle2, XCircle } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { UserPermissionsPanel } from "@/components/users/user-permissions-panel";
+import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -29,8 +30,7 @@ type EditForm = z.infer<typeof editSchema>;
 export default function UsuarioDetailPage({ params }: { params: { id: string } }) {
   const qc = useQueryClient();
   const { data: session } = useSession();
-  const [resetResult, setResetResult] = useState<string | null>(null);
-  const [copied,      setCopied]      = useState(false);
+  const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
   const [saveOk,      setSaveOk]      = useState(false);
 
   const { data: userData, isLoading } = useQuery({
@@ -102,15 +102,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   const resetPassword = async () => {
     const res  = await fetch(`/api/admin/users/${params.id}/reset-password`, { method: "POST" });
     const json = await res.json();
-    if (res.ok) setResetResult(json.temporaryPassword);
-  };
-
-  const copyPassword = () => {
-    if (resetResult) {
-      navigator.clipboard.writeText(resetResult);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    if (res.ok) setResetResult({ name: user.name, password: json.temporaryPassword });
   };
 
   if (isLoading) return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
@@ -134,27 +126,6 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
         </div>
         <p className="text-sm text-gray-400 mt-0.5">{user.email}</p>
       </div>
-
-      {/* Resultado de reset */}
-      {resetResult && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-4">
-          <div className="flex items-center gap-2 mb-2">
-            <KeyRound className="w-4 h-4 text-amber-600" />
-            <p className="text-xs font-semibold text-amber-800">Contraseña temporal (visible una sola vez)</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 bg-white border border-amber-200 rounded-lg px-3 py-2 text-sm font-mono font-bold text-amber-900 tracking-wider select-all">
-              {resetResult}
-            </code>
-            <button onClick={copyPassword}
-              className={cn("btn-secondary text-xs py-2 px-3", copied && "text-green-700 border-green-300")}>
-              {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            </button>
-          </div>
-          <p className="text-xs text-amber-600 mt-2">El usuario deberá cambiarla en su próximo ingreso.</p>
-          <button onClick={() => setResetResult(null)} className="text-xs text-amber-500 underline mt-1">Cerrar</button>
-        </div>
-      )}
 
       {/* Formulario de edición */}
       <div className="card p-5">
@@ -280,6 +251,8 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
           </p>
         </div>
       )}
+
+      <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import type { UserRole } from "@prisma/client";
 
 const ROLES: UserRole[] = ["ADMIN","OWNER","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
@@ -21,7 +22,7 @@ export default function UsuariosPage() {
   const [roleFilter,  setRoleFilter]  = useState("");
   const [activeFilter,setActiveFilter]= useState("true");
   const [branchFilter,setBranchFilter]= useState("");
-  const [resetResult, setResetResult] = useState<{name:string; password:string} | null>(null);
+  const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
 
   const sessionReady = status === "authenticated";
 
@@ -80,30 +81,6 @@ export default function UsuariosPage() {
           <Plus className="w-4 h-4" />Nuevo usuario
         </Link>
       </div>
-
-      {/* Resultado de reset — visible una sola vez */}
-      {resetResult && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-4">
-          <div className="flex items-start gap-3">
-            <KeyRound className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-900 mb-1">
-                Contraseña reseteada para {resetResult.name}
-              </p>
-              <p className="text-xs text-amber-700 mb-2">
-                Contraseña temporal (visible una sola vez). Comunícasela al usuario:
-              </p>
-              <code className="block bg-white border border-amber-200 rounded-lg px-3 py-2 text-sm font-mono font-bold text-amber-900 tracking-wider select-all">
-                {resetResult.password}
-              </code>
-              <p className="text-xs text-amber-600 mt-2">
-                El usuario deberá cambiarla en su próximo ingreso.
-              </p>
-            </div>
-            <button onClick={() => setResetResult(null)} className="text-amber-400 hover:text-amber-600 text-lg">×</button>
-          </div>
-        </div>
-      )}
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
@@ -208,6 +185,8 @@ export default function UsuariosPage() {
           </table>
         </div>
       )}
+
+      <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
     </div>
   );
 }
