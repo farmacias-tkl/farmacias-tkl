@@ -1,16 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, KeyRound, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { UserPermissionsPanel } from "@/components/users/user-permissions-panel";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { ActionErrorModal } from "@/components/users/action-error-modal";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -33,6 +34,10 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   const { data: session } = useSession();
   const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
   const [actionError, setActionError] = useState("");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting,    setResetting]    = useState(false);
+  // Guard síncrono: el estado de React no alcanza para frenar un doble click en el mismo tick.
+  const resettingRef = useRef(false);
   const [saveOk,      setSaveOk]      = useState(false);
 
   const { data: userData, isLoading } = useQuery({
@@ -102,6 +107,9 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   };
 
   const resetPassword = async () => {
+    if (resettingRef.current) return;
+    resettingRef.current = true;
+    setResetting(true);
     setActionError("");
     try {
       const res  = await fetch(`/api/admin/users/${params.id}/reset-password`, { method: "POST" });
@@ -117,6 +125,10 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
       setResetResult({ name: user.name, password: json.temporaryPassword });
     } catch {
       setActionError("No se pudo conectar con el servidor. Intentá de nuevo.");
+    } finally {
+      resettingRef.current = false;
+      setResetting(false);
+      setConfirmReset(false);
     }
   };
 
@@ -212,9 +224,11 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
             <p className="text-sm text-gray-700">Resetear contraseña</p>
             <p className="text-xs text-gray-400">Genera una contraseña temporal. El usuario deberá cambiarla.</p>
           </div>
-          <button onClick={resetPassword} disabled={!user.active}
+          <button onClick={() => setConfirmReset(true)} disabled={!user.active || resetting}
             className="btn-secondary text-sm text-amber-700 border-amber-300 hover:bg-amber-50 disabled:opacity-40">
-            <KeyRound className="w-4 h-4" />Resetear
+            {resetting
+              ? <><Loader2 className="w-4 h-4 animate-spin" />Reseteando...</>
+              : <><KeyRound className="w-4 h-4" />Resetear</>}
           </button>
         </div>
 
@@ -266,6 +280,18 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
           </p>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmReset}
+        title={`Resetear contraseña de ${user.name}`}
+        message="Esto invalida la contraseña actual del usuario y genera una temporal nueva. ¿Continuar?"
+        variant="warning"
+        confirmLabel="Resetear"
+        cancelLabel="Cancelar"
+        loading={resetting}
+        onConfirm={resetPassword}
+        onCancel={() => { if (!resettingRef.current) setConfirmReset(false); }}
+      />
 
       <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
       <ActionErrorModal message={actionError} onClose={() => setActionError("")} />

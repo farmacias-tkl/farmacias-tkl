@@ -1,16 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   Users, Plus, Search, CheckCircle2, XCircle,
-  ShieldCheck, KeyRound, ChevronDown, ChevronUp,
+  ShieldCheck, KeyRound, ChevronDown, ChevronUp, Loader2,
 } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { ActionErrorModal } from "@/components/users/action-error-modal";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import type { UserRole } from "@prisma/client";
 
 const ROLES: UserRole[] = ["ADMIN","OWNER","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
@@ -25,6 +26,10 @@ export default function UsuariosPage() {
   const [branchFilter,setBranchFilter]= useState("");
   const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
   const [actionError, setActionError] = useState("");
+  const [confirmReset, setConfirmReset] = useState<{ id: string; name: string } | null>(null);
+  const [resettingId,  setResettingId]  = useState<string | null>(null);
+  // Guard síncrono: el estado de React no alcanza para frenar un doble click en el mismo tick.
+  const resettingRef = useRef(false);
 
   const sessionReady = status === "authenticated";
 
@@ -65,6 +70,9 @@ export default function UsuariosPage() {
   };
 
   const resetPassword = async (id: string, name: string) => {
+    if (resettingRef.current) return;
+    resettingRef.current = true;
+    setResettingId(id);
     setActionError("");
     try {
       const res  = await fetch(`/api/admin/users/${id}/reset-password`, { method: "POST" });
@@ -80,6 +88,10 @@ export default function UsuariosPage() {
       setResetResult({ name, password: json.temporaryPassword });
     } catch {
       setActionError("No se pudo conectar con el servidor. Intentá de nuevo.");
+    } finally {
+      resettingRef.current = false;
+      setResettingId(null);
+      setConfirmReset(null);
     }
   };
 
@@ -179,10 +191,13 @@ export default function UsuariosPage() {
                         className="btn-secondary text-xs py-1 px-2.5">
                         Editar
                       </Link>
-                      <button onClick={() => resetPassword(u.id, u.name)}
-                        title="Resetear contraseña"
-                        className="btn-secondary text-xs py-1 px-2 text-amber-700 border-amber-300 hover:bg-amber-50">
-                        <KeyRound className="w-3.5 h-3.5" />
+                      <button onClick={() => setConfirmReset({ id: u.id, name: u.name })}
+                        disabled={resettingId !== null}
+                        title={resettingId === u.id ? "Reseteando..." : "Resetear contraseña"}
+                        className="btn-secondary text-xs py-1 px-2 text-amber-700 border-amber-300 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                        {resettingId === u.id
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <KeyRound className="w-3.5 h-3.5" />}
                       </button>
                       <button
                         onClick={() => toggleActive(u.id, u.active)}
@@ -200,6 +215,18 @@ export default function UsuariosPage() {
           </table>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirmReset}
+        title={confirmReset ? `Resetear contraseña de ${confirmReset.name}` : ""}
+        message="Esto invalida la contraseña actual del usuario y genera una temporal nueva. ¿Continuar?"
+        variant="warning"
+        confirmLabel="Resetear"
+        cancelLabel="Cancelar"
+        loading={resettingId !== null}
+        onConfirm={() => confirmReset && resetPassword(confirmReset.id, confirmReset.name)}
+        onCancel={() => { if (!resettingRef.current) setConfirmReset(null); }}
+      />
 
       <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
       <ActionErrorModal message={actionError} onClose={() => setActionError("")} />
