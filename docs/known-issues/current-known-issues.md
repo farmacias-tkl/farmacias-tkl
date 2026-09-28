@@ -80,6 +80,10 @@ escribe el `auditLog` con `.catch(() => {})` **fuera** de un `$transaction`. Si 
 audit falla, el registro de ausencia queda sin rastro de auditoría. Deuda separada,
 identificada, **no resuelta** (DM-7 no la tocó, por diseño — una concern por commit).
 
+Mismo patrón en los endpoints de reset de contraseña (admin y owner): ver
+"Reset de contraseña — auditoría fuera de `$transaction` (F5)" en la sección
+*Gestión de usuarios — reset de contraseña*.
+
 ---
 
 ## Infraestructura
@@ -295,6 +299,96 @@ atacante tiene acceso indefinido hasta cambiar `AUTH_SECRET`.
 
 **Mitigación**: cookies HTTP-only + Secure. Browser cierra sesión al
 limpiar cookies o en private mode.
+
+---
+
+## Gestión de usuarios — reset de contraseña
+
+Registrado al cierre del gate `fix/reset-password-ui` (F1–F4, 2026-09-28).
+El fix de UI (modal de resultado, modal de error, confirmación + guard de
+doble click, llave deshabilitada en admin) está en producción; lo que sigue
+queda abierto o es decisión explícita.
+
+### 🔒 DECISIÓN — acceso de emergencia
+
+Existe una decisión de producto sobre acceso de emergencia documentada fuera del repo.
+Antes de modificar la autorización de `/api/owner/*` o el manejo de sesiones de cuentas
+inactivas, consultar al product owner.
+
+---
+
+### 🔒 DECISIÓN (no bug) — el OWNER puede resetear su propia contraseña con la llave
+
+**Descripción**: en `/owner/usuarios` la llave está habilitada también en la
+fila propia (el endpoint lo permite explícitamente). **No bloquear**: es la
+única vía de recuperación sin SQL cuando un OWNER olvidó su contraseña pero
+conserva una sesión abierta (`/perfil` exige la contraseña actual).
+Descartado F6 en el gate `fix/reset-password-ui`.
+
+---
+
+### ⚠️ Reset de contraseña — auditoría fuera de `$transaction` (F5)
+
+**Descripción**: `POST /api/admin/users/[id]/reset-password` y
+`POST /api/owner/users/[id]/reset-password` hacen el `user.update` y
+después escriben la auditoría con `.catch(() => {})`, **fuera** de un
+`$transaction`. Si la escritura de auditoría falla, el reset queda aplicado
+sin rastro. Se agrupa con **DC-4** (mismo patrón que `POST /api/absences`).
+
+**Asimetría**: el reset admin escribe **solo** `AuditLog`
+(`RESET_PASSWORD`); el reset owner escribe `AuditLog` **+** `SecurityEvent`
+(`USER_PASSWORD_RESET`).
+
+**Estado**: diferido.
+
+---
+
+### ⚠️ Sin rate limit / ventana de idempotencia server-side para reset (F7)
+
+**Descripción**: el server acepta resets consecutivos del mismo usuario sin
+límite; cada POST genera una contraseña temporal nueva e invalida la
+anterior.
+
+**Mitigación implementada**: en UI, confirmación previa (`ConfirmModal`) +
+guard de doble click (`useRef`) + botón deshabilitado mientras la request
+está pendiente.
+
+**Estado**: diferido.
+
+---
+
+### 🐛 La tabla de usuarios no se refresca tras un reset
+
+**Descripción**: después de un reset exitoso, el badge "Debe cambiar
+contraseña" de la fila recién aparece al recargar la página.
+
+**Fix pendiente**: `invalidateQueries` de la lista (`admin-users` /
+`owner-users`, y `admin-user` en el detalle) tras el reset.
+
+---
+
+### 🐛 El tooltip de la llave deshabilitada no se muestra
+
+**Descripción**: el `title` explicativo de la llave deshabilitada
+(OWNER/ADMIN/inactivo en admin; inactivo en owner) no aparece al pasar el
+mouse.
+
+**Causa probable**: un `<button disabled>` no recibe eventos de mouse en
+algunos navegadores, así que no dispara el tooltip nativo.
+
+**Fix propuesto**: envolver el botón en un `<span title=...>`.
+
+---
+
+### ⚠️ `mustChangePassword` se congela en el JWT al login
+
+**Descripción**: el flag se copia al token solo en el login
+(`src/lib/auth.ts`) y el layout lo lee del JWT. Tras un **self-reset**, el
+OWNER no es redirigido a `/cambiar-password` hasta volver a loguearse; su
+contraseña ya es la temporal nueva.
+
+**Workaround**: después de un self-reset, cerrar sesión y entrar con la
+temporal.
 
 ---
 
