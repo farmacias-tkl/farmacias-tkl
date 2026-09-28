@@ -9,6 +9,7 @@ import {
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
+import { ActionErrorModal } from "@/components/users/action-error-modal";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -89,13 +90,21 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
 
   const resetPassword = async (id: string, name: string) => {
     setActionError("");
-    const res  = await fetch(`/api/owner/users/${id}/reset-password`, { method: "POST" });
-    const json = await res.json();
-    if (!res.ok) {
-      setActionError(json.error ?? "Error al resetear contrasena");
-      return;
+    try {
+      const res  = await fetch(`/api/owner/users/${id}/reset-password`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error ?? "Error al resetear contrasena");
+        return;
+      }
+      if (typeof json.temporaryPassword !== "string") {
+        setActionError("Respuesta inválida del servidor al resetear la contraseña.");
+        return;
+      }
+      setResetResult({ name, password: json.temporaryPassword });
+    } catch {
+      setActionError("No se pudo conectar con el servidor. Intentá de nuevo.");
     }
-    setResetResult({ name, password: json.temporaryPassword });
   };
 
   return (
@@ -109,12 +118,6 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
           <Plus className="w-4 h-4" />Nuevo usuario
         </Link>
       </div>
-
-      {actionError && (
-        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {actionError}
-        </div>
-      )}
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
@@ -240,6 +243,7 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
       />
 
       <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
+      <ActionErrorModal message={actionError} onClose={() => setActionError("")} />
     </div>
   );
 }

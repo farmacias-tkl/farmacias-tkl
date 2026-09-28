@@ -10,6 +10,7 @@ import {
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
+import { ActionErrorModal } from "@/components/users/action-error-modal";
 import type { UserRole } from "@prisma/client";
 
 const ROLES: UserRole[] = ["ADMIN","OWNER","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"];
@@ -23,6 +24,7 @@ export default function UsuariosPage() {
   const [activeFilter,setActiveFilter]= useState("true");
   const [branchFilter,setBranchFilter]= useState("");
   const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
+  const [actionError, setActionError] = useState("");
 
   const sessionReady = status === "authenticated";
 
@@ -63,9 +65,22 @@ export default function UsuariosPage() {
   };
 
   const resetPassword = async (id: string, name: string) => {
-    const res  = await fetch(`/api/admin/users/${id}/reset-password`, { method: "POST" });
-    const json = await res.json();
-    if (res.ok) setResetResult({ name, password: json.temporaryPassword });
+    setActionError("");
+    try {
+      const res  = await fetch(`/api/admin/users/${id}/reset-password`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error ?? "Error al resetear contraseña");
+        return;
+      }
+      if (typeof json.temporaryPassword !== "string") {
+        setActionError("Respuesta inválida del servidor al resetear la contraseña.");
+        return;
+      }
+      setResetResult({ name, password: json.temporaryPassword });
+    } catch {
+      setActionError("No se pudo conectar con el servidor. Intentá de nuevo.");
+    }
   };
 
   if (status === "loading") return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
@@ -187,6 +202,7 @@ export default function UsuariosPage() {
       )}
 
       <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
+      <ActionErrorModal message={actionError} onClose={() => setActionError("")} />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { ArrowLeft, KeyRound, CheckCircle2, XCircle } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { UserPermissionsPanel } from "@/components/users/user-permissions-panel";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
+import { ActionErrorModal } from "@/components/users/action-error-modal";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -31,6 +32,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   const qc = useQueryClient();
   const { data: session } = useSession();
   const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
+  const [actionError, setActionError] = useState("");
   const [saveOk,      setSaveOk]      = useState(false);
 
   const { data: userData, isLoading } = useQuery({
@@ -100,9 +102,22 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   };
 
   const resetPassword = async () => {
-    const res  = await fetch(`/api/admin/users/${params.id}/reset-password`, { method: "POST" });
-    const json = await res.json();
-    if (res.ok) setResetResult({ name: user.name, password: json.temporaryPassword });
+    setActionError("");
+    try {
+      const res  = await fetch(`/api/admin/users/${params.id}/reset-password`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error ?? "Error al resetear contraseña");
+        return;
+      }
+      if (typeof json.temporaryPassword !== "string") {
+        setActionError("Respuesta inválida del servidor al resetear la contraseña.");
+        return;
+      }
+      setResetResult({ name: user.name, password: json.temporaryPassword });
+    } catch {
+      setActionError("No se pudo conectar con el servidor. Intentá de nuevo.");
+    }
   };
 
   if (isLoading) return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
@@ -253,6 +268,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
       )}
 
       <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
+      <ActionErrorModal message={actionError} onClose={() => setActionError("")} />
     </div>
   );
 }
