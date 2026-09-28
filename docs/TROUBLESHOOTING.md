@@ -63,10 +63,12 @@ convirtieron en newlines reales, el JSON deja de ser válido.
 **Fix**: usar Python r-string (raw) para preservar los `\n` literales:
 
 ```python
-SA_JSON = r'{"type":"service_account",...,"private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",...}'
+SA_JSON = r'{"type":"service_account",...,"private_key":"<CLAVE_PRIVADA_DEL_SA>",...}'
 ```
 
-El prefijo `r` evita que Python interprete los `\n` como newlines.
+El valor real de `<CLAVE_PRIVADA_DEL_SA>` contiene secuencias `\n`
+literales (barra invertida + `n`) entre sus líneas. El prefijo `r` evita
+que Python interprete esos `\n` como newlines.
 
 ---
 

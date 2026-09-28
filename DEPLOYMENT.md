@@ -81,7 +81,7 @@ Aplicar a **Production** y **Preview** (no a Development salvo que se use el mis
 
 | Variable | Descripción | Ejemplo |
 |---|---|---|
-| `DATABASE_URL` | Connection string de Neon, con `?sslmode=require` | `postgresql://USER:PASS@HOST.neon.tech/DBNAME?sslmode=require` |
+| `DATABASE_URL` | Connection string de Neon, con `?sslmode=require` | `<CONNECTION_STRING_DE_NEON>` — esquema `postgresql`, con usuario, password, host y base; copiarla del dashboard de Neon y terminarla en `?sslmode=require` |
 
 ### Google Drive integration
 
@@ -246,10 +246,12 @@ Esto borra `control.json`, reprocesa todos los DBF desde el principio y deja tod
 Crear `.env.neon` en la raíz del repo (NO commitear):
 
 ```env
-DATABASE_URL="postgresql://USER:PASS@HOST.neon.tech/DBNAME?sslmode=require"
+DATABASE_URL="<CONNECTION_STRING_DE_NEON>"
 GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID="ID_DE_LA_CARPETA_HISTORICO"
 GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 ```
+
+`<CONNECTION_STRING_DE_NEON>` es la misma connection string de `DATABASE_URL` en Vercel (esquema `postgresql`, con usuario, password, host y base, terminada en `?sslmode=require`).
 
 > ⚠️ Apuntar `GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID` a `historico/`, NO a `diario/`, durante la carga inicial.
 
