@@ -1,14 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, CheckCircle2, XCircle, Copy } from "lucide-react";
+import { ArrowLeft, KeyRound, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { UserPermissionsPanel } from "@/components/users/user-permissions-panel";
+import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
+import { ActionErrorModal } from "@/components/users/action-error-modal";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -29,8 +32,12 @@ type EditForm = z.infer<typeof editSchema>;
 export default function UsuarioDetailPage({ params }: { params: { id: string } }) {
   const qc = useQueryClient();
   const { data: session } = useSession();
-  const [resetResult, setResetResult] = useState<string | null>(null);
-  const [copied,      setCopied]      = useState(false);
+  const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting,    setResetting]    = useState(false);
+  // Guard síncrono: el estado de React no alcanza para frenar un doble click en el mismo tick.
+  const resettingRef = useRef(false);
   const [saveOk,      setSaveOk]      = useState(false);
 
   const { data: userData, isLoading } = useQuery({
@@ -100,21 +107,41 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
   };
 
   const resetPassword = async () => {
-    const res  = await fetch(`/api/admin/users/${params.id}/reset-password`, { method: "POST" });
-    const json = await res.json();
-    if (res.ok) setResetResult(json.temporaryPassword);
-  };
-
-  const copyPassword = () => {
-    if (resetResult) {
-      navigator.clipboard.writeText(resetResult);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+    if (resettingRef.current) return;
+    resettingRef.current = true;
+    setResetting(true);
+    setActionError("");
+    try {
+      const res  = await fetch(`/api/admin/users/${params.id}/reset-password`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(json.error ?? "Error al resetear contraseña");
+        return;
+      }
+      if (typeof json.temporaryPassword !== "string") {
+        setActionError("Respuesta inválida del servidor al resetear la contraseña.");
+        return;
+      }
+      setResetResult({ name: user.name, password: json.temporaryPassword });
+    } catch {
+      setActionError("No se pudo conectar con el servidor. Intentá de nuevo.");
+    } finally {
+      resettingRef.current = false;
+      setResetting(false);
+      setConfirmReset(false);
     }
   };
 
   if (isLoading) return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
   if (!user)     return <div className="card p-10 text-center text-sm text-gray-400">Usuario no encontrado.</div>;
+
+  // Solo UX: refleja los rechazos del server (403 OWNER/ADMIN, 400 inactivo), que sigue siendo la fuente de verdad.
+  const resetBlocked =
+    user.role === "OWNER" || user.role === "ADMIN"
+      ? "Solo el OWNER puede resetear contraseñas de usuarios Dirección o Administrador"
+      : !user.active
+        ? "Usuario inactivo — no se puede resetear"
+        : null;
 
   return (
     <div className="max-w-lg mx-auto space-y-4">
@@ -134,27 +161,6 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
         </div>
         <p className="text-sm text-gray-400 mt-0.5">{user.email}</p>
       </div>
-
-      {/* Resultado de reset */}
-      {resetResult && (
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-4">
-          <div className="flex items-center gap-2 mb-2">
-            <KeyRound className="w-4 h-4 text-amber-600" />
-            <p className="text-xs font-semibold text-amber-800">Contraseña temporal (visible una sola vez)</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 bg-white border border-amber-200 rounded-lg px-3 py-2 text-sm font-mono font-bold text-amber-900 tracking-wider select-all">
-              {resetResult}
-            </code>
-            <button onClick={copyPassword}
-              className={cn("btn-secondary text-xs py-2 px-3", copied && "text-green-700 border-green-300")}>
-              {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            </button>
-          </div>
-          <p className="text-xs text-amber-600 mt-2">El usuario deberá cambiarla en su próximo ingreso.</p>
-          <button onClick={() => setResetResult(null)} className="text-xs text-amber-500 underline mt-1">Cerrar</button>
-        </div>
-      )}
 
       {/* Formulario de edición */}
       <div className="card p-5">
@@ -226,9 +232,12 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
             <p className="text-sm text-gray-700">Resetear contraseña</p>
             <p className="text-xs text-gray-400">Genera una contraseña temporal. El usuario deberá cambiarla.</p>
           </div>
-          <button onClick={resetPassword} disabled={!user.active}
+          <button onClick={() => setConfirmReset(true)} disabled={!!resetBlocked || resetting}
+            title={resetBlocked ?? undefined}
             className="btn-secondary text-sm text-amber-700 border-amber-300 hover:bg-amber-50 disabled:opacity-40">
-            <KeyRound className="w-4 h-4" />Resetear
+            {resetting
+              ? <><Loader2 className="w-4 h-4 animate-spin" />Reseteando...</>
+              : <><KeyRound className="w-4 h-4" />Resetear</>}
           </button>
         </div>
 
@@ -280,6 +289,21 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
           </p>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmReset}
+        title={`Resetear contraseña de ${user.name}`}
+        message="Esto invalida la contraseña actual del usuario y genera una temporal nueva. ¿Continuar?"
+        variant="warning"
+        confirmLabel="Resetear"
+        cancelLabel="Cancelar"
+        loading={resetting}
+        onConfirm={resetPassword}
+        onCancel={() => { if (!resettingRef.current) setConfirmReset(false); }}
+      />
+
+      <ResetPasswordResultModal result={resetResult} onClose={() => setResetResult(null)} />
+      <ActionErrorModal message={actionError} onClose={() => setActionError("")} />
     </div>
   );
 }
