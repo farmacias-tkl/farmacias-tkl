@@ -8,6 +8,32 @@ historial: `git log` en el repo.
 
 ---
 
+## Septiembre 2026
+
+### fix (users) — UI de reset de contraseña (gate `fix/reset-password-ui`, F1–F4)
+
+El reset se ejecutaba en el server (quedaba en `AuditLog`/`SecurityEvent`), pero la
+contraseña temporal se mostraba en un bloque inline arriba del `<main>` con scroll
+propio: si el usuario había scrolleado hasta la fila, no veía nada y volvía a hacer
+click, generando resets múltiples. Solo cliente; sin cambios de API.
+
+- `a70925b` — **F1**: `ResetPasswordResultModal` compartido (sobre `ui/Modal`): overlay
+  fijo con botón Copiar y cierre explícito "Ya la anoté" (sin ESC ni backdrop). La
+  contraseña vive solo en estado React y se limpia al cerrar. Reemplaza el bloque
+  inline en `/admin/usuarios`, `/admin/usuarios/[id]` y `/owner/usuarios`.
+- `ec4d767` — **F2**: `ActionErrorModal`; lista y detalle admin dejan de descartar en
+  silencio los `!res.ok` y manejan errores de red/JSON. En `/owner/usuarios` el aviso
+  inline de error pasa al modal (cubre también activar/desactivar).
+- `0f5e911` — **F3**: `ConfirmModal` previo al reset en los 3 puntos, estado pendiente
+  con spinner y guard síncrono (`useRef`) contra doble click. El self-reset de OWNER
+  sigue permitido.
+- `ea748fd` — **F4**: en admin (lista y detalle) la llave queda deshabilitada para
+  OWNER, ADMIN e inactivos, reflejando los rechazos del server (que sigue siendo la
+  fuente de verdad).
+
+Merge `859774d`. Deudas abiertas del gate (F5, F7, refresco de tabla, tooltip,
+`mustChangePassword` en JWT) en `docs/known-issues/current-known-issues.md`.
+
 ## Junio 2026
 
 ### feat (call-center) — Fundación del dominio gateado

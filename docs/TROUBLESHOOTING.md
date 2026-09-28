@@ -247,9 +247,23 @@ El JWT no se refresca automáticamente al cambiar `executiveAccess`.
 
 ### Síntoma: ADMIN ve error "Solo el OWNER puede gestionar usuarios..."
 
-Comportamiento esperado. ADMIN no puede editar/desactivar/resetear
-password de usuarios OWNER ni a otros ADMIN. Hacer la operación desde
-un usuario OWNER.
+Comportamiento esperado. Es el 403 de edición/desactivación
+(`PATCH /api/admin/users/[id]`): ADMIN no puede editar ni desactivar
+usuarios OWNER ni a otros ADMIN. Hacer la operación desde un usuario
+OWNER.
+
+### Síntoma: ADMIN no puede resetear la contraseña de un OWNER/ADMIN
+
+Comportamiento esperado. El endpoint
+`POST /api/admin/users/[id]/reset-password` responde 403 con:
+
+> "Solo el OWNER puede resetear contrasenas de usuarios Direccion o Administrador."
+
+En la UI (`/admin/usuarios` y `/admin/usuarios/[id]`) la llave de reset
+aparece **deshabilitada** para filas OWNER, ADMIN e inactivas. Si igual
+llega un rechazo del server (403/400/404/500 o error de red), se muestra
+en un **modal de error**. Hacer el reset desde `/owner/usuarios` con un
+usuario OWNER.
 
 ### Síntoma: usuario relogueado pero sigue redirect loop a `/cambiar-password`
 

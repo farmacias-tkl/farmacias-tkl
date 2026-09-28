@@ -364,9 +364,15 @@ rm .env.neon
 
 ### Error "Solo el OWNER puede gestionar usuarios con rol Direccion o Administrador"
 
-**Causa:** un ADMIN intentó editar/desactivar/resetear-password de un usuario OWNER o ADMIN.
+**Causa:** un ADMIN intentó editar o desactivar (`PATCH /api/admin/users/[id]`) un usuario OWNER o ADMIN.
 
 **Esto es comportamiento esperado.** Solo OWNER puede gestionar esos roles. Si se necesita la operación, hacerla desde un usuario OWNER.
+
+### Error "Solo el OWNER puede resetear contrasenas de usuarios Direccion o Administrador."
+
+**Causa:** un ADMIN intentó resetear la contraseña (`POST /api/admin/users/[id]/reset-password`) de un usuario OWNER o ADMIN.
+
+**Esto es comportamiento esperado.** En `/admin/usuarios` la llave de reset aparece deshabilitada para OWNER, ADMIN e inactivos; si el server igual rechaza, la UI muestra el error en un modal. Hacer el reset desde `/owner/usuarios` con un usuario OWNER.
 
 ### `prisma db push` pide `--accept-data-loss`
 
