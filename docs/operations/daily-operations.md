@@ -331,8 +331,12 @@ Solo OWNER puede crear OWNER o ADMIN. Mismo flujo desde `/owner/usuarios/nuevo`.
 ### Conectarse a Neon desde local
 
 ```bash
-psql "postgresql://USER:PASS@HOST.neon.tech/DBNAME?sslmode=require"
+psql "<CONNECTION_STRING_DE_NEON>"
 ```
+
+`<CONNECTION_STRING_DE_NEON>`: la connection string del dashboard de Neon
+(esquema `postgresql`, con usuario, password, host y base, terminada en
+`?sslmode=require`).
 
 ### Prisma Studio contra producción
 

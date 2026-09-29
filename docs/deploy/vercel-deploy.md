@@ -175,8 +175,12 @@ y se agota rápido.
 El connection string del pooler queda así:
 
 ```
-postgresql://USER:PASS@ep-xxx-pooler.c-N.us-east-1.aws.neon.tech/DBNAME?sslmode=require&channel_binding=require
+<POOLER_CONNECTION_STRING_DE_NEON>
 ```
+
+Esquema `postgresql`, con usuario, password, host del pooler
+(`ep-<id>-pooler.<región>.aws.neon.tech`) y base; terminada en
+`?sslmode=require&channel_binding=require`.
 
 Notar el `-pooler` en el hostname. Eso lo provee Neon dashboard cuando
 copiás el connection string.
