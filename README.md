@@ -159,7 +159,7 @@ Lista de variables requeridas. Sin valores reales — copiar `.env.example` y co
 
 | Variable | Descripción | Placeholder |
 |---|---|---|
-| `DATABASE_URL` | Connection string Postgres | `postgresql://USER:PASS@HOST:5432/DB?sslmode=require` |
+| `DATABASE_URL` | Connection string Postgres | `<CONNECTION_STRING_POSTGRES>` — esquema `postgresql`, con usuario, password, host y base; terminada en `?sslmode=require` |
 | `AUTH_SECRET` | Secret para firmar JWTs (NextAuth v5). Generar con `openssl rand -base64 32` | `YOUR_AUTH_SECRET` |
 | `NEXTAUTH_URL` | URL pública de la app | `https://YOUR_DOMAIN` |
 | `NODE_ENV` | `development`, `production` o `test` | `development` |

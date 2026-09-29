@@ -147,6 +147,9 @@ async function main() {
       assert.ok(conv!.firstResponseAt, "firstResponseAt parseado del ISO");
       const we = await prisma.webhookEvent.findUnique({ where: { id } });
       assert.equal(we!.payload, null, "payload nuleado tras PROCESSED");
+      assert.equal(we!.status, "PROCESSED");
+      assert.ok(we!.processedAt, "processedAt registrado en WebhookEvent");
+      assert.equal(await prisma.syncLog.count({ where: { source: "EMOZION", status: "SUCCESS" } }), 0, "éxito NO crea SyncLog");
     });
 
     // 2. message_created incoming (CUSTOMER) + outgoing privado (OPERATOR, isPrivate); sentAt ISO
@@ -378,7 +381,7 @@ async function main() {
     const syncSucc = await prisma.syncLog.count({ where: { status: "SUCCESS" } });
     const syncErrC = await prisma.syncLog.count({ where: { status: { in: ["ERROR", "PARTIAL"] } } });
     console.log(`SyncLog SUCCESS=${syncSucc} ERROR/PARTIAL=${syncErrC}`);
-    await check("SyncLog se crea para éxito y para fallo", () => { assert.ok(syncSucc >= 1 && syncErrC >= 1); });
+    await check("SyncLog solo para fallo (éxito no escribe)", () => { assert.equal(syncSucc, 0); assert.ok(syncErrC >= 1); });
   } finally {
     await (await import("../prisma")).prisma.$disconnect().catch(() => {});
     console.log("\n== teardown ==");

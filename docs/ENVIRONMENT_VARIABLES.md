@@ -40,14 +40,20 @@ fuente de verdad — si agregás o renombrás una variable, actualizá este doc.
 **Formato Neon (con pooler y SSL)**:
 
 ```
-postgresql://USER:PASS@HOST.neon.tech/DBNAME?sslmode=require&channel_binding=require
+<POOLER_CONNECTION_STRING_DE_NEON>
 ```
+
+Esquema `postgresql`, con usuario, password, host del pooler de Neon
+(`*.neon.tech`) y base; terminada en `?sslmode=require&channel_binding=require`.
 
 **Formato local**:
 
 ```
-postgresql://postgres:PASSWORD@localhost:5432/tkl_dev
+<CONNECTION_STRING_LOCAL>
 ```
+
+Esquema `postgresql`, usuario `postgres` con su password local, host
+`localhost:5432` y base `tkl_dev`.
 
 **Dónde se usa**:
 - `prisma/schema.prisma` (datasource).
@@ -139,8 +145,12 @@ sola línea. Usado para autenticar contra Drive API.
 **Formato**: JSON serializado.
 
 ```json
-{"type":"service_account","project_id":"YOUR_PROJECT_ID","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"YOUR_SA_EMAIL","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"...","client_x509_cert_url":"...","universe_domain":"googleapis.com"}
+{"type":"service_account","project_id":"YOUR_PROJECT_ID","private_key_id":"...","private_key":"<CLAVE_PRIVADA_DEL_SA>","client_email":"YOUR_SA_EMAIL","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"...","client_x509_cert_url":"...","universe_domain":"googleapis.com"}
 ```
+
+El valor real de `<CLAVE_PRIVADA_DEL_SA>` contiene secuencias `\n`
+literales (barra invertida + `n`) entre sus líneas; deben conservarse
+como escape dentro del string JSON.
 
 **Dónde se usa**:
 - `src/lib/integrations/google-drive.ts` (cliente Drive).

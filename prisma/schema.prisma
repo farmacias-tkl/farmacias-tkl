@@ -1357,8 +1357,13 @@ model WebhookEvent {
   accountId              Int
   externalConversationId String?
   externalMessageId      String?
-  // payload MÍNIMO NORMALIZADO (lo arma el processor del 4B 4/4): NUNCA
-  // custom_attributes/data_url/DNI/teléfono completo. Se nulea tras TTL 7 días.
+  // payload MÍNIMO NORMALIZADO (lo arman los mappers en el receptor del webhook).
+  // CONTIENE: ids externos, estado, fechas, labels crudas, contacto (teléfono completo +
+  // nombre visible), body del mensaje, autor/sender id y metadata de adjuntos sin URL.
+  // EXCLUYE por diseño: custom_attributes, additional_attributes, data_url, thumb_url;
+  // nunca el body crudo del webhook.
+  // Se anula (JsonNull) al quedar PROCESSED; ERROR/RECEIVED lo conservan. Sin TTL
+  // implementado: retención pendiente (ver docs/known-issues).
   // Sin UI; los logs no imprimen contenido. Cifrado de campo = gate de decisión
   // pre-prod (datos de salud, Ley 25.326), no en 4B inicial.
   payload                Json?

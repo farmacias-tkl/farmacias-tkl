@@ -16,6 +16,10 @@ import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent }
  * dominio falla → rollback del dominio (nada parcial), pero el WebhookEvent ERROR + el
  * SyncLog ERROR sobreviven (la marca de "qué pasó" nunca se pierde con el rollback).
  *
+ * SyncLog SOLO en fallo (ERROR/PARTIAL): el éxito ya queda en WebhookEvent
+ * (status PROCESSED + processedAt); una fila de SyncLog por webhook exitoso era
+ * redundante y hacía crecer la tabla sin lectores.
+ *
  * Fuera-de-orden: SIN reconsulta a Emozion. message_created sin conversación previa y sin
  * datos de conversación en el payload → ERROR (needsRetry), dominio intacto. La reconsulta
  * es mejora futura (no se usa el token de Emozion acá).
@@ -168,7 +172,7 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
     }
   }
 
-  // ── (2) FUERA de la transacción de dominio: marca + SyncLog (sobreviven al rollback) ──
+  // ── (2) FUERA de la transacción de dominio: marca (+ SyncLog solo en fallo) ──
   if (domainOk) {
     await prisma.webhookEvent.update({
       where: { id: ev.id },
@@ -177,17 +181,6 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
         processedAt: new Date(),
         payload: Prisma.JsonNull, // minimización: el dato ya vive en el dominio
         error: warnings.length ? warnings.join("; ").slice(0, 500) : null,
-      },
-    });
-    await prisma.syncLog.create({
-      data: {
-        source: "EMOZION",
-        status: "SUCCESS",
-        message: `webhook ${ev.eventType} procesado`,
-        rowsProcessed: 1,
-        warnings: warnings.length ? warnings : undefined,
-        syncDate: new Date(),
-        triggeredBy: "WEBHOOK",
       },
     });
     return { status: "PROCESSED", outcome, warnings, error: null };

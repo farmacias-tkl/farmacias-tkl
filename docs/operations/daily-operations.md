@@ -33,9 +33,12 @@ Los 3 runs llaman al mismo endpoint `POST /api/sync/trigger` con
    ```sql
    SELECT createdAt, source, status, message, "rowsProcessed"
    FROM "SyncLog"
+   WHERE source <> 'EMOZION'
    ORDER BY createdAt DESC
    LIMIT 10;
    ```
+   `EMOZION` (webhook del call center) solo loguea errores (`ERROR`/`PARTIAL`);
+   se excluye para que no tape los runs de saldos/ventas.
 3. **Dashboard ejecutivo**: abrir `https://dashboard.YOUR_DOMAIN/executive`.
    No debe mostrar banner de stale (excepto domingos para saldos).
 
@@ -331,8 +334,12 @@ Solo OWNER puede crear OWNER o ADMIN. Mismo flujo desde `/owner/usuarios/nuevo`.
 ### Conectarse a Neon desde local
 
 ```bash
-psql "postgresql://USER:PASS@HOST.neon.tech/DBNAME?sslmode=require"
+psql "<CONNECTION_STRING_DE_NEON>"
 ```
+
+`<CONNECTION_STRING_DE_NEON>`: la connection string del dashboard de Neon
+(esquema `postgresql`, con usuario, password, host y base, terminada en
+`?sslmode=require`).
 
 ### Prisma Studio contra producción
 
