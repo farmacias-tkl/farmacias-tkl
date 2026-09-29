@@ -157,7 +157,7 @@ Para verificar el setup:
 Esto dispara un run manual. Verificá:
 - Status del workflow = success.
 - En Vercel logs: aparece la request a `/api/sync/trigger`.
-- En la DB: `SELECT * FROM "SyncLog" ORDER BY "createdAt" DESC LIMIT 5;` muestra el run.
+- En la DB: `SELECT * FROM "SyncLog" WHERE source <> 'EMOZION' ORDER BY "createdAt" DESC LIMIT 5;` muestra el run.
 
 ---
 
@@ -215,6 +215,8 @@ Cada run muestra:
 ### `SyncLog` en Neon
 
 La tabla `SyncLog` es el log persistente de cada ejecución del sync.
+El webhook del call center (`source = EMOZION`) solo loguea errores
+(`ERROR`/`PARTIAL`), por eso se excluye de las queries de control.
 Útil para historiales y stats:
 
 ```sql
@@ -226,6 +228,7 @@ SELECT
   AVG("durationMs") as avg_ms
 FROM "SyncLog"
 WHERE "createdAt" > now() - interval '7 days'
+  AND source <> 'EMOZION'
 GROUP BY hour, source, status
 ORDER BY hour DESC;
 ```
@@ -342,7 +345,7 @@ hace falta (ej: el sync que puede tardar 2-3 min).
 
 1. **Vercel UI**: último deploy verde. Sin errors recientes en Functions.
 2. **GitHub Actions**: los 3 runs del día están en verde (Daily Sync workflow).
-3. **`SyncLog`**: filas recientes con `status=SUCCESS` (no `STALE` ni `ERROR` recurrentes).
+3. **`SyncLog`**: filas recientes de saldos/ventas (`source <> 'EMOZION'`) con `status=SUCCESS` (no `STALE` ni `ERROR` recurrentes).
 4. **Dashboard ejecutivo**: visible en `https://dashboard.YOUR_DOMAIN/executive`, KPIs no en 0.
 
 ---

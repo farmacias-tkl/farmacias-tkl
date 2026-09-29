@@ -368,11 +368,14 @@ model SyncLog {
 ```
 
 Cada llamada a `syncBalances()` y `syncSales()` escribe un row.
+El webhook del call center (`source = EMOZION`) solo escribe cuando un
+evento falla (`ERROR`/`PARTIAL`); el éxito queda en `WebhookEvent`.
 Diagnóstico:
 
 ```sql
 SELECT createdAt, source, status, message, "rowsProcessed"
 FROM "SyncLog"
+WHERE source <> 'EMOZION'
 ORDER BY createdAt DESC
 LIMIT 20;
 ```
