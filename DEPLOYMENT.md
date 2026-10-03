@@ -306,9 +306,10 @@ rm .env.neon
 2. **Logs en Vercel**: dashboard → proyecto → **Functions** logs. Buscar requests a `/api/sync/trigger` en horario del cron.
 3. **SyncLog en Neon**: la tabla `SyncLog` registra cada ejecución del sync. Query:
    ```sql
-   SELECT createdAt, source, status, message, "rowsProcessed"
+   SELECT "createdAt", source, status, message, "rowsProcessed"
    FROM "SyncLog"
-   ORDER BY createdAt DESC
+   WHERE source <> 'ATTACHMENT_STORAGE'
+   ORDER BY "createdAt" DESC
    LIMIT 20;
    ```
 

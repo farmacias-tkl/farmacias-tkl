@@ -369,14 +369,16 @@ model SyncLog {
 
 Cada llamada a `syncBalances()` y `syncSales()` escribe un row.
 El webhook del call center (`source = EMOZION`) solo escribe cuando un
-evento falla (`ERROR`/`PARTIAL`); el éxito queda en `WebhookEvent`.
-Diagnóstico:
+evento falla (`ERROR`/`PARTIAL`); el éxito queda en `WebhookEvent`. El job de copia
+de adjuntos (`source = ATTACHMENT_STORAGE`) solo escribe en fallo, TTL, aborto,
+alerta o reintentos.
+Diagnóstico de saldos/ventas:
 
 ```sql
-SELECT createdAt, source, status, message, "rowsProcessed"
+SELECT "createdAt", source, status, message, "rowsProcessed"
 FROM "SyncLog"
-WHERE source <> 'EMOZION'
-ORDER BY createdAt DESC
+WHERE source IN ('GOOGLE_DRIVE', 'SALES_API')
+ORDER BY "createdAt" DESC
 LIMIT 20;
 ```
 

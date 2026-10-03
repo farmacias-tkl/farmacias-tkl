@@ -31,14 +31,14 @@ Los 3 runs llaman al mismo endpoint `POST /api/sync/trigger` con
    - Los 3 runs del día deberían estar verdes.
 2. **`SyncLog` en Neon**:
    ```sql
-   SELECT createdAt, source, status, message, "rowsProcessed"
+   SELECT "createdAt", source, status, message, "rowsProcessed"
    FROM "SyncLog"
-   WHERE source <> 'EMOZION'
-   ORDER BY createdAt DESC
+   WHERE source IN ('GOOGLE_DRIVE', 'SALES_API')
+   ORDER BY "createdAt" DESC
    LIMIT 10;
    ```
-   `EMOZION` (webhook del call center) solo loguea errores (`ERROR`/`PARTIAL`);
-   se excluye para que no tape los runs de saldos/ventas.
+   `EMOZION` (webhook del call center) y `ATTACHMENT_STORAGE` (job de copia de adjuntos)
+   solo loguean fallos/alertas; se excluyen para que no tapen los runs de saldos/ventas.
 3. **Dashboard ejecutivo**: abrir `https://dashboard.YOUR_DOMAIN/executive`.
    No debe mostrar banner de stale (excepto domingos para saldos).
 

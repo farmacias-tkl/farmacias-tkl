@@ -134,6 +134,7 @@ async function main() {
   const { runAttachmentCopy } = await import("./worker");
   const { runMaintenance } = await import("./maintenance");
   const { buildReserveQuery } = await import("./reserve-sql");
+  const { handleAttachmentCopy } = await import("./endpoint");
 
   // Captura TODO stdout/stderr de cada corrida para verificar que nunca sale una URL.
   // Reentrante (corridas concurrentes): se instala una vez y se restaura al salir la última.
@@ -620,6 +621,121 @@ async function main() {
       assert.equal(r.storageStatus, "PENDING"); assert.equal(r.storageAttemptCount, 0);
       const log = await prisma.syncLog.findFirstOrThrow({ where: { source: "ATTACHMENT_STORAGE" } });
       assert.equal(log.status, "ERROR"); assert.ok(JSON.stringify(log.warnings).includes("CONFIG_INVALID:ATTACHMENT_SOURCE_ALLOWED_HOSTS"));
+    });
+
+    // ── B6.3-C4: endpoint (núcleo) con el worker REAL ──────────────────────────────────
+    console.log("\n== B6.3-C4: endpoint ==");
+    const SECRET = "k".repeat(40);
+    const AUTH = `Bearer ${SECRET}`;
+    const callEndpoint = (r2: FakeR2, fetcher: SourceFetcher, o: { signal?: AbortSignal; deadlineMs?: number; env?: Record<string, string> } = {}) =>
+      captured(() => handleAttachmentCopy(
+        { authorization: AUTH, signal: o.signal ?? new AbortController().signal },
+        {
+          env: o.env ?? { ATTACHMENT_COPY_JOB_SECRET: SECRET, ATTACHMENT_COPY_JOB_ENABLED: "true" },
+          runCopy: runAttachmentCopy,
+          getPrisma: async () => prisma,
+          copyDeps: { prisma, r2: { client: r2, bucket: BUCKET }, fetchers: [fetcher], now, random: () => 0.5 },
+          ...(o.deadlineMs ? { deadlineMs: o.deadlineMs } : {}),
+        },
+      ));
+    const bodyHasNoIds = (body: unknown, ids: string[]) => {
+      const j = JSON.stringify(body);
+      for (const id of ids) assert.ok(!j.includes(id), "sin ids en el cuerpo");
+      assert.ok(!/SENTINEL|https?:|files\.example|cdn\.example|call-center\/attachments|receta/.test(j), "sin URLs/keys/hostnames");
+    };
+
+    await check("C4-1. corrida OK → 200 con contadores correctos; sin ids/URLs/keys/hostnames en el cuerpo", async () => {
+      await reset();
+      const r2 = new FakeR2(); const f = new FakeFetcher();
+      const a = await mkAtt(), b = await mkAtt();
+      const bad = await mkAtt();
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("A") });
+      f.behaviors.set(b.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("B") });
+      f.behaviors.set(bad.sourceFetchUrl!, { kind: "error", code: "ORIGIN_HTTP_5XX", retryable: true });
+      const expired = await mkAtt({ capturedAt: new Date(now().getTime() - 73 * 3600_000) });
+      const res = await callEndpoint(r2, f);
+      assert.equal(res.status, 200);
+      const body = res.body as any;
+      assert.equal(body.status, "ok");
+      assert.deepEqual(body.maintenance, { leasesRecovered: 0, attachmentsTtlNoOrigin: 1, webhookUrlsCleared: 0 });
+      assert.equal(body.copy.reserved, 3); assert.equal(body.copy.stored, 2); assert.equal(body.copy.retryScheduled, 1);
+      assert.equal(body.copy.stopReason, "none"); assert.equal(body.copy.aborted, false); assert.equal(body.copy.preflight, "ok");
+      assert.equal(typeof body.durationMs, "number");
+      assert.deepEqual(Object.keys(body).sort(), ["copy", "durationMs", "maintenance", "status"]);
+      bodyHasNoIds(body, [a.id, b.id, bad.id, expired.id]);
+      assert.equal((await row(a.id)).storageStatus, "STORED");
+    });
+
+    await check("C4-2. flag apagado → 200 disabled y la base NO se tocó (ni mantenimiento)", async () => {
+      await reset();
+      const expired = await mkAtt({ capturedAt: new Date(now().getTime() - 73 * 3600_000) });
+      const before = await row(expired.id);
+      const r2 = new FakeR2();
+      const res = await callEndpoint(r2, new FakeFetcher(), { env: { ATTACHMENT_COPY_JOB_SECRET: SECRET } });
+      assert.equal(res.status, 200); assert.deepEqual(res.body, { status: "disabled" });
+      assert.deepEqual(await row(expired.id), before, "ni siquiera M2 corrió");
+      assert.equal(r2.putCalls + r2.getCalls, 0); assert.equal(await prisma.syncLog.count(), 0);
+    });
+
+    await check("C4-3. deadline: worker lento → responde antes de maxDuration con stopReason deadline; ítem liberado", async () => {
+      await reset();
+      const r2 = new FakeR2(); const f = new FakeFetcher();
+      const a = await mkAtt({ status: "FAILED", attempts: 1, next: new Date(now().getTime() - 1000) });
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "hang" });
+      const t0 = Date.now();
+      const res = await callEndpoint(r2, f, { deadlineMs: 500 });
+      const elapsed = Date.now() - t0;
+      assert.ok(elapsed < 60_000 && elapsed < 2_500, `respondió a tiempo (${elapsed} ms)`);
+      const body = res.body as any;
+      assert.equal(res.status, 200); assert.equal(body.copy.stopReason, "deadline"); assert.equal(body.copy.released, 1); assert.equal(body.copy.aborted, false);
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "FAILED"); assert.equal(r.storageAttemptCount, 1); assert.ok(r.sourceFetchUrl);
+    });
+
+    await check("C4-4. request abortado → stopReason external, ítems liberados sin consumir intento", async () => {
+      await reset();
+      const r2 = new FakeR2(); const f = new FakeFetcher();
+      const a = await mkAtt(), b = await mkAtt();
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "hang" });
+      f.behaviors.set(b.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("b") });
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 100);
+      const res = await callEndpoint(r2, f, { signal: ctrl.signal });
+      const body = res.body as any;
+      assert.equal(res.status, 200); assert.equal(body.copy.stopReason, "external"); assert.equal(body.copy.aborted, true);
+      assert.equal(body.copy.released, 2); assert.equal(body.copy.stored, 0);
+      for (const x of [a, b]) {
+        const r = await row(x.id);
+        assert.equal(r.storageStatus, "PENDING"); assert.equal(r.storageAttemptCount, 0); assert.equal(r.storageLeaseId, null);
+      }
+    });
+
+    await check("C4-5. lectores de SyncLog existentes (app + consultas de docs) NO muestran filas ATTACHMENT_STORAGE", async () => {
+      await reset();
+      const t = (m: number) => new Date(Date.now() - m * 60_000);
+      await prisma.syncLog.createMany({ data: [
+        { source: "GOOGLE_DRIVE", status: "SUCCESS", message: "saldos", syncDate: new Date(), triggeredBy: "CRON", createdAt: t(30) },
+        { source: "SALES_API", status: "SUCCESS", message: "ventas", syncDate: new Date(), triggeredBy: "CRON", createdAt: t(20) },
+        { source: "EMOZION", status: "ERROR", message: "webhook", syncDate: new Date(), triggeredBy: "WEBHOOK", createdAt: t(10) },
+        { source: "ATTACHMENT_STORAGE", status: "ERROR", message: "copy", syncDate: new Date(), triggeredBy: "CRON", createdAt: t(1) },
+      ] });
+      // App: dashboard ejecutivo (executive/page.tsx:128) — consulta SIN cambios (ya filtra GOOGLE_DRIVE).
+      const lastSync = await prisma.syncLog.findFirst({ where: { source: "GOOGLE_DRIVE" }, orderBy: { createdAt: "desc" }, select: { createdAt: true, status: true } });
+      assert.equal(lastSync?.status, "SUCCESS");
+      // Docs: SQL literal de cada doc, ya filtrado.
+      const sources = async (sql: string) => (await prisma.$queryRawUnsafe<{ source: string }[]>(sql)).map((r) => r.source);
+      const docsSaldosVentas = [
+        `SELECT * FROM "SyncLog" WHERE source IN ('GOOGLE_DRIVE', 'SALES_API') ORDER BY "createdAt" DESC LIMIT 5;`, // vercel-deploy.md
+        `SELECT "createdAt", source, status, message, "rowsProcessed" FROM "SyncLog" WHERE source IN ('GOOGLE_DRIVE', 'SALES_API') ORDER BY "createdAt" DESC LIMIT 10;`, // daily-operations.md
+        `SELECT "createdAt", source, status, message, "rowsProcessed" FROM "SyncLog" WHERE source IN ('GOOGLE_DRIVE', 'SALES_API') ORDER BY "createdAt" DESC LIMIT 20;`, // neon-schema.md
+      ];
+      for (const q of docsSaldosVentas) assert.deepEqual(await sources(q), ["SALES_API", "GOOGLE_DRIVE"], q);
+      const grouped = await sources(`SELECT date_trunc('hour', "createdAt") as hour, source, status, COUNT(*) as runs, AVG("durationMs") as avg_ms FROM "SyncLog" WHERE "createdAt" > now() - interval '7 days' AND source IN ('GOOGLE_DRIVE', 'SALES_API') GROUP BY hour, source, status ORDER BY hour DESC;`);
+      assert.deepEqual(grouped.sort(), ["GOOGLE_DRIVE", "SALES_API"]);
+      // DEPLOYMENT.md: antes sin filtro (mostraba todo) → sigue mostrando todo MENOS ATTACHMENT_STORAGE.
+      assert.deepEqual(await sources(`SELECT "createdAt", source, status, message, "rowsProcessed" FROM "SyncLog" WHERE source <> 'ATTACHMENT_STORAGE' ORDER BY "createdAt" DESC LIMIT 20;`), ["EMOZION", "SALES_API", "GOOGLE_DRIVE"]);
+      // Equivalencia con la consulta vieja (<> 'EMOZION') sobre los datos de siempre:
+      assert.deepEqual(await sources(`SELECT source FROM "SyncLog" WHERE source <> 'EMOZION' AND source <> 'ATTACHMENT_STORAGE' ORDER BY "createdAt" DESC`), ["SALES_API", "GOOGLE_DRIVE"]);
     });
 
     await check("10. ningún log (stdout/stderr) ni SyncLog contiene la URL / filename", async () => {
