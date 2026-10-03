@@ -1,25 +1,25 @@
 /**
- * Tests del adapter R2 (B6.2). PUROS, sin credenciales ni bucket real: inyección de un stub
- * `R2SendClient`. NO leen env real (salvo el test de CONFIG_MISSING, que limpia/restaura env).
+ * Tests del adapter R2 (B6.2 + B6.3-C1). PUROS, sin credenciales ni bucket real: inyección de
+ * un stub `R2SendClient`. NO leen env real (salvo el test de CONFIG_MISSING, que limpia/restaura env).
  *   npx tsx src/lib/integrations/r2.test.ts
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {
   putObject,
   headObject,
+  getObject,
   deleteObject,
   getR2Config,
   R2StorageError,
   type R2SendClient,
 } from "./r2";
 
-// Checksums: contrato interno = HEX lowercase de 64; al borde S3 va en base64. Derivamos los
-// pares hex↔base64 con Buffer para que los asserts queden consistentes con el adapter.
-const HEX_IN = "a".repeat(64);                                   // checksum del input (hex válido)
-const HEX_IN_B64 = Buffer.from(HEX_IN, "hex").toString("base64"); // lo que debe ir al comando
-const HEX_R2 = "b".repeat(64);                                   // checksum que "devuelve" R2 (en hex)
-const HEX_R2_B64 = Buffer.from(HEX_R2, "hex").toString("base64"); // forma base64 que entrega R2
+// Content-MD5 = base64 de 16 bytes. Derivado con crypto para que el assert sea real.
+const MD5_B64 = createHash("md5").update("hola").digest("base64");
+// SHA-256 en base64 que un stub "devuelve" como si R2 lo mandara: el adapter debe IGNORARLO.
+const SHA_B64 = createHash("sha256").update("hola").digest("base64");
 
 let passed = 0;
 const failures: string[] = [];
@@ -92,58 +92,76 @@ async function main() {
     assert.equal(stub.lastInput.ChecksumSHA256, undefined); // sin checksum no se manda
   });
 
-  // 3. putObject con checksum hex → manda ChecksumSHA256 en BASE64 al comando
-  await test("3. putObject con checksum hex → ChecksumSHA256 base64 en el comando", async () => {
+  // 3. putObject con contentMd5 + ifNoneMatch → ContentMD5 / IfNoneMatch en el comando
+  await test("3. putObject con contentMd5 + ifNoneMatch → ContentMD5 e IfNoneMatch en el comando", async () => {
     const stub = makeStub({});
-    await putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "application/pdf", contentLength: 1, checksumSha256: HEX_IN });
-    assert.equal(stub.lastInput.ChecksumSHA256, HEX_IN_B64); // convertido hex→base64
-    assert.notEqual(stub.lastInput.ChecksumSHA256, HEX_IN);  // NO va el hex crudo
+    await putObject(stub, "b", { key: "k", body: Buffer.from("hola"), contentType: "application/pdf", contentLength: 4, contentMd5: MD5_B64, ifNoneMatch: "*" });
+    assert.equal(stub.lastInput.ContentMD5, MD5_B64);
+    assert.equal(stub.lastInput.IfNoneMatch, "*");
   });
 
-  // 3b. putObject con checksum inválido (no-hex / longitud ≠ 64) → error claro, sin enviar nada
-  await test("3b. putObject checksum inválido → R2StorageError 'invalid checksum input'", async () => {
+  // 3a. sin contentMd5/ifNoneMatch → el comando NO los lleva
+  await test("3a. putObject sin contentMd5/ifNoneMatch → comando sin ContentMD5 ni IfNoneMatch", async () => {
     const stub = makeStub({});
-    await assert.rejects(
-      () => putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1, checksumSha256: "NOPE" }),
-      (e: unknown) => e instanceof R2StorageError && e.code === "PERMANENT" && /invalid checksum input/.test(e.message),
-    );
-    // longitud correcta pero con char no-hex
-    await assert.rejects(
-      () => putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1, checksumSha256: "g".repeat(64) }),
-      (e: unknown) => e instanceof R2StorageError && e.code === "PERMANENT",
-    );
+    await putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1 });
+    assert.equal("ContentMD5" in stub.lastInput, false);
+    assert.equal("IfNoneMatch" in stub.lastInput, false);
+  });
+
+  // 3b. contentMd5 inválido → error claro, sin enviar nada
+  await test("3b. putObject contentMd5 inválido → R2StorageError 'invalid contentMd5 input'", async () => {
+    const stub = makeStub({});
+    const bad = [
+      "NOPE",                                                   // forma inválida
+      createHash("sha256").update("x").digest("base64"),        // base64 válido pero 32 bytes
+      createHash("md5").update("x").digest("hex"),              // hex de 32 chars, no base64
+      "AAAAAAAAAAAAAAAAAAAAAB==",                               // 24 chars pero NO canónico
+    ];
+    for (const contentMd5 of bad) {
+      await assert.rejects(
+        () => putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1, contentMd5 }),
+        (e: unknown) => e instanceof R2StorageError && e.code === "PERMANENT" && /invalid contentMd5 input/.test(e.message),
+        `debe rechazar contentMd5=${contentMd5}`,
+      );
+    }
     assert.equal(stub.lastCommand, "", "no debe haber enviado nada al cliente");
   });
 
-  // 3c. putObject SIN checksum → el comando NO lleva ChecksumSHA256 ni ningún campo Checksum*
-  //     (no metemos checksum de más a nivel de comando; el automático del SDK se apaga con
-  //     WHEN_REQUIRED en el cliente real, pero eso es middleware, no visible al stub — ver nota).
-  await test("3c. putObject sin checksum → comando sin ningún campo Checksum*", async () => {
-    const stub = makeStub({ ETag: '"e"' });
-    await putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1 });
-    const checksumKeys = Object.keys(stub.lastInput).filter((k) => /checksum/i.test(k));
-    assert.deepEqual(checksumKeys, [], `no debe haber campos Checksum* en el comando; encontrados: ${checksumKeys.join(",")}`);
+  // 3b'. ifNoneMatch distinto de "*" (forzado en runtime) → error claro, sin enviar nada
+  await test("3b'. putObject ifNoneMatch ≠ \"*\" → R2StorageError PERMANENT", async () => {
+    const stub = makeStub({});
+    await assert.rejects(
+      () => putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1, ifNoneMatch: '"etag"' as any }),
+      (e: unknown) => e instanceof R2StorageError && e.code === "PERMANENT" && /ifNoneMatch/.test(e.message),
+    );
+    assert.equal(stub.lastCommand, "");
   });
 
-  // 4. putObject devuelve provider/bucket/key/contentType/sizeBytes/checksum(hex)/etag/uploadedAt
-  await test("4. putObject result completo (checksum de R2 base64→hex prevalece, etag transportado)", async () => {
-    const stub = makeStub({ ETag: '"e1"', ChecksumSHA256: HEX_R2_B64 });
-    const r = await putObject(stub, "b", { key: "k", body: Buffer.from("xy"), contentType: "image/png", contentLength: 2, checksumSha256: HEX_IN });
+  // 3c. el comando NUNCA lleva campos Checksum* (R2 no soporta SHA-256 full-object), aun con MD5
+  //     (el automático del SDK se apaga con WHEN_REQUIRED en el cliente real; es middleware,
+  //     no visible al stub — ver nota en r2.ts).
+  await test("3c. putObject → comando sin ningún campo Checksum* (con y sin contentMd5)", async () => {
+    const stub = makeStub({ ETag: '"e"' });
+    await putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1 });
+    let checksumKeys = Object.keys(stub.lastInput).filter((k) => /checksum/i.test(k));
+    assert.deepEqual(checksumKeys, [], `sin MD5: campos Checksum* encontrados: ${checksumKeys.join(",")}`);
+    await putObject(stub, "b", { key: "k", body: Buffer.from("hola"), contentType: "x", contentLength: 4, contentMd5: MD5_B64, ifNoneMatch: "*" });
+    checksumKeys = Object.keys(stub.lastInput).filter((k) => /checksum/i.test(k));
+    assert.deepEqual(checksumKeys, [], `con MD5: campos Checksum* encontrados: ${checksumKeys.join(",")}`);
+  });
+
+  // 4. putObject devuelve provider/bucket/key/contentType/sizeBytes/etag/uploadedAt; SIN checksum
+  await test("4. putObject result completo y SIN checksumSha256 (aunque R2 devuelva ChecksumSHA256)", async () => {
+    const stub = makeStub({ ETag: '"e1"', ChecksumSHA256: SHA_B64 });
+    const r = await putObject(stub, "b", { key: "k", body: Buffer.from("xy"), contentType: "image/png", contentLength: 2 });
     assert.equal(r.provider, "R2");
     assert.equal(r.bucket, "b");
     assert.equal(r.key, "k");
     assert.equal(r.contentType, "image/png");
     assert.equal(r.sizeBytes, 2);
-    assert.equal(r.checksumSha256, HEX_R2); // el de R2 (base64→hex) prevalece sobre el input
     assert.equal(r.etag, '"e1"');
     assert.ok(r.uploadedAt instanceof Date);
-  });
-
-  // 4b. putObject sin checksum de R2 → cae al del input (ya hex)
-  await test("4b. putObject sin ChecksumSHA256 de R2 → usa el del input (hex)", async () => {
-    const stub = makeStub({ ETag: '"e"' });
-    const r = await putObject(stub, "b", { key: "k", body: Buffer.from("z"), contentType: "x", contentLength: 1, checksumSha256: HEX_IN });
-    assert.equal(r.checksumSha256, HEX_IN);
+    assert.equal("checksumSha256" in r, false, "el result no debe exponer checksumSha256");
   });
 
   // 5. putObject con Readable SIN contentLength → error claro, sin tocar el cliente
@@ -166,10 +184,10 @@ async function main() {
     assert.equal(stub.lastInput.ContentLength, 4);
   });
 
-  // 6. headObject mapea ContentType/ContentLength/ETag/LastModified/Metadata/ChecksumSHA256
-  await test("6. headObject mapea metadata", async () => {
+  // 6. headObject mapea ContentType/ContentLength/ETag/LastModified/Metadata; SIN checksum
+  await test("6. headObject mapea metadata y NO expone checksumSha256", async () => {
     const lm = new Date("2026-06-22T10:00:00Z");
-    const stub = makeStub({ ContentType: "image/jpeg", ContentLength: 12345, ETag: '"h"', LastModified: lm, Metadata: { attachmentid: "1" }, ChecksumSHA256: HEX_R2_B64 });
+    const stub = makeStub({ ContentType: "image/jpeg", ContentLength: 12345, ETag: '"h"', LastModified: lm, Metadata: { attachmentid: "1" }, ChecksumSHA256: SHA_B64 });
     const r = await headObject(stub, "b", "k");
     assert.equal(r.exists, true);
     assert.equal(r.contentType, "image/jpeg");
@@ -177,8 +195,36 @@ async function main() {
     assert.equal(r.etag, '"h"');
     assert.equal(r.lastModified, lm);
     assert.deepEqual(r.metadata, { attachmentid: "1" });
-    assert.equal(r.checksumSha256, HEX_R2); // base64 de R2 → hex interno
+    assert.equal("checksumSha256" in r, false, "head no debe exponer checksumSha256");
     assert.equal(stub.lastCommand, "HeadObjectCommand");
+  });
+
+  // 6b. getObject transporta body (stream) + metadata, sin consumirlo ni hashearlo
+  await test("6b. getObject → GetObjectCommand, body iterable intacto + metadata", async () => {
+    const lm = new Date("2026-06-22T10:00:00Z");
+    const stub = makeStub({ Body: Readable.from([Buffer.from("ho"), Buffer.from("la")]), ContentType: "image/jpeg", ContentLength: 4, ETag: '"g"', LastModified: lm, Metadata: { sha256: "x" }, ChecksumSHA256: SHA_B64 });
+    const r = await getObject(stub, "b", "k");
+    assert.equal(stub.lastCommand, "GetObjectCommand");
+    assert.equal(stub.lastInput.Bucket, "b");
+    assert.equal(stub.lastInput.Key, "k");
+    assert.equal(r.provider, "R2");
+    assert.equal(r.contentType, "image/jpeg");
+    assert.equal(r.sizeBytes, 4);
+    assert.equal(r.etag, '"g"');
+    assert.equal(r.lastModified, lm);
+    assert.deepEqual(r.metadata, { sha256: "x" });
+    assert.equal("checksumSha256" in r, false);
+    const chunks: Buffer[] = [];
+    for await (const c of r.body) chunks.push(Buffer.from(c));
+    assert.equal(Buffer.concat(chunks).toString(), "hola");
+  });
+
+  // 6c. getObject inexistente → NOT_FOUND; body ausente/no iterable → UNKNOWN
+  await test("6c. getObject inexistente → NOT_FOUND; sin body legible → UNKNOWN", async () => {
+    const missing = makeThrowingStub({ name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
+    await assert.rejects(() => getObject(missing, "b", "k"), (e: unknown) => e instanceof R2StorageError && e.code === "NOT_FOUND");
+    await assert.rejects(() => getObject(makeStub({}), "b", "k"), (e: unknown) => e instanceof R2StorageError && e.code === "UNKNOWN");
+    await assert.rejects(() => getObject(makeStub({ Body: "no-stream" }), "b", "k"), (e: unknown) => e instanceof R2StorageError && e.code === "UNKNOWN");
   });
 
   // 7. headObject de objeto inexistente → NOT_FOUND
@@ -214,6 +260,40 @@ async function main() {
     await assert.rejects(() => headObject(badReq, "b", "k"), (e: unknown) => e instanceof R2StorageError && e.code === "PERMANENT");
     const weird = makeThrowingStub({ name: "Weird" });
     await assert.rejects(() => headObject(weird, "b", "k"), (e: unknown) => e instanceof R2StorageError && e.code === "UNKNOWN");
+  });
+
+  // 9c. BadDigest / InvalidDigest (400) → CHECKSUM_MISMATCH, NO PERMANENT
+  await test("9c. BadDigest/InvalidDigest → CHECKSUM_MISMATCH (antes de la regla 4xx)", async () => {
+    const put = (s: R2SendClient) => putObject(s, "b", { key: "k", body: Buffer.from("hola"), contentType: "x", contentLength: 4, contentMd5: MD5_B64 });
+    for (const err of [
+      { name: "BadDigest", $metadata: { httpStatusCode: 400 } },
+      { Code: "BadDigest", $metadata: { httpStatusCode: 400 } },
+      { name: "InvalidDigest", $metadata: { httpStatusCode: 400 } },
+      { Code: "InvalidDigest", $metadata: { httpStatusCode: 400 } },
+    ]) {
+      await assert.rejects(() => put(makeThrowingStub(err)), (e: unknown) => e instanceof R2StorageError && e.code === "CHECKSUM_MISMATCH", JSON.stringify(err));
+    }
+  });
+
+  // 9d. 412 / PreconditionFailed → PRECONDITION_FAILED, NO PERMANENT
+  await test("9d. 412/PreconditionFailed → PRECONDITION_FAILED (antes de la regla 4xx)", async () => {
+    const put = (s: R2SendClient) => putObject(s, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1, ifNoneMatch: "*" });
+    for (const err of [
+      { name: "PreconditionFailed", $metadata: { httpStatusCode: 412 } },
+      { Code: "PreconditionFailed" },
+      { name: "SomethingElse", $metadata: { httpStatusCode: 412 } },
+    ]) {
+      await assert.rejects(() => put(makeThrowingStub(err)), (e: unknown) => e instanceof R2StorageError && e.code === "PRECONDITION_FAILED", JSON.stringify(err));
+    }
+  });
+
+  // 9e. los mensajes de error normalizados no filtran key/bucket
+  await test("9e. mensajes de R2StorageError sin key/bucket", async () => {
+    const s = makeThrowingStub({ name: "BadDigest", $metadata: { httpStatusCode: 400 } });
+    await assert.rejects(
+      () => putObject(s, "SENTINEL_BUCKET", { key: "SENTINEL_KEY", body: Buffer.from("hola"), contentType: "x", contentLength: 4, contentMd5: MD5_B64 }),
+      (e: unknown) => e instanceof R2StorageError && !/SENTINEL_/.test(e.message),
+    );
   });
 
   console.log(`\nr2 adapter: ${passed} ok, ${failures.length} fail`);

@@ -1,12 +1,18 @@
 /**
- * Adapter de storage R2 (Cloudflare) / S3-compatible (B6.2).
+ * Adapter de storage R2 (Cloudflare) / S3-compatible (B6.2, ampliado en B6.3-C1).
  *
- * GENÉRICO: NO importa Prisma ni conoce ConversationAttachment. Solo put/head/delete de
+ * GENÉRICO: NO importa Prisma ni conoce ConversationAttachment. Solo put/head/get/delete de
  * objetos. La convención de `key` (storageKey), el mapeo a columnas de dominio, la captura de
  * origen y el job de copia viven AFUERA (B6.3) — esto es solo la capa de transporte.
  *
- * B6.2 NO incluye: signed URLs / preview / download (B3-B), validación de integridad
- * end-to-end (B6.3), streaming sin contentLength (eval @aws-sdk/lib-storage en B6.3).
+ * INTEGRIDAD (B6.3-C1): R2 NO soporta checksum SHA-256 de objeto completo (solo COMPOSITE /
+ * multipart; ver matriz de compatibilidad S3 de Cloudflare) y HeadObject no lo devuelve. Por
+ * eso el adapter NO maneja ChecksumSHA256: transporta Content-MD5 (validación de transporte
+ * del lado de R2) e If-None-Match:"*" (no pisar un objeto existente). El SHA-256 y el criterio
+ * de cierre (GetObject + recálculo) son del worker, no del adapter.
+ *
+ * NO incluye: signed URLs / preview / download (B3-B), hash ni tope de bytes en getObject
+ * (worker), streaming sin contentLength.
  *
  * Inyección de cliente: las operaciones reciben un `S3Client` (vía `getR2Client()` en prod,
  * o un stub en tests). Así los tests no necesitan credenciales ni bucket real.
@@ -15,6 +21,7 @@ import {
   S3Client,
   PutObjectCommand,
   HeadObjectCommand,
+  GetObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { Readable } from "node:stream";
@@ -28,10 +35,12 @@ export interface PutR2ObjectInput {
   /** REQUERIDO si body es Readable (PutObjectCommand necesita longitud; streaming sin
    *  longitud previa queda para B6.3 con lib-storage). */
   contentLength?: number;
-  /** Checksum SHA-256 en HEX lowercase de 64 chars (formato interno / lo que va a la DB).
-   *  Se transporta a R2 convertido a base64 (borde S3). NO se valida integridad en B6.2
-   *  (eso es B6.3). Hex inválido → R2StorageError PERMANENT "invalid checksum input". */
-  checksumSha256?: string;
+  /** MD5 del body en BASE64 (24 chars, 16 bytes) → header Content-MD5. R2 lo valida del lado
+   *  del servidor (BadDigest si no coincide → CHECKSUM_MISMATCH). Inválido → R2StorageError
+   *  PERMANENT "invalid contentMd5 input" sin enviar nada. */
+  contentMd5?: string;
+  /** Solo "*": la escritura falla (412 → PRECONDITION_FAILED) si la key ya existe. */
+  ifNoneMatch?: "*";
   metadata?: Record<string, string>;
 }
 
@@ -41,7 +50,6 @@ export interface PutR2ObjectResult {
   key: string;
   contentType: string;
   sizeBytes?: number;
-  checksumSha256?: string; // HEX lowercase (convertido del base64 que devuelve R2, o el del input)
   etag?: string;           // metadata técnica — NUNCA checksum fuente de verdad
   uploadedAt: Date;
 }
@@ -53,7 +61,19 @@ export interface HeadR2ObjectResult {
   exists: true;
   contentType?: string;
   sizeBytes?: number;
-  checksumSha256?: string; // HEX lowercase (convertido del base64 de R2)
+  etag?: string;
+  lastModified?: Date;
+  metadata?: Record<string, string>;
+}
+
+export interface GetR2ObjectResult {
+  provider: "R2";
+  bucket: string;
+  key: string;
+  /** Body crudo como stream de bytes. SIN hash ni tope: el consumidor (worker) los aplica. */
+  body: AsyncIterable<Uint8Array>;
+  contentType?: string;
+  sizeBytes?: number;
   etag?: string;
   lastModified?: Date;
   metadata?: Record<string, string>;
@@ -65,9 +85,11 @@ export type R2ErrorCode =
   | "AUTH_ERROR"
   | "NOT_FOUND"
   | "RETRYABLE"
-  // RESERVADO para B6.3: B6.2 NO lo emite porque no valida integridad end-to-end (no compara
-  // el checksum esperado contra el del objeto). Queda en el enum para que B6.3 no toque el contrato.
+  // R2 rechazó el Content-MD5 (BadDigest/InvalidDigest). La comparación SHA-256 post-GetObject
+  // del worker también usa este código.
   | "CHECKSUM_MISMATCH"
+  // If-None-Match:"*" sobre una key existente (412 / PreconditionFailed).
+  | "PRECONDITION_FAILED"
   | "PERMANENT"
   | "UNKNOWN";
 
@@ -117,7 +139,7 @@ export function getR2Client(): { client: S3Client; bucket: string } {
     credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
     // SDK v3 (≥3.729) puede inyectar CRC32 por defecto en uploads. Contra R2/S3-compatible
     // eso puede romper uploads. Configuramos WHEN_REQUIRED para evitar checksums automáticos
-    // no pedidos y respetar un checksum provisto explícitamente (ej. nuestro ChecksumSHA256).
+    // no pedidos; la integridad de transporte va por Content-MD5 explícito.
     // Nombres verificados por typecheck en el SDK instalado (3.1075). El efecto real contra R2
     // se confirma recién en un gate posterior con bucket real (B6.4/staging), no con stubs.
     requestChecksumCalculation: "WHEN_REQUIRED",
@@ -132,16 +154,14 @@ export interface R2SendClient {
   send(command: unknown): Promise<any>;
 }
 
-// ── Checksum: borde hex (interno/DB) ↔ base64 (S3/R2) ───────────────────────────────
-const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
+// ── Content-MD5: base64 canónico de exactamente 16 bytes ────────────────────────────
+const BASE64_MD5_RE = /^[A-Za-z0-9+/]{22}==$/;
 
-/** hex lowercase de 64 → base64 (formato que espera el header ChecksumSHA256 de S3/R2). */
-function hexSha256ToBase64(hex: string): string {
-  return Buffer.from(hex, "hex").toString("base64");
-}
-/** base64 (lo que devuelve R2) → hex lowercase (formato interno / DB). */
-function base64Sha256ToHex(b64: string): string {
-  return Buffer.from(b64, "base64").toString("hex");
+/** ¿Es un MD5 en base64 válido? Forma (24 chars, padding "==") + round-trip canónico a 16 bytes. */
+function isValidBase64Md5(v: unknown): v is string {
+  if (typeof v !== "string" || !BASE64_MD5_RE.test(v)) return false;
+  const bytes = Buffer.from(v, "base64");
+  return bytes.length === 16 && bytes.toString("base64") === v;
 }
 
 // ── Normalización de errores del SDK/stub ───────────────────────────────────────────
@@ -161,6 +181,14 @@ function normalizeError(e: unknown): R2StorageError {
       name === "SignatureDoesNotMatch" || status === 401 || status === 403) {
     return new R2StorageError("AUTH_ERROR", "Acceso denegado a R2", e);
   }
+  // Integridad de transporte: R2 rechazó el Content-MD5 (antes de la regla 4xx genérica).
+  if (name === "BadDigest" || code === "BadDigest" || name === "InvalidDigest" || code === "InvalidDigest") {
+    return new R2StorageError("CHECKSUM_MISMATCH", "R2 rechazó el Content-MD5", e);
+  }
+  // If-None-Match:"*" sobre key existente (antes de la regla 4xx genérica).
+  if (name === "PreconditionFailed" || code === "PreconditionFailed" || status === 412) {
+    return new R2StorageError("PRECONDITION_FAILED", "El objeto ya existe (precondición fallida)", e);
+  }
   // Transitorio / retryable: red, timeout, throttling, 5xx
   if (name === "TimeoutError" || name === "RequestTimeout" || name === "ThrottlingException" ||
       name === "SlowDown" || (err as { code?: string })?.code === "ECONNRESET" ||
@@ -176,8 +204,9 @@ function normalizeError(e: unknown): R2StorageError {
 
 // ── Operaciones ─────────────────────────────────────────────────────────────────────
 /**
- * Sube un objeto a R2. Si `body` es Readable, `contentLength` es OBLIGATORIO (B6.2 no maneja
- * streaming sin longitud). Transporta `checksumSha256` como ChecksumSHA256 (no lo valida).
+ * Sube un objeto a R2. Si `body` es Readable, `contentLength` es OBLIGATORIO (no se maneja
+ * streaming sin longitud). Transporta `contentMd5` como Content-MD5 e `ifNoneMatch` como
+ * If-None-Match. NO envía ningún campo Checksum* (R2 no soporta SHA-256 full-object).
  */
 export async function putObject(
   client: R2SendClient,
@@ -190,26 +219,27 @@ export async function putObject(
     throw new R2StorageError("PERMANENT", "contentLength es obligatorio cuando body es un stream (B6.2 no soporta streaming sin longitud)");
   }
 
-  // Checksum interno = hex lowercase de 64; al borde S3 va en base64. Hex inválido → error claro.
-  let checksumBase64: string | undefined;
-  if (input.checksumSha256 != null) {
-    if (!HEX_SHA256_RE.test(input.checksumSha256)) {
-      throw new R2StorageError("PERMANENT", "invalid checksum input (se espera SHA-256 hex lowercase de 64 chars)");
-    }
-    checksumBase64 = hexSha256ToBase64(input.checksumSha256);
+  // Content-MD5 = base64 canónico de 16 bytes. Inválido → error claro, sin enviar nada.
+  if (input.contentMd5 != null && !isValidBase64Md5(input.contentMd5)) {
+    throw new R2StorageError("PERMANENT", "invalid contentMd5 input (se espera MD5 en base64 de 16 bytes)");
+  }
+  // If-None-Match: solo "*" (defensa runtime además del tipo).
+  if (input.ifNoneMatch != null && input.ifNoneMatch !== "*") {
+    throw new R2StorageError("PERMANENT", "invalid ifNoneMatch input (solo se admite \"*\")");
   }
 
   // NOTA (límite del stub): los tests interceptan .send(command) y ven command.input, pero el
   // checksum automático del SDK se inyecta en el MIDDLEWARE (después de construir el comando).
   // Estos tests verifican la capa de COMANDO (lo que ponemos nosotros); que R2 acepte el upload
-  // sin CRC32 espurio se confirma en B6.4/staging con bucket real, no con stubs.
+  // sin CRC32 espurio y valide Content-MD5 se confirma en B6.4 con bucket real, no con stubs.
   const command = new PutObjectCommand({
     Bucket: bucket,
     Key: input.key,
     Body: input.body as any,
     ContentType: input.contentType,
     ...(input.contentLength != null ? { ContentLength: input.contentLength } : {}),
-    ...(checksumBase64 ? { ChecksumSHA256: checksumBase64 } : {}),
+    ...(input.contentMd5 != null ? { ContentMD5: input.contentMd5 } : {}),
+    ...(input.ifNoneMatch != null ? { IfNoneMatch: input.ifNoneMatch } : {}),
     ...(input.metadata ? { Metadata: input.metadata } : {}),
   });
 
@@ -226,8 +256,6 @@ export async function putObject(
     key: input.key,
     contentType: input.contentType,
     sizeBytes: input.contentLength,
-    // R2 devuelve el checksum en base64 → lo normalizamos a hex; si no vino, usamos el del input (ya hex).
-    checksumSha256: typeof res?.ChecksumSHA256 === "string" ? base64Sha256ToHex(res.ChecksumSHA256) : input.checksumSha256,
     etag: typeof res?.ETag === "string" ? res.ETag : undefined,
     uploadedAt: new Date(),
   };
@@ -255,7 +283,39 @@ export async function headObject(
     exists: true,
     contentType: typeof res?.ContentType === "string" ? res.ContentType : undefined,
     sizeBytes: typeof res?.ContentLength === "number" ? res.ContentLength : undefined,
-    checksumSha256: typeof res?.ChecksumSHA256 === "string" ? base64Sha256ToHex(res.ChecksumSHA256) : undefined,
+    etag: typeof res?.ETag === "string" ? res.ETag : undefined,
+    lastModified: res?.LastModified instanceof Date ? res.LastModified : undefined,
+    metadata: res?.Metadata && typeof res.Metadata === "object" ? res.Metadata : undefined,
+  };
+}
+
+/**
+ * GET de un objeto. Devuelve el body como stream de bytes + metadata técnica. GENÉRICO: no
+ * hashea ni aplica tope de bytes (eso es del worker). Si no existe → R2StorageError(NOT_FOUND).
+ * Body ausente o no iterable → R2StorageError(UNKNOWN).
+ */
+export async function getObject(
+  client: R2SendClient,
+  bucket: string,
+  key: string,
+): Promise<GetR2ObjectResult> {
+  let res: any;
+  try {
+    res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  } catch (e) {
+    throw normalizeError(e);
+  }
+  const body = res?.Body;
+  if (!body || typeof body[Symbol.asyncIterator] !== "function") {
+    throw new R2StorageError("UNKNOWN", "GetObject sin body legible");
+  }
+  return {
+    provider: "R2",
+    bucket,
+    key,
+    body: body as AsyncIterable<Uint8Array>,
+    contentType: typeof res?.ContentType === "string" ? res.ContentType : undefined,
+    sizeBytes: typeof res?.ContentLength === "number" ? res.ContentLength : undefined,
     etag: typeof res?.ETag === "string" ? res.ETag : undefined,
     lastModified: res?.LastModified instanceof Date ? res.LastModified : undefined,
     metadata: res?.Metadata && typeof res.Metadata === "object" ? res.Metadata : undefined,
