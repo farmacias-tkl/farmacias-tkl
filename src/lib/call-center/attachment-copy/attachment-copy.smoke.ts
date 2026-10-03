@@ -135,6 +135,7 @@ async function main() {
   const { runMaintenance } = await import("./maintenance");
   const { buildReserveQuery } = await import("./reserve-sql");
   const { handleAttachmentCopy } = await import("./endpoint");
+  const { runMaintenanceOnly } = await import("./maintenance-runner");
 
   // Captura TODO stdout/stderr de cada corrida para verificar que nunca sale una URL.
   // Reentrante (corridas concurrentes): se instala una vez y se restaura al salir la última.
@@ -627,12 +628,13 @@ async function main() {
     console.log("\n== B6.3-C4: endpoint ==");
     const SECRET = "k".repeat(40);
     const AUTH = `Bearer ${SECRET}`;
-    const callEndpoint = (r2: FakeR2, fetcher: SourceFetcher, o: { signal?: AbortSignal; deadlineMs?: number; env?: Record<string, string> } = {}) =>
+    const callEndpoint = (r2: FakeR2, fetcher: SourceFetcher, o: { signal?: AbortSignal; deadlineMs?: number; env?: Record<string, string>; body?: string; authorization?: string; runCopy?: typeof runAttachmentCopy } = {}) =>
       captured(() => handleAttachmentCopy(
-        { authorization: AUTH, signal: o.signal ?? new AbortController().signal },
+        { authorization: o.authorization ?? AUTH, signal: o.signal ?? new AbortController().signal, readBody: async () => o.body ?? "" },
         {
           env: o.env ?? { ATTACHMENT_COPY_JOB_SECRET: SECRET, ATTACHMENT_COPY_JOB_ENABLED: "true" },
-          runCopy: runAttachmentCopy,
+          runCopy: o.runCopy ?? runAttachmentCopy,
+          runMaintenanceOnly: () => runMaintenanceOnly(prisma, now(), [fetcher]),
           getPrisma: async () => prisma,
           copyDeps: { prisma, r2: { client: r2, bucket: BUCKET }, fetchers: [fetcher], now, random: () => 0.5 },
           ...(o.deadlineMs ? { deadlineMs: o.deadlineMs } : {}),
@@ -661,20 +663,92 @@ async function main() {
       assert.equal(body.copy.reserved, 3); assert.equal(body.copy.stored, 2); assert.equal(body.copy.retryScheduled, 1);
       assert.equal(body.copy.stopReason, "none"); assert.equal(body.copy.aborted, false); assert.equal(body.copy.preflight, "ok");
       assert.equal(typeof body.durationMs, "number");
-      assert.deepEqual(Object.keys(body).sort(), ["copy", "durationMs", "maintenance", "status"]);
+      assert.deepEqual(Object.keys(body).sort(), ["copy", "durationMs", "healthy", "maintenance", "status"]);
+      assert.equal(body.healthy, true);
       bodyHasNoIds(body, [a.id, b.id, bad.id, expired.id]);
       assert.equal((await row(a.id)).storageStatus, "STORED");
     });
 
-    await check("C4-2. flag apagado → 200 disabled y la base NO se tocó (ni mantenimiento)", async () => {
+    /** R2 que FALLA si se lo invoca (para afirmar cero llamadas). */
+    class ExplodingR2 extends FakeR2 {
+      calls = 0;
+      async send(): Promise<any> { this.calls++; throw new Error("R2 NO debe invocarse en maintenance_only"); }
+    }
+
+    await check("C4-2. flag apagado + auth OK → maintenance_only: M1/M2/M3 corren; cero reservas; cero llamadas a R2", async () => {
+      await reset();
+      const past = new Date(now().getTime() - 1000);
+      const stuck = await mkAtt({ status: "COPYING", attempts: MAX_ATTEMPTS, next: past, lease: "lease-stuck" });   // M1
+      const expired = await mkAtt({ capturedAt: new Date(now().getTime() - 73 * 3600_000) });                         // M2
+      const ready = await mkAtt();                                                                                     // listo, NO se reserva
+      const ev = await prisma.webhookEvent.create({ data: { source: "EMOZION", eventType: "message_created", accountId: 22, status: "ERROR",
+        receivedAt: new Date(now().getTime() - 73 * 3600_000), transientSourceUrls: { v: 1, urls: { k: urlFor(777) }, rejected: [] } }, select: { id: true } }); // M3
+      const r2 = new ExplodingR2();
+      let workerCalls = 0;
+      const res = await callEndpoint(r2, new FakeFetcher(), {
+        env: { ATTACHMENT_COPY_JOB_SECRET: SECRET },
+        runCopy: async (...a) => { workerCalls++; return runAttachmentCopy(...a); },
+      });
+      assert.equal(res.status, 200);
+      const body = res.body as any;
+      assert.equal(body.status, "maintenance_only"); assert.equal(body.healthy, true);
+      assert.deepEqual(body.maintenance, { leasesRecovered: 1, attachmentsTtlNoOrigin: 1, webhookUrlsCleared: 1 });
+      assert.deepEqual(Object.keys(body).sort(), ["durationMs", "healthy", "maintenance", "status"]);
+      assert.equal(workerCalls, 0, "el worker no se invoca"); assert.equal(r2.calls, 0, "cero llamadas a R2");
+      assert.equal((await row(stuck.id)).storageLastError, "LEASE_EXPIRED_MAX");
+      assert.equal((await row(expired.id)).storageStatus, "NO_ORIGIN");
+      const r = await row(ready.id);
+      assert.equal(r.storageStatus, "PENDING"); assert.equal(r.storageAttemptCount, 0, "cero reservas"); assert.equal(r.storageLeaseId, null);
+      const isNull = (await prisma.$queryRaw<{ n: boolean }[]>`SELECT ("transientSourceUrls" IS NULL) AS n FROM "WebhookEvent" WHERE id = ${ev.id}`)[0].n;
+      assert.equal(isNull, true, "M3 corrió");
+      const log = await prisma.syncLog.findFirstOrThrow({ where: { source: "ATTACHMENT_STORAGE" } });
+      assert.equal(log.status, "ERROR"); assert.equal(log.message, "attachment-copy: maintenance_only");
+      assert.ok(!/SENTINEL|https?:|receta/.test(JSON.stringify(log)));
+    });
+
+    await check("C4-2b. flag apagado: sin secreto → 503 y auth mala → 401, ambos sin tocar la base", async () => {
       await reset();
       const expired = await mkAtt({ capturedAt: new Date(now().getTime() - 73 * 3600_000) });
       const before = await row(expired.id);
-      const r2 = new FakeR2();
-      const res = await callEndpoint(r2, new FakeFetcher(), { env: { ATTACHMENT_COPY_JOB_SECRET: SECRET } });
-      assert.equal(res.status, 200); assert.deepEqual(res.body, { status: "disabled" });
-      assert.deepEqual(await row(expired.id), before, "ni siquiera M2 corrió");
-      assert.equal(r2.putCalls + r2.getCalls, 0); assert.equal(await prisma.syncLog.count(), 0);
+      const r503 = await callEndpoint(new ExplodingR2(), new FakeFetcher(), { env: {} });
+      assert.equal(r503.status, 503);
+      const r401 = await callEndpoint(new ExplodingR2(), new FakeFetcher(), { env: { ATTACHMENT_COPY_JOB_SECRET: SECRET }, authorization: "Bearer otro" });
+      assert.equal(r401.status, 401); assert.equal(r401.body, null);
+      assert.deepEqual(await row(expired.id), before, "M2 NO corrió");
+      assert.equal(await prisma.syncLog.count(), 0);
+    });
+
+    await check("C4-2c. limit 1 con 3 ítems listos → copia 1; limit 50 → el resto; inválido → 400 sin tocar la base", async () => {
+      await reset();
+      const r2 = new FakeR2(); const f = new FakeFetcher();
+      const atts = [await mkAtt(), await mkAtt(), await mkAtt()];
+      for (const a of atts) f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from(`l-${a.id}`) });
+      for (const body of ['{"limit":0}', '{"limit":51}', '{"limit":"3"}', '{"limit":2.5}', "{roto", '{"limit":1,"x":1}']) {
+        const bad = await callEndpoint(r2, f, { body });
+        assert.equal(bad.status, 400, body); assert.deepEqual(bad.body, { status: "bad_request" });
+      }
+      const unauth = await callEndpoint(r2, f, { body: "{roto", authorization: "Bearer otro" });
+      assert.equal(unauth.status, 401, "no autenticado con body inválido → 401");
+      assert.equal(r2.putCalls, 0); assert.equal(await prisma.syncLog.count(), 0);
+      for (const a of atts) assert.equal((await row(a.id)).storageAttemptCount, 0, "400/401 no tocaron la base");
+      const one = await callEndpoint(r2, f, { body: '{"limit":1}' });
+      assert.equal((one.body as any).copy.reserved, 1); assert.equal((one.body as any).copy.stored, 1);
+      const rest = await callEndpoint(r2, f, { body: '{"limit":50}' });
+      assert.equal(rest.status, 200); assert.equal((rest.body as any).copy.stored, 2);
+    });
+
+    await check("C4-2d. healthy=false con preflight fallido y con R2 auth (worker real)", async () => {
+      await reset();
+      const f = new FakeFetcher();
+      const a = await mkAtt();
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("h") });
+      const pre = new FakeR2(); pre.headAuthError = true;
+      const r1 = await callEndpoint(pre, f);
+      assert.equal((r1.body as any).copy.stopReason, "preflight"); assert.equal((r1.body as any).healthy, false);
+      const auth = new FakeR2(); auth.putAuthError = true;
+      const r2 = await callEndpoint(auth, f);
+      assert.equal((r2.body as any).copy.stopReason, "r2_auth"); assert.equal((r2.body as any).healthy, false);
+      assert.equal((await row(a.id)).storageAttemptCount, 0);
     });
 
     await check("C4-3. deadline: worker lento → responde antes de maxDuration con stopReason deadline; ítem liberado", async () => {
@@ -688,6 +762,7 @@ async function main() {
       assert.ok(elapsed < 60_000 && elapsed < 2_500, `respondió a tiempo (${elapsed} ms)`);
       const body = res.body as any;
       assert.equal(res.status, 200); assert.equal(body.copy.stopReason, "deadline"); assert.equal(body.copy.released, 1); assert.equal(body.copy.aborted, false);
+      assert.equal(body.healthy, true, "deadline no es una falla");
       const r = await row(a.id);
       assert.equal(r.storageStatus, "FAILED"); assert.equal(r.storageAttemptCount, 1); assert.ok(r.sourceFetchUrl);
     });

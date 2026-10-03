@@ -83,6 +83,8 @@ export interface CopyCounters {
 
 export interface AttachmentCopyRunResult {
   maintenance: MaintenanceResult;
+  /** false si el mantenimiento falló (contadores en 0); la copia igual se intenta. */
+  maintenanceOk: boolean;
   copy: CopyCounters;
 }
 
@@ -147,14 +149,23 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
   const copy: CopyCounters = { enabled: false, preflight: "skipped", reserved: 0, stored: 0, retryScheduled: 0, failedTerminal: 0, conflicts: 0, leaseLost: 0, released: 0, aborted: false, stopReason: "none" };
   const warnings: string[] = [];
 
-  // 1. Mantenimiento (siempre)
-  const maintenance = await runMaintenance(d.prisma, d.now(), d.fetchers);
+  // 1. Mantenimiento (siempre). Si falla, se registra y la copia igual se intenta.
+  let maintenance: MaintenanceResult = { leasesRecovered: 0, attachmentsTtlNoOrigin: 0, webhookUrlsCleared: 0 };
+  let maintenanceOk = true;
+  try {
+    maintenance = await runMaintenance(d.prisma, d.now(), d.fetchers);
+  } catch (e) {
+    maintenanceOk = false;
+    const code = safeErrorCode(e, "copy.maintenance");
+    warnings.push(`MAINTENANCE_FAILED:${code}`);
+    console.error("[attachment-copy] maintenance failed", JSON.stringify({ code }));
+  }
 
   // 2. ¿Copia habilitada?
   copy.enabled = d.env.ATTACHMENT_COPY_JOB_ENABLED === "true" && (!!d.r2 || r2ConfigValid());
   if (!copy.enabled) {
-    await writeRunSyncLog(d, maintenance, copy, warnings);
-    return { maintenance, copy };
+    await writeRunSyncLog(d, maintenance, copy, warnings, maintenanceOk);
+    return { maintenance, maintenanceOk, copy };
   }
 
   // 3. Config de los fetchers ANTES de reservar (no se queman intentos por error de config)
@@ -165,8 +176,8 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
       copy.stopReason = "config";
       warnings.push(`CONFIG_INVALID:${bad}`);
       console.error("[attachment-copy] config invalid", JSON.stringify({ condition: bad }));
-      await writeRunSyncLog(d, maintenance, copy, warnings);
-      return { maintenance, copy };
+      await writeRunSyncLog(d, maintenance, copy, warnings, maintenanceOk);
+      return { maintenance, maintenanceOk, copy };
     }
   }
 
@@ -190,8 +201,8 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
       const code = op.reason() ? `copy.preflight|${op.reason()}` : safeErrorCode(e, "copy.preflight");
       warnings.push(`PREFLIGHT_FAILED:${code}`);
       console.error("[attachment-copy] preflight failed", JSON.stringify({ code }));
-      await writeRunSyncLog(d, maintenance, copy, warnings);
-      return { maintenance, copy };
+      await writeRunSyncLog(d, maintenance, copy, warnings, maintenanceOk);
+      return { maintenance, maintenanceOk, copy };
     } finally {
       op.dispose();
     }
@@ -233,8 +244,8 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
     run.dispose();
   }
 
-  await writeRunSyncLog(d, maintenance, copy, warnings);
-  return { maintenance, copy };
+  await writeRunSyncLog(d, maintenance, copy, warnings, maintenanceOk);
+  return { maintenance, maintenanceOk, copy };
 }
 
 function count(c: CopyCounters, o: ItemOutcome): void {
@@ -426,8 +437,8 @@ async function release(d: CopyDeps, row: ReservedRow, leaseId: string): Promise<
 }
 
 // ── SyncLog (solo en fallo, TTL, aborto, alerta o reintentos) ─────────────────────────
-async function writeRunSyncLog(d: CopyDeps, m: MaintenanceResult, c: CopyCounters, warnings: string[]): Promise<void> {
-  const severe = c.preflight === "failed" || c.aborted || c.stopReason === "r2_timeout" || c.failedTerminal > 0 || c.conflicts > 0 || m.leasesRecovered > 0 || m.attachmentsTtlNoOrigin > 0;
+async function writeRunSyncLog(d: CopyDeps, m: MaintenanceResult, c: CopyCounters, warnings: string[], maintenanceOk: boolean): Promise<void> {
+  const severe = !maintenanceOk || c.preflight === "failed" || c.aborted || c.stopReason === "r2_timeout" || c.failedTerminal > 0 || c.conflicts > 0 || m.leasesRecovered > 0 || m.attachmentsTtlNoOrigin > 0;
   const mild = c.retryScheduled > 0 || m.webhookUrlsCleared > 0;
   if (!severe && !mild) return;
   const all = [
