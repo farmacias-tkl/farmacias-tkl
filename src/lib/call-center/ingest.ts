@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { canTransition } from "./transitions";
+import { initialStorageFields, type AttachmentSourceCtx } from "./attachment-source";
 import type {
   NormalizedConversation,
   NormalizedMessage,
@@ -99,6 +100,9 @@ export async function upsertMessageFromEmozion(
   tx: Prisma.TransactionClient,
   conversationId: string,
   n: NormalizedMessage,
+  // B6.3-C2: contexto de captura de origen (de WebhookEvent.transientSourceUrls). null = no
+  // capturado (captura off/probe/"on" no efectivo, o reproceso sin transientSourceUrls).
+  sourceCtx: AttachmentSourceCtx | null = null,
 ): Promise<UpsertMessageResult> {
   if (n.isActivity) {
     return { messageId: null, created: false, ignored: true, warnings: [] };
@@ -138,8 +142,9 @@ export async function upsertMessageFromEmozion(
   for (const a of n.attachments) {
     const existingAtt = await tx.conversationAttachment.findUnique({
       where: { sourceExternalId: a.sourceExternalId },
+      select: { id: true },
     });
-    if (existingAtt) continue; // idempotente: ya persistido (retry / reenvío)
+    if (existingAtt) continue; // idempotente: ya persistido (retry / reenvío). Sin backfill de origen.
     await tx.conversationAttachment.create({
       data: {
         conversationId,
@@ -152,9 +157,13 @@ export async function upsertMessageFromEmozion(
         sizeBytes: a.sizeBytes,
         documentType: "UNKNOWN", // lo setea un humano, NUNCA la ingesta
         status: "RECEIVED",
+        // B6.3-C2 (E5): PENDING solo con URL capturada (la copia va a ocurrir); si no, NO_ORIGIN
+        // con el motivo. sourceFetchUrl es origen transitorio: lo consume y anula el job (C3).
+        ...initialStorageFields(a.sourceExternalId, sourceCtx),
         // retentionUntil omitido → default null (sin política de retención aún)
-        // NUNCA: mediaUrl/data_url/thumb_url/source_url/filename/bytes/storageProvider/storageKey
+        // NUNCA: mediaUrl/thumb_url/source_url/filename/bytes/storageProvider/storageKey
       },
+      select: { id: true },
     });
     attachmentsCreated++;
   }

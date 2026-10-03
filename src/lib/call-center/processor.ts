@@ -5,6 +5,7 @@ import {
   upsertMessageFromEmozion,
   applyStatusChangedFromEmozion,
 } from "./ingest";
+import { parseTransientSourceUrls } from "./attachment-source";
 import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent } from "./emozion-types";
 
 /**
@@ -94,7 +95,10 @@ function hydrateStatusEvent(s: any): NormalizedStatusEvent {
 }
 
 export async function processWebhookEvent(webhookEventId: string): Promise<ProcessResult> {
-  const ev = await prisma.webhookEvent.findUnique({ where: { id: webhookEventId } });
+  const ev = await prisma.webhookEvent.findUnique({
+    where: { id: webhookEventId },
+    select: { id: true, eventType: true, payload: true, transientSourceUrls: true, receivedAt: true },
+  });
   if (!ev) return { status: "ERROR", outcome: "error", warnings: [], error: "WebhookEvent no encontrado" };
 
   const warnings: string[] = [];
@@ -133,7 +137,10 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
               throw new ProcessError("needsRetry", "message_created fuera de orden y sin datos de conversación en el payload");
             }
           }
-          const r = await upsertMessageFromEmozion(tx, conv.id, hydrateMessage(payload.message));
+          // B6.3-C2: origen transitorio de adjuntos (fuera de payload). capturedAt = receivedAt
+          // → el TTL mide la edad real de la URL aunque el evento se reprocese más tarde.
+          const sourceCtx = parseTransientSourceUrls(ev.transientSourceUrls, ev.receivedAt);
+          const r = await upsertMessageFromEmozion(tx, conv.id, hydrateMessage(payload.message), sourceCtx);
           warnings.push(...r.warnings);
           break;
         }
@@ -180,13 +187,18 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
         status: "PROCESSED",
         processedAt: new Date(),
         payload: Prisma.JsonNull, // minimización: el dato ya vive en el dominio
+        // B6.3-C2: origen transitorio anulado en el MISMO update. DbNull (SQL NULL), NO JsonNull:
+        // los barridos e invariantes usan `IS NULL`.
+        transientSourceUrls: Prisma.DbNull,
         error: warnings.length ? warnings.join("; ").slice(0, 500) : null,
       },
+      select: { id: true },
     });
     return { status: "PROCESSED", outcome, warnings, error: null };
   }
 
   // dominio falló / needsRetry / insufficientData → ERROR; payload SE CONSERVA para reproceso.
+  // transientSourceUrls también se conserva (lo limpia el barrido TTL de 72h, C3).
   await prisma.webhookEvent.update({
     where: { id: ev.id },
     data: { status: "ERROR", attempts: { increment: 1 }, error: (errorMsg ?? "error").slice(0, 500) },

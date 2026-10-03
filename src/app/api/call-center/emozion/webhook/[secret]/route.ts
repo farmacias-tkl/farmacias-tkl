@@ -14,6 +14,7 @@
  * ni como fallback "para debug". Los logs nunca incluyen payload, body ni el secret.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   readEnvelope,
@@ -25,6 +26,17 @@ import {
 } from "@/lib/call-center/emozion-mappers";
 import { processWebhookEvent } from "@/lib/call-center/processor";
 import { buildAttachmentCapture } from "@/lib/call-center/attachment-debug";
+import {
+  resolveCaptureMode,
+  transientSourceUrlsForWebhook,
+  maybeProbeSourceUrls,
+} from "@/lib/call-center/attachment-source";
+import { getR2Config } from "@/lib/integrations/r2";
+
+/** ¿Config R2 completa? (para el gate de captura "on", E3). Nunca expone valores. */
+function r2ConfigValid(): boolean {
+  try { getR2Config(); return true; } catch { return false; }
+}
 
 export const runtime = "nodejs";
 
@@ -204,13 +216,27 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
   // DIAGNÓSTICO (gateado, apagado por defecto): si EMOZION_DEBUG_CAPTURE==="true", guardamos
   // la vista ESTRUCTURAL sanitizada (sin contenido/PII) en vez del payload normalizado. El
   // resto del flujo no cambia (se persiste y, si RECEIVED, se intenta procesar como siempre).
-  if (process.env.EMOZION_DEBUG_CAPTURE === "true" && raw && typeof raw === "object") {
+  const debugCaptureOn = process.env.EMOZION_DEBUG_CAPTURE === "true" && !!raw && typeof raw === "object";
+  if (debugCaptureOn) {
     payload = buildDebugCapture(raw, env);
   }
 
   // FALLBACK SEGURO: si no hubo payload mínimo normalizado, NO se guarda el body crudo.
   // Solo metadata + status IGNORED/ERROR. Las Dates del normalizado se serializan a ISO.
   const payloadJson = payload ? JSON.parse(JSON.stringify(payload)) : undefined;
+
+  // B6.3-C2 — ORIGEN TRANSITORIO de adjuntos: SOLO con captura "on" EFECTIVA (copia lista),
+  // status RECEIVED, message_created, debug apagado y con adjuntos. Va en su PROPIA columna en el
+  // MISMO create; NUNCA dentro de payload. Jamás se loguea.
+  const capture = resolveCaptureMode(process.env, r2ConfigValid);
+  const transientSourceUrls = transientSourceUrlsForWebhook({
+    mode: capture.mode,
+    allowedHosts: capture.allowedHosts,
+    status,
+    eventType,
+    debugCaptureOn,
+    rawAttachments: env.message?.attachments,
+  });
 
   let eventId: string;
   try {
@@ -222,6 +248,7 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
         externalConversationId,
         externalMessageId,
         payload: payloadJson,
+        ...(transientSourceUrls ? { transientSourceUrls: transientSourceUrls as unknown as Prisma.InputJsonValue } : {}),
         status,
         attempts: 0,
         error,
@@ -229,12 +256,18 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
       select: { id: true },
     });
     eventId = ev.id;
-    // Log sin payload/body/secret.
+    // Log sin payload/body/secret (ni transientSourceUrls).
     console.log("[emozion-webhook]", JSON.stringify({ eventId: ev.id, eventType, accountId, externalConversationId, externalMessageId, status, error }));
   } catch (e) {
     // No se pudo ni persistir → 5xx para que Emozion reintente (única red de seguridad).
     console.error("[emozion-webhook] persist failed:", e instanceof Error ? e.message : String(e));
     return NextResponse.json({ ok: false }, { status: 500 });
+  }
+
+  // B6.3-C2 — PROBE (solo modo "probe", tope por instancia + vencimiento): loguea la FORMA
+  // enmascarada de data_url. No persiste nada; nunca lanza.
+  if (eventType === "message_created") {
+    maybeProbeSourceUrls(eventId, env.message?.attachments);
   }
 
   // Procesamiento síncrono: solo para eventos RECEIVED (IGNORED/ERROR no tienen dominio que

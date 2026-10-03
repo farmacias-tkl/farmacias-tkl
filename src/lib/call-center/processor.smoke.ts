@@ -21,6 +21,13 @@ import {
   normalizeStatusEvent,
   conversationExternalId,
 } from "./emozion-mappers";
+import {
+  resolveCaptureMode,
+  transientSourceUrlsForWebhook,
+  maybeProbeSourceUrls,
+  __resetAttachmentSourceStateForTests,
+  type CaptureMode,
+} from "./attachment-source";
 
 const TEST_DB = "tkl_cc4b_smoke";
 const ISO = "2026-06-17T19:15:45.621-03:00";
@@ -73,8 +80,12 @@ const rawAtt = (id: number, fileType = "image", fileSize = 1024, sentinel = "") 
   thumb_url: `https://emozion.example/rails/active_storage/SENTINEL_THUMB_${sentinel || id}.jpg`,
 });
 
-// Espeja la construcción de payload del handler usando los MAPPERS REALES.
-function buildFromRaw(raw: any): { eventType: string; externalConversationId: string | null; externalMessageId: string | null; payload: any; status: "RECEIVED" | "IGNORED" | "ERROR" } {
+// B6.3-C2: opciones de captura que espejan el handler (modo efectivo + allowlist + debug).
+type CaptureOpts = { capture?: { mode: CaptureMode; allowedHosts: string[] }; debugOn?: boolean };
+
+// Espeja la construcción de payload del handler usando los MAPPERS REALES (y, desde B6.3-C2,
+// el MISMO gate de transientSourceUrls que usa el route).
+function buildFromRaw(raw: any, opts: CaptureOpts = {}): { eventType: string; externalConversationId: string | null; externalMessageId: string | null; payload: any; status: "RECEIVED" | "IGNORED" | "ERROR"; transientSourceUrls: unknown } {
   const env = readEnvelope(raw);
   const eventType = env.event ?? "unknown";
   const externalConversationId = conversationExternalId(env.conversation);
@@ -98,7 +109,14 @@ function buildFromRaw(raw: any): { eventType: string; externalConversationId: st
     if (r.outcome === "processed") payload = { event: eventType, statusEvent: r.data };
     else status = "ERROR";
   }
-  return { eventType, externalConversationId, externalMessageId, payload: payload ? JSON.parse(JSON.stringify(payload)) : null, status };
+  // Debug capture (espeja el route): el payload pasa a ser la vista estructural, no el normalizado.
+  if (opts.debugOn) payload = { _debug: "EMOZION_DEBUG_CAPTURE (simulado)" };
+  const capture = opts.capture ?? { mode: "off" as CaptureMode, allowedHosts: [] };
+  const transientSourceUrls = transientSourceUrlsForWebhook({
+    mode: capture.mode, allowedHosts: capture.allowedHosts, status, eventType,
+    debugCaptureOn: !!opts.debugOn, rawAttachments: env.message?.attachments,
+  });
+  return { eventType, externalConversationId, externalMessageId, payload: payload ? JSON.parse(JSON.stringify(payload)) : null, status, transientSourceUrls };
 }
 
 async function main() {
@@ -112,13 +130,23 @@ async function main() {
   const { processWebhookEvent, getUniqueViolationTarget, isDomainIdempotencyUniqueViolation } = await import("./processor");
 
   // Crea el WebhookEvent a partir de un RAW real (vía mappers) tal como lo haría el handler.
-  async function fromRaw(raw: any) {
-    const b = buildFromRaw(raw);
+  async function fromRaw(raw: any, opts: CaptureOpts = {}) {
+    const b = buildFromRaw(raw, opts);
     const ev = await prisma.webhookEvent.create({
-      data: { source: "EMOZION", eventType: b.eventType, accountId: 22, externalConversationId: b.externalConversationId, externalMessageId: b.externalMessageId, payload: b.payload ?? undefined, status: b.status, attempts: 0 },
+      data: {
+        source: "EMOZION", eventType: b.eventType, accountId: 22, externalConversationId: b.externalConversationId, externalMessageId: b.externalMessageId, payload: b.payload ?? undefined,
+        ...(b.transientSourceUrls ? { transientSourceUrls: b.transientSourceUrls as Prisma.InputJsonValue } : {}),
+        status: b.status, attempts: 0,
+      },
       select: { id: true },
     });
     return { id: ev.id, builtStatus: b.status };
+  }
+  // B6.3-C2: ¿transientSourceUrls es SQL NULL? (no JSON null). Va por SQL a propósito.
+  async function transientIsSqlNull(id: string): Promise<boolean> {
+    const rows = await prisma.$queryRaw<{ isnull: boolean }[]>`SELECT ("transientSourceUrls" IS NULL) AS isnull FROM "WebhookEvent" WHERE id = ${id}`;
+    assert.equal(rows.length, 1);
+    return rows[0].isnull;
   }
   // Crea un WebhookEvent con payload normalizado DIRECTO (para forzar fallos de dominio).
   async function fromNormalized(eventType: string, payload: unknown, extConv: string | null) {
@@ -370,6 +398,123 @@ async function main() {
       assert.equal(await prisma.conversationMessage.count({ where: { externalMessageId: "wamid-j" } }), 1, "mensaje no duplica");
       assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:31006" } }), 1, "adjunto preexistente no duplica");
       assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:31007" } }), 1, "adjunto NUEVO se creó (no se perdió)");
+    });
+
+    // ── B6.3-C2: CAPTURA DE ORIGEN (transientSourceUrls) ─────────────────────────────
+    console.log("\n== B6.3-C2: captura de origen ==");
+    const ALLOWED = "emozion.example"; // host de los fixtures rawAtt (placeholder sintético)
+    const ON_ENV = { ATTACHMENT_SOURCE_CAPTURE: "on", ATTACHMENT_COPY_JOB_ENABLED: "true", ATTACHMENT_SOURCE_ALLOWED_HOSTS: ALLOWED };
+    const ON = resolveCaptureMode(ON_ENV, () => true);           // "on" EFECTIVO (mismo resolver que el route)
+    const REJECTING = resolveCaptureMode({ ...ON_ENV, ATTACHMENT_SOURCE_ALLOWED_HOSTS: "other.example" }, () => true);
+    const PROBE_ENV = { ATTACHMENT_SOURCE_CAPTURE: "probe", ATTACHMENT_SOURCE_PROBE_UNTIL: "2999-01-01T00:00:00Z" };
+    const PROBE = resolveCaptureMode(PROBE_ENV, () => false);
+    assert.equal(ON.mode, "on"); assert.equal(REJECTING.mode, "on"); assert.equal(PROBE.mode, "probe");
+    const attRow = (sid: string) => prisma.conversationAttachment.findUnique({ where: { sourceExternalId: sid } });
+
+    // (a) captura off → transientSourceUrls SQL NULL; adjunto NO_ORIGIN SOURCE_NOT_CAPTURED
+    await check("B6.3-a. off → transientSourceUrls SQL NULL; adjunto NO_ORIGIN SOURCE_NOT_CAPTURED", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: CONV, msgId: 27001, sourceId: "wamid-b63a", mt: "incoming", content: "a", senderId: 555, senderType: null, attachments: [rawAtt(32001, "image", 1000, "B63A")] }));
+      assert.equal(await transientIsSqlNull(id), true, "off no escribe transientSourceUrls");
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      assert.equal(await transientIsSqlNull(id), true);
+      const a = await attRow("emozion-attachment:32001");
+      assert.equal(a!.storageStatus, "NO_ORIGIN");
+      assert.equal(a!.storageLastError, "SOURCE_NOT_CAPTURED");
+      assert.equal(a!.sourceFetchUrl, null);
+      assert.ok(!JSON.stringify(a).includes("SENTINEL"), "ninguna URL persistida");
+    });
+
+    // (b) "on" efectivo → URL SOLO en sourceFetchUrl; payload sin sentinelas; transientSourceUrls SQL NULL tras PROCESSED
+    await check("B6.3-b. on efectivo → URL solo en sourceFetchUrl; payload limpio; transientSourceUrls IS NULL tras PROCESSED", async () => {
+      const raw = rawMsg({ convId: CONV, msgId: 27002, sourceId: "wamid-b63b", mt: "incoming", content: "b", senderId: 555, senderType: null, attachments: [rawAtt(32002, "image", 1000, "B63B")] });
+      const expectedUrl = raw.attachments![0].data_url;
+      const { id } = await fromRaw(raw, { capture: ON });
+      const before = await prisma.webhookEvent.findUnique({ where: { id }, select: { payload: true } });
+      assert.ok(!JSON.stringify(before!.payload).includes("SENTINEL"), "payload NUNCA lleva la URL");
+      assert.equal(await transientIsSqlNull(id), false, "transientSourceUrls escrito en el mismo create");
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      assert.equal(await transientIsSqlNull(id), true, "anulado (SQL NULL) en el update a PROCESSED");
+      const we = await prisma.webhookEvent.findUnique({ where: { id }, select: { receivedAt: true, payload: true } });
+      assert.equal(we!.payload, null);
+      const a = await attRow("emozion-attachment:32002");
+      assert.equal(a!.storageStatus, "PENDING");
+      assert.equal(a!.sourceFetchUrl, expectedUrl);
+      assert.equal(a!.sourceFetchCapturedAt!.getTime(), we!.receivedAt.getTime(), "capturedAt = receivedAt del evento");
+      assert.equal(a!.storageLastError, null);
+      const { sourceFetchUrl: _u, ...rest } = a!;
+      assert.ok(!JSON.stringify(rest).includes("SENTINEL"), "la URL vive SOLO en sourceFetchUrl");
+      const m = await prisma.conversationMessage.findUnique({ where: { externalMessageId: "wamid-b63b" } });
+      assert.ok(!JSON.stringify(m).includes("SENTINEL"), "el mensaje no lleva la URL");
+    });
+
+    // (c) host rechazado → NO_ORIGIN SOURCE_URL_REJECTED; (c2) sin data_url → SOURCE_URL_MISSING
+    await check("B6.3-c. host fuera de allowlist → NO_ORIGIN SOURCE_URL_REJECTED; sin data_url → SOURCE_URL_MISSING", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: CONV, msgId: 27003, sourceId: "wamid-b63c", mt: "incoming", content: "c", senderId: 555, senderType: null,
+        attachments: [rawAtt(32003, "image", 1000, "B63C"), { id: 32013, file_type: "file", file_size: 10 }] }), { capture: REJECTING });
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      assert.equal(await transientIsSqlNull(id), true);
+      const rej = await attRow("emozion-attachment:32003");
+      assert.equal(rej!.storageStatus, "NO_ORIGIN"); assert.equal(rej!.storageLastError, "SOURCE_URL_REJECTED"); assert.equal(rej!.sourceFetchUrl, null);
+      const miss = await attRow("emozion-attachment:32013");
+      assert.equal(miss!.storageStatus, "NO_ORIGIN"); assert.equal(miss!.storageLastError, "SOURCE_URL_MISSING"); assert.equal(miss!.sourceFetchUrl, null);
+    });
+
+    // (d) evento en ERROR conserva transientSourceUrls (lo limpia el TTL de C3); sin dominio parcial
+    await check("B6.3-d. evento ERROR (huérfano) conserva transientSourceUrls; sin adjunto creado", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: null, msgId: 27004, sourceId: "wamid-b63d", mt: "incoming", content: "d", senderId: 555, senderType: null, embedConv: false, attachments: [rawAtt(32004, "image", 1000, "B63D")] }), { capture: ON });
+      const r = await processWebhookEvent(id);
+      assert.equal(r.status, "ERROR");
+      assert.equal(await transientIsSqlNull(id), false, "ERROR NO toca transientSourceUrls");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:32004" } }), 0);
+    });
+
+    // (e) probe → nada persistido (ni payload, ni transientSourceUrls, ni el adjunto); log enmascarado
+    await check("B6.3-e. probe → nada persistido; log solo con forma enmascarada", async () => {
+      __resetAttachmentSourceStateForTests();
+      const raw = rawMsg({ convId: CONV, msgId: 27005, sourceId: "wamid-b63e", mt: "incoming", content: "e", senderId: 555, senderType: null, attachments: [rawAtt(32005, "image", 1000, "B63E")] });
+      const { id } = await fromRaw(raw, { capture: PROBE });
+      const logs: string[] = [];
+      const ol = console.log;
+      console.log = (...a: unknown[]) => { logs.push(a.map(String).join(" ")); };
+      let probed: boolean;
+      try { probed = maybeProbeSourceUrls(id, raw.attachments, PROBE_ENV); } finally { console.log = ol; }
+      assert.equal(probed, true, "el probe logueó");
+      assert.equal(logs.length, 1);
+      assert.ok(!/SENTINEL|https?:\/\//.test(logs[0]), "el log del probe no contiene la URL");
+      assert.equal(await transientIsSqlNull(id), true, "probe no escribe transientSourceUrls");
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const a = await attRow("emozion-attachment:32005");
+      assert.equal(a!.storageStatus, "NO_ORIGIN"); assert.equal(a!.storageLastError, "SOURCE_NOT_CAPTURED"); assert.equal(a!.sourceFetchUrl, null);
+      assert.ok(!JSON.stringify(a).includes("SENTINEL"));
+    });
+
+    // (f) "on" + EMOZION_DEBUG_CAPTURE → NO escribe transientSourceUrls
+    await check("B6.3-f. on + EMOZION_DEBUG_CAPTURE → no escribe transientSourceUrls", async () => {
+      const { id } = await fromRaw(rawMsg({ convId: CONV, msgId: 27006, sourceId: "wamid-b63f", mt: "incoming", content: "f", senderId: 555, senderType: null, attachments: [rawAtt(32006, "image", 1000, "B63F")] }), { capture: ON, debugOn: true });
+      assert.equal(await transientIsSqlNull(id), true);
+      await processWebhookEvent(id); // con payload de debug el processor falla (ERROR): documentado
+      assert.equal(await transientIsSqlNull(id), true);
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:32006" } }), 0);
+    });
+
+    // (g) adjunto YA existente → sin cambios (sin backfill), aunque el reenvío traiga URL con "on"
+    await check("B6.3-g. adjunto preexistente + reenvío con 'on' → sin backfill; transientSourceUrls anulado", async () => {
+      const first = await fromRaw(rawMsg({ convId: CONV, msgId: 27007, sourceId: "wamid-b63g", mt: "incoming", content: "g", senderId: 555, senderType: null, attachments: [rawAtt(32007, "image", 1000, "B63G")] }));
+      assert.equal((await processWebhookEvent(first.id)).status, "PROCESSED");
+      const before = await attRow("emozion-attachment:32007");
+      const again = await fromRaw(rawMsg({ convId: CONV, msgId: 27007, sourceId: "wamid-b63g", mt: "incoming", content: "g", senderId: 555, senderType: null, attachments: [rawAtt(32007, "image", 1000, "B63G")] }), { capture: ON });
+      assert.equal(await transientIsSqlNull(again.id), false);
+      assert.equal((await processWebhookEvent(again.id)).status, "PROCESSED");
+      assert.equal(await transientIsSqlNull(again.id), true);
+      const after = await attRow("emozion-attachment:32007");
+      assert.deepEqual(after, before, "fila del adjunto idéntica (sin backfill)");
+      assert.equal(after!.storageStatus, "NO_ORIGIN"); assert.equal(after!.sourceFetchUrl, null);
+    });
+
+    // Invariante: ningún PROCESSED con transientSourceUrls no nulo
+    await check("B6.3-inv. cero WebhookEvent PROCESSED con transientSourceUrls IS NOT NULL", async () => {
+      const rows = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*)::bigint AS n FROM "WebhookEvent" WHERE status = 'PROCESSED' AND "transientSourceUrls" IS NOT NULL`;
+      assert.equal(Number(rows[0].n), 0);
     });
 
     // Verificación agregada + salida sanitizada

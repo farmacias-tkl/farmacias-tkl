@@ -32,6 +32,8 @@ const FORBIDDEN = [
   "sourceFetchUrl", "sourceFetchCapturedAt", "storageProvider", "storageBucket", "storageKey",
   "storageContentType", "storageSizeBytes", "storageChecksumSha256", "storageCopiedAt",
   "storageAttemptCount", "storageLastError", "storageNextRetryAt",
+  // B6.3: fencing del job y origen transitorio del webhook — NUNCA en lectores.
+  "storageLeaseId", "transientSourceUrls",
 ];
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }

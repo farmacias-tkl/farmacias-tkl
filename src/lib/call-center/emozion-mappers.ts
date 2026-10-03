@@ -11,6 +11,7 @@ import type {
   NormalizedStatus,
   NormalizedAuthor,
 } from "./emozion-types";
+import { isUsableAttachmentId, emozionAttachmentSourceExternalId } from "./attachment-identity";
 
 /**
  * Mappers PUROS Emozion(Chatwoot fork) → TKL. Sin DB, sin red.
@@ -60,16 +61,6 @@ function normalizeMessageBody(content: unknown): string | null {
 }
 
 /**
- * ¿id de adjunto usable? Por TIPO, NO truthiness (id 0 es válido).
- *  - number: finito (rechaza NaN/Infinity/-Infinity).
- *  - string: no vacío tras trim (rechaza "" y solo-whitespace).
- */
-function isUsableAttachmentId(id: unknown): id is number | string {
-  if (typeof id === "number") return Number.isFinite(id);
-  return typeof id === "string" && id.trim().length > 0;
-}
-
-/**
  * Metadata de attachments → NormalizedAttachment[] (B2.1). PURO: sin bytes, sin URL cruda.
  * Mapea TODOS los adjuntos (no solo [0]). SIN documentType (lo pone el ingest = UNKNOWN).
  *
@@ -93,10 +84,9 @@ export function normalizeAttachments(
     if (!isUsableAttachmentId(att.id)) {
       return { attachments: [], brokenIdentity: true, warnings: [`adjunto[${i}] sin id usable → identidad rota; extId=${externalMessageId}`] };
     }
-    // id trimmeado si es string → no generar keys de idempotencia divergentes por whitespace.
-    const rawId = typeof att.id === "string" ? att.id.trim() : att.id;
     attachments.push({
-      sourceExternalId: `emozion-attachment:${rawId}`, // id estable (no índice)
+      // id estable (no índice), trimmeado; helper compartido con la captura de origen (B6.3).
+      sourceExternalId: emozionAttachmentSourceExternalId(att.id),
       mediaType: typeof att.file_type === "string" ? att.file_type : null,
       sizeBytes: typeof att.file_size === "number" && Number.isFinite(att.file_size) ? att.file_size : null,
       mimeType: null,         // el fork no lo manda

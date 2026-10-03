@@ -588,6 +588,7 @@ enum SyncSource {
   GOOGLE_DRIVE
   SALES_API
   EMOZION
+  ATTACHMENT_STORAGE // job de copia de adjuntos a storage privado (B6.3). Al final: coincide con ADD VALUE.
 }
 
 enum SyncTrigger {
@@ -1319,6 +1320,11 @@ model ConversationAttachment {
   /// Momento de captura del origen transitorio, usado para TTL/alerta.
   sourceFetchCapturedAt DateTime?
 
+  /// Token de fencing de la reserva vigente (solo con storageStatus=COPYING). Aleatorio por
+  /// reserva; NULL fuera de COPYING. Todo update de cierre filtra id+COPYING+storageLeaseId.
+  /// NUNCA a UI/API/logs/AuditLog.
+  storageLeaseId        String?
+
   // PROVENANCE DE CLASIFICACIÓN — decisión explícita de diseño:
   // quién/cuándo setea documentType vive en AuditLog vía el evento ATTACHMENT_CLASSIFIED
   // (action + userId + detail {from,to}), NO como columna de este modelo.
@@ -1367,6 +1373,11 @@ model WebhookEvent {
   // Sin UI; los logs no imprimen contenido. Cifrado de campo = gate de decisión
   // pre-prod (datos de salud, Ley 25.326), no en 4B inicial.
   payload                Json?
+  // ORIGEN TRANSITORIO de adjuntos (B6.3): {"v":1,"urls":{<sourceExternalId>:<url>},"rejected":[<sourceExternalId>]}.
+  // Solo con ATTACHMENT_SOURCE_CAPTURE=on efectivo. FUERA de payload. Se anula (SQL NULL, DbNull)
+  // en el MISMO update que marca PROCESSED; ERROR/RECEIVED → barrido TTL 72h. NINGÚN lector lo
+  // selecciona; nunca a logs/AuditLog.
+  transientSourceUrls    Json?
   status                 WebhookEventStatus @default(RECEIVED)
   attempts               Int                @default(0)
   receivedAt             DateTime           @default(now())
