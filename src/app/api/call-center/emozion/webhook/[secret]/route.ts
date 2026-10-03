@@ -31,7 +31,8 @@ import {
   transientSourceUrlsForWebhook,
   maybeProbeSourceUrls,
 } from "@/lib/call-center/attachment-source";
-import { getR2Config } from "@/lib/integrations/r2";
+// r2-config (no r2): el webhook NO debe cargar @aws-sdk/client-s3 (B6.3-C2c).
+import { getR2Config } from "@/lib/integrations/r2-config";
 import { safeErrorCode } from "@/lib/call-center/safe-error";
 
 /** ¿Config R2 completa? (para el gate de captura "on", E3). Nunca expone valores. */
