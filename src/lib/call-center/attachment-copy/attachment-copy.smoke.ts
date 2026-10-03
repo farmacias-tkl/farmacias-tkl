@@ -813,6 +813,87 @@ async function main() {
       assert.deepEqual(await sources(`SELECT source FROM "SyncLog" WHERE source <> 'EMOZION' AND source <> 'ATTACHMENT_STORAGE' ORDER BY "createdAt" DESC`), ["SALES_API", "GOOGLE_DRIVE"]);
     });
 
+    // ── B6.3-C4c: flag "true" + config R2 incompleta → CONFIG (no "copia apagada") ─────────
+    console.log("\n== B6.3-C4c: config R2 incompleta con el flag encendido ==");
+    // Valores FICTICIOS (no son credenciales): solo importa presencia/ausencia.
+    const R2_FAKE_ENV = { R2_ACCOUNT_ID: "acct-ficticio", R2_ACCESS_KEY_ID: "ak-ficticio", R2_SECRET_ACCESS_KEY: "sk-ficticio", R2_BUCKET: "bucket-ficticio" };
+    /** Llama al endpoint SIN r2 inyectado (como en prod): config desde env; factory que falla si se invoca. */
+    async function callEndpointNoInjectedR2(env: Record<string, string>, fetcher: SourceFetcher) {
+      const exploding = new ExplodingR2();
+      let factoryCalls = 0;
+      const res = await captured(() => handleAttachmentCopy(
+        { authorization: AUTH, signal: new AbortController().signal, readBody: async () => "" },
+        {
+          env,
+          runCopy: runAttachmentCopy,
+          runMaintenanceOnly: () => runMaintenanceOnly(prisma, now(), [fetcher]),
+          getPrisma: async () => prisma,
+          copyDeps: { prisma, fetchers: [fetcher], now, random: () => 0.5, r2Factory: () => { factoryCalls++; return { client: exploding, bucket: BUCKET }; } },
+        },
+      ));
+      return { res, exploding, factoryCalls: () => factoryCalls };
+    }
+
+    for (const missing of Object.keys(R2_FAKE_ENV) as (keyof typeof R2_FAKE_ENV)[]) {
+      await check(`C4c-1. flag "true" sin ${missing} → stopReason config, healthy:false, SyncLog ERROR código fijo, ítem intacto, R2 no invocado`, async () => {
+        await reset();
+        const f = new FakeFetcher();
+        const prevNext = new Date(now().getTime() - 5000);
+        const a = await mkAtt({ status: "FAILED", attempts: 2, next: prevNext });
+        f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("x") });
+        const before = await row(a.id);
+        const env: Record<string, string> = { ATTACHMENT_COPY_JOB_SECRET: SECRET, ATTACHMENT_COPY_JOB_ENABLED: "true", ...R2_FAKE_ENV };
+        delete env[missing];
+        const { res, exploding, factoryCalls } = await callEndpointNoInjectedR2(env, f);
+        const body = res.body as any;
+        assert.equal(res.status, 200); assert.equal(body.status, "ok");
+        assert.equal(body.copy.enabled, true); assert.equal(body.copy.stopReason, "config"); assert.equal(body.healthy, false);
+        assert.equal(body.copy.reserved, 0); assert.equal(body.copy.preflight, "skipped");
+        assert.equal(exploding.calls, 0, "cero llamadas a R2"); assert.equal(factoryCalls(), 0, "ni siquiera se creó el cliente");
+        assert.equal(f.calls.size, 0, "no se descargó nada");
+        const r = await row(a.id);
+        assert.equal(r.storageStatus, before.storageStatus); assert.equal(r.storageAttemptCount, 2);
+        assert.equal(r.storageNextRetryAt!.getTime(), prevNext.getTime()); assert.equal(r.storageLeaseId, null);
+        const log = await prisma.syncLog.findFirstOrThrow({ where: { source: "ATTACHMENT_STORAGE" } });
+        assert.equal(log.status, "ERROR");
+        assert.ok(JSON.stringify(log.warnings).includes("CONFIG_INVALID:copy.config|R2StorageError|CONFIG_MISSING|"));
+        const all = JSON.stringify({ body, log });
+        for (const leak of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "ficticio", "Falta config"]) {
+          assert.ok(!all.includes(leak), `ni nombres ni valores de variables (${leak})`);
+        }
+        assert.ok(!/R2_ACCOUNT_ID|R2_ACCESS_KEY_ID|R2_SECRET_ACCESS_KEY|R2_BUCKET|ficticio/.test(capturedOutput), "tampoco en logs");
+      });
+    }
+
+    await check("C4c-2. flag \"true\" + config R2 completa → NO es config (llega al preflight con el cliente de la factory)", async () => {
+      await reset();
+      const f = new FakeFetcher();
+      const { res, factoryCalls } = await callEndpointNoInjectedR2({ ATTACHMENT_COPY_JOB_SECRET: SECRET, ATTACHMENT_COPY_JOB_ENABLED: "true", ...R2_FAKE_ENV }, f);
+      // La factory se invoca; el R2 falso explota en el preflight → stopReason preflight (no config).
+      assert.equal(factoryCalls(), 1);
+      assert.equal((res.body as any).copy.stopReason, "preflight"); assert.equal((res.body as any).healthy, false);
+    });
+
+    await check("C4c-3. regresión: flag \"true\" + allowlist vacía → config, healthy:false, sin reservas", async () => {
+      await reset();
+      const r2 = new ExplodingR2();
+      const a = await mkAtt();
+      const res = await callEndpoint(r2, realFetcher({}, []));
+      const body = res.body as any;
+      assert.equal(body.copy.stopReason, "config"); assert.equal(body.healthy, false); assert.equal(body.copy.reserved, 0);
+      assert.equal(r2.calls, 0); assert.equal((await row(a.id)).storageAttemptCount, 0);
+    });
+
+    await check("C4c-4. regresión: flag apagado (aun con config R2 incompleta) → maintenance_only healthy:true, sin alerta", async () => {
+      await reset();
+      const a = await mkAtt();
+      const { res, exploding, factoryCalls } = await callEndpointNoInjectedR2({ ATTACHMENT_COPY_JOB_SECRET: SECRET }, new FakeFetcher());
+      assert.deepEqual(res.body, { status: "maintenance_only", maintenance: { leasesRecovered: 0, attachmentsTtlNoOrigin: 0, webhookUrlsCleared: 0 }, healthy: true, durationMs: (res.body as any).durationMs });
+      assert.equal(exploding.calls + factoryCalls(), 0);
+      assert.equal(await prisma.syncLog.count(), 0, "copia apagada voluntariamente: sin SyncLog");
+      assert.equal((await row(a.id)).storageAttemptCount, 0);
+    });
+
     await check("10. ningún log (stdout/stderr) ni SyncLog contiene la URL / filename", async () => {
       // la captura NO está vacía: contiene las alertas que sí se loguean (con códigos e ids)
       assert.ok(capturedOutput.includes("CHECKSUM_CONFLICT") && capturedOutput.includes("preflight failed"), "la captura registró los logs del worker");

@@ -78,6 +78,16 @@ async function main() {
     }
   });
 
+  // 1c. getR2Config(env) valida contra el env RECIBIDO (no process.env)
+  await test("1c. getR2Config(env) usa el env pasado; falta cualquiera de los 4 → CONFIG_MISSING", () => {
+    const full = { R2_ACCOUNT_ID: "a", R2_ACCESS_KEY_ID: "k", R2_SECRET_ACCESS_KEY: "s", R2_BUCKET: "b" };
+    assert.equal(getR2Config(full).bucket, "b");
+    for (const k of Object.keys(full)) {
+      const env: Record<string, string | undefined> = { ...full, [k]: undefined };
+      assert.throws(() => getR2Config(env), (e: unknown) => e instanceof R2StorageError && e.code === "CONFIG_MISSING", k);
+    }
+  });
+
   // 2. putObject manda bucket/key/contentType/contentLength/body al comando
   await test("2. putObject envía Bucket/Key/ContentType/ContentLength/Body", async () => {
     const stub = makeStub({ ETag: '"abc"' });

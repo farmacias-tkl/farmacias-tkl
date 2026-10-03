@@ -3,7 +3,8 @@
  *
  * Flujo de runAttachmentCopy({ deadline, signal }):
  *  1. Mantenimiento (M1/M2/M3) SIEMPRE, aun con la copia apagada.
- *  2. Copia solo con ATTACHMENT_COPY_JOB_ENABLED==="true" + config R2 válida.
+ *  2. Copia solo con ATTACHMENT_COPY_JOB_ENABLED==="true". Flag "true" con config R2 incompleta
+ *     → aborto CONFIG (healthy=false + SyncLog), no "copia apagada".
  *  3. Config de los fetchers (p.ej. allowlist vacía/inválida) → aborto CONFIG sin reservar.
  *  4. Preflight: headObject(".preflight") ANTES de reservar, con la señal de operación; si falla
  *     o no responde a tiempo → no se reserva nada.
@@ -49,6 +50,8 @@ export interface CopyDeps {
   prisma: PrismaClient;
   /** Cliente R2 + bucket. Si se inyecta, no se exige config R2 en env (tests). */
   r2?: { client: R2SendClient; bucket: string };
+  /** Crea el cliente R2 cuando NO se inyecta `r2` (default getR2Client). Solo se llama con la config válida. */
+  r2Factory: () => { client: R2SendClient; bucket: string };
   fetchers: readonly SourceFetcher[];
   now: () => Date;
   random: () => number;
@@ -89,10 +92,6 @@ export interface AttachmentCopyRunResult {
 }
 
 const DEFAULT_LIMIT = 25;
-
-function r2ConfigValid(): boolean {
-  try { getR2Config(); return true; } catch { return false; }
-}
 
 type ItemOutcome = "stored" | "retry" | "terminal" | "conflict" | "released" | "leaseLost";
 interface ItemResult { outcome: ItemOutcome; stop?: StopReason }
@@ -139,6 +138,7 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
   const d: CopyDeps = {
     prisma: partial.prisma ?? defaultPrisma,
     r2: partial.r2,
+    r2Factory: partial.r2Factory ?? getR2Client,
     fetchers: partial.fetchers ?? [createEmozionFetcher()],
     now: partial.now ?? (() => new Date()),
     random: partial.random ?? Math.random,
@@ -162,10 +162,28 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
   }
 
   // 2. ¿Copia habilitada?
-  copy.enabled = d.env.ATTACHMENT_COPY_JOB_ENABLED === "true" && (!!d.r2 || r2ConfigValid());
+  // a) Flag distinto de "true" → copia apagada voluntariamente (sin alerta).
+  copy.enabled = d.env.ATTACHMENT_COPY_JOB_ENABLED === "true";
   if (!copy.enabled) {
     await writeRunSyncLog(d, maintenance, copy, warnings, maintenanceOk);
     return { maintenance, maintenanceOk, copy };
+  }
+
+  // b) Flag "true" pero config R2 incompleta → aborto CONFIG (healthy=false) ANTES del preflight y
+  //    de reservar: cero reservas, cero intentos, cero llamadas a R2. Solo el código seguro
+  //    (nunca nombres ni valores de variables: el message de getR2Config los nombra).
+  if (!d.r2) {
+    try {
+      getR2Config(d.env);
+    } catch (e) {
+      const code = safeErrorCode(e, "copy.config"); // "copy.config|R2StorageError|CONFIG_MISSING|"
+      copy.aborted = true;
+      copy.stopReason = "config";
+      warnings.push(`CONFIG_INVALID:${code}`);
+      console.error("[attachment-copy] config invalid", JSON.stringify({ code }));
+      await writeRunSyncLog(d, maintenance, copy, warnings, maintenanceOk);
+      return { maintenance, maintenanceOk, copy };
+    }
   }
 
   // 3. Config de los fetchers ANTES de reservar (no se queman intentos por error de config)
@@ -187,7 +205,7 @@ export async function runAttachmentCopy(opts: RunOptions, partial: Partial<CopyD
     let r2: R2Ctx;
     const op = run.op(d.r2OpTimeoutMs);
     try {
-      r2 = d.r2 ?? getR2Client();
+      r2 = d.r2 ?? d.r2Factory();
       try {
         await headObject(r2.client, r2.bucket, PREFLIGHT_KEY, { abortSignal: op.signal });
       } catch (e) {

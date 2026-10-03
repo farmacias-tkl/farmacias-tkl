@@ -47,12 +47,15 @@ export interface R2Config {
 }
 
 // ── Config (lazy, guard manual estilo google-drive.ts) ──────────────────────────────
-/** Lee y valida la config R2 desde env. Lanza R2StorageError(CONFIG_MISSING) si falta algo. */
-export function getR2Config(): R2Config {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucket = process.env.R2_BUCKET;
+/**
+ * Lee y valida la config R2 desde env (default process.env). Lanza R2StorageError(CONFIG_MISSING)
+ * si falta algo. El mensaje nombra las variables faltantes: NO va a sumideros (usar safeErrorCode).
+ */
+export function getR2Config(env: Record<string, string | undefined> = process.env): R2Config {
+  const accountId = env.R2_ACCOUNT_ID;
+  const accessKeyId = env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = env.R2_SECRET_ACCESS_KEY;
+  const bucket = env.R2_BUCKET;
   const missing = [
     !accountId && "R2_ACCOUNT_ID",
     !accessKeyId && "R2_ACCESS_KEY_ID",
@@ -62,7 +65,7 @@ export function getR2Config(): R2Config {
   if (missing.length) {
     throw new R2StorageError("CONFIG_MISSING", `Falta config R2: ${missing.join(", ")}`);
   }
-  const endpoint = process.env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`;
-  const region = process.env.R2_REGION || "auto";
+  const endpoint = env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`;
+  const region = env.R2_REGION || "auto";
   return { accountId: accountId!, accessKeyId: accessKeyId!, secretAccessKey: secretAccessKey!, bucket: bucket!, endpoint, region };
 }
