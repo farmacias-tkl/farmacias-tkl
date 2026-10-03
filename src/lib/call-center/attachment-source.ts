@@ -35,12 +35,51 @@ export function getConfiguredCaptureMode(env: Env = process.env): CaptureMode {
   return v === "probe" || v === "on" ? v : "off";
 }
 
-/** Allowlist de hostnames (lowercase, sin punto inicial, sin vacíos). */
+// ── Hostnames ────────────────────────────────────────────────────────────────────────
+/** Hostname DNS con al menos un punto, labels [a-z0-9-] sin guión en los bordes, ≤ 253. */
+const HOSTNAME_RE = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+/** Sufijos de hosts privados/locales: nunca orígenes válidos. */
+const PRIVATE_HOST_SUFFIXES = ["localhost", "local", "internal", "lan", "home.arpa"];
+
+function isPrivateHostname(h: string): boolean {
+  return PRIVATE_HOST_SUFFIXES.some((s) => h === s || h.endsWith(`.${s}`));
+}
+
+/** ¿hostname público válido? (no IP literal, no privado/local, forma DNS). */
+export function isPublicHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h.startsWith("[") || h.includes(":")) return false; // IPv6 literal
+  if (IPV4_RE.test(h)) return false;                       // IPv4 literal
+  if (isPrivateHostname(h)) return false;
+  return HOSTNAME_RE.test(h);
+}
+
+/**
+ * Allowlist de hostnames (lowercase, sin punto inicial, vacíos ignorados). ESTRICTA: si alguna
+ * entrada no es un hostname público válido (IP, privado, con esquema/path/puerto...), la
+ * allowlist completa se considera inválida → [] (= sin allowlist: la captura "on" no es
+ * efectiva y el job de copia aborta como CONFIG).
+ */
 export function getAllowedHosts(env: Env = process.env): string[] {
-  return (env.ATTACHMENT_SOURCE_ALLOWED_HOSTS ?? "")
+  const hosts = (env.ATTACHMENT_SOURCE_ALLOWED_HOSTS ?? "")
     .split(",")
     .map((h) => h.trim().toLowerCase().replace(/^\.+/, ""))
     .filter((h) => h.length > 0);
+  return hosts.every(isPublicHostname) ? hosts : [];
+}
+
+/**
+ * Hostname de una URL apto para registrar (SyncLog), y NADA más de la URL: sin esquema, path,
+ * query ni fragment. Validado contra [a-z0-9.-]{1,253}; si no cumple → "invalid".
+ */
+export function hostnameForLog(u: string): string {
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return /^[a-z0-9.-]{1,253}$/.test(h) ? h : "invalid";
+  } catch {
+    return "invalid";
+  }
 }
 
 export interface CaptureResolution {
@@ -85,7 +124,7 @@ export function isHostAllowed(hostname: string, hosts: string[]): boolean {
   return hosts.some((a) => h === a || h.endsWith(`.${a}`));
 }
 
-/** https + sin userinfo + largo ≤ 2048 + host en allowlist. Nunca devuelve ni loguea el valor en error. */
+/** https + sin userinfo + largo ≤ 2048 + host público (no IP/privado) en allowlist. Nunca devuelve ni loguea el valor en error. */
 export function validateSourceUrl(
   u: unknown,
   hosts: string[],
@@ -96,6 +135,7 @@ export function validateSourceUrl(
   try { url = new URL(u); } catch { return { ok: false, code: "SOURCE_URL_REJECTED" }; }
   if (url.protocol !== "https:") return { ok: false, code: "SOURCE_URL_REJECTED" };
   if (url.username || url.password) return { ok: false, code: "SOURCE_URL_REJECTED" };
+  if (!isPublicHostname(url.hostname)) return { ok: false, code: "SOURCE_URL_REJECTED" }; // IP literal / privado
   if (!isHostAllowed(url.hostname, hosts)) return { ok: false, code: "SOURCE_URL_REJECTED" };
   return { ok: true, url: u };
 }

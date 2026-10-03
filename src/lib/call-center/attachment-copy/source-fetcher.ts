@@ -22,6 +22,8 @@ export interface SourceFetchLimits {
   timeoutMs: number;
   /** Señal de la corrida (deadline/aborto externo). Si se dispara → FetchAbortedError. */
   signal?: AbortSignal;
+  /** Tamaño informado por el proveedor (> 0): los bytes recibidos deben coincidir (SIZE_MISMATCH). */
+  expectedSizeBytes?: number | null;
 }
 
 export interface SourceFetcher {
@@ -29,11 +31,21 @@ export interface SourceFetcher {
   /** TTL del origen transitorio de este proveedor (lo usa M2). */
   readonly sourceTtlMs: number;
   fetch(sourceRef: string, limits: SourceFetchLimits): Promise<FetchedObject>;
+  /**
+   * Config del proveedor inválida (p.ej. allowlist vacía) → NOMBRE de la condición; null si OK.
+   * El worker aborta la corrida como CONFIG ANTES de reservar (no se queman intentos).
+   */
+  configError?(): string | null;
 }
 
 /** Error de descarga con código de enum fijo. NUNCA lleva URL ni contenido en el mensaje. */
 export class SourceFetchError extends Error {
-  constructor(public readonly code: CopyErrorCode, public readonly retryable: boolean) {
+  constructor(
+    public readonly code: CopyErrorCode,
+    public readonly retryable: boolean,
+    /** SOLO para ORIGIN_REDIRECT_REJECTED: hostname del destino rechazado (sin esquema/path/query). */
+    public readonly rejectedHost?: string,
+  ) {
     super(code);
     this.name = "SourceFetchError";
   }

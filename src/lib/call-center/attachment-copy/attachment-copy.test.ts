@@ -169,6 +169,131 @@ async function main() {
     assert.equal(objectKeyFor("cm123abc"), "call-center/attachments/v1/cm123abc");
   });
 
+  // ── Correcciones Codex sobre C3: descarga completa, redirecciones, config ──────────────
+  /** fetch inyectable que responde por URL (Response nueva por llamada) y registra init. */
+  function routedFetch(routes: Record<string, () => Response>) {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const impl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      const r = routes[url];
+      if (!r) throw new TypeError("no route");
+      return r();
+    }) as unknown as FetchImpl;
+    return { impl, calls };
+  }
+  const HOSTS2 = [HOST, "cdn.example"];
+  const fetcher2 = (impl: FetchImpl) => createEmozionFetcher({ fetchImpl: impl, allowedHosts: () => HOSTS2 });
+  const redirectTo = (location: string, status = 302) => () => new Response(null, { status, headers: { location } });
+  const ok = (body: Buffer, headers: Record<string, string> = {}) => () => new Response(new Uint8Array(body), { status: 200, headers });
+
+  await test("16. solo HTTP 200: 206 y otro 2xx → INCOMPLETE_RESPONSE reintentable", async () => {
+    for (const status of [201, 203, 206]) {
+      const f = fakeFetch(() => new Response("parcial", { status }));
+      await expectFetchError(fetcher(f.impl).fetch(URL_OK, LIMITS), "INCOMPLETE_RESPONSE", true);
+    }
+  });
+
+  await test("17. 0 bytes → EMPTY_BODY reintentable", async () => {
+    await expectFetchError(fetcher(fakeFetch(() => new Response(new Uint8Array(0), { status: 200 })).impl).fetch(URL_OK, LIMITS), "EMPTY_BODY", true);
+    await expectFetchError(fetcher(fakeFetch(() => new Response(null, { status: 200 })).impl).fetch(URL_OK, LIMITS), "EMPTY_BODY", true);
+  });
+
+  await test("18. cuerpo truncado: 7 de 100 bytes con Content-Length 100 → INCOMPLETE_BODY reintentable", async () => {
+    const f = fakeFetch(() => new Response(Buffer.alloc(7, 1), { status: 200, headers: { "content-length": "100" } }));
+    await expectFetchError(fetcher(f.impl).fetch(URL_OK, LIMITS), "INCOMPLETE_BODY", true);
+  });
+
+  await test("19. stream que se corta a mitad → INCOMPLETE_BODY (nunca sigue con lo leído)", async () => {
+    let n = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(ctrl) { if (n++ < 2) ctrl.enqueue(new Uint8Array(10)); else ctrl.error(new Error("socket hang up")); },
+    });
+    await expectFetchError(fetcher(fakeFetch(() => new Response(stream, { status: 200 })).impl).fetch(URL_OK, LIMITS), "INCOMPLETE_BODY", true);
+  });
+
+  await test("20. Content-Encoding gzip: NO se compara Content-Length (sí el sizeBytes del proveedor)", async () => {
+    const body = Buffer.alloc(40, 2);
+    const gz = () => new Response(body, { status: 200, headers: { "content-length": "12", "content-encoding": "gzip" } });
+    const r = await fetcher(fakeFetch(gz).impl).fetch(URL_OK, LIMITS);
+    assert.equal(r.sizeBytes, 40);
+    const id = () => new Response(body, { status: 200, headers: { "content-length": "12", "content-encoding": "identity" } });
+    await expectFetchError(fetcher(fakeFetch(id).impl).fetch(URL_OK, LIMITS), "INCOMPLETE_BODY", true);
+  });
+
+  await test("21. sizeBytes del proveedor ≠ recibido → SIZE_MISMATCH; igual o ausente/0 → OK", async () => {
+    const body = Buffer.alloc(40, 3);
+    const mk = () => fakeFetch(() => new Response(body, { status: 200, headers: { "content-length": "40" } })).impl;
+    await expectFetchError(fetcher(mk()).fetch(URL_OK, { ...LIMITS, expectedSizeBytes: 50 }), "SIZE_MISMATCH", true);
+    assert.equal((await fetcher(mk()).fetch(URL_OK, { ...LIMITS, expectedSizeBytes: 40 })).sizeBytes, 40);
+    assert.equal((await fetcher(mk()).fetch(URL_OK, { ...LIMITS, expectedSizeBytes: null })).sizeBytes, 40);
+    assert.equal((await fetcher(mk()).fetch(URL_OK, { ...LIMITS, expectedSizeBytes: 0 })).sizeBytes, 40);
+  });
+
+  await test("22. 1 y 3 redirecciones permitidas (Location relativa y absoluta) → OK; 4 → TOO_MANY_REDIRECTS", async () => {
+    const body = Buffer.from("final");
+    const one = routedFetch({ [URL_OK]: redirectTo("https://cdn.example/a"), "https://cdn.example/a": ok(body) });
+    assert.equal((await fetcher2(one.impl).fetch(URL_OK, LIMITS)).sizeBytes, body.length);
+    assert.equal(one.calls.length, 2);
+    const three = routedFetch({
+      [URL_OK]: redirectTo("https://cdn.example/a", 301),
+      "https://cdn.example/a": redirectTo("/b", 307),            // relativa → se resuelve contra la actual
+      "https://cdn.example/b": redirectTo(`https://${HOST}/c`, 308),
+      [`https://${HOST}/c`]: ok(body),
+    });
+    assert.equal((await fetcher2(three.impl).fetch(URL_OK, LIMITS)).sizeBytes, body.length);
+    assert.deepEqual(three.calls.map((c) => c.url), [URL_OK, "https://cdn.example/a", "https://cdn.example/b", `https://${HOST}/c`]);
+    const four = routedFetch({
+      [URL_OK]: redirectTo("https://cdn.example/1"),
+      "https://cdn.example/1": redirectTo("https://cdn.example/2"),
+      "https://cdn.example/2": redirectTo("https://cdn.example/3"),
+      "https://cdn.example/3": redirectTo("https://cdn.example/4"),
+      "https://cdn.example/4": ok(body),
+    });
+    await expectFetchError(fetcher2(four.impl).fetch(URL_OK, LIMITS), "TOO_MANY_REDIRECTS", true);
+    assert.equal(four.calls.length, 4, "no sigue el 4º salto");
+  });
+
+  await test("23. salto a host no permitido / http / IP privada / credenciales → ORIGIN_REDIRECT_REJECTED con SOLO el hostname", async () => {
+    const cases: [string, string][] = [
+      ["https://evil.example/SENTINEL_PATH?SENTINEL_Q=1#SENTINEL_F", "evil.example"],
+      ["http://cdn.example/SENTINEL_DOWNGRADE", "cdn.example"],
+      ["https://10.0.0.5/SENTINEL_IP", "10.0.0.5"],
+      ["https://user:SENTINEL_PW@cdn.example/x", "cdn.example"],
+      ["https://intranet.local/SENTINEL", "intranet.local"],
+    ];
+    for (const [loc, host] of cases) {
+      const f = routedFetch({ [URL_OK]: redirectTo(loc) });
+      await assert.rejects(fetcher2(f.impl).fetch(URL_OK, LIMITS), (e: unknown) => {
+        assert.ok(e instanceof SourceFetchError);
+        assert.equal(e.code, "ORIGIN_REDIRECT_REJECTED"); assert.equal(e.retryable, true);
+        assert.equal(e.rejectedHost, host);
+        assert.ok(!/SENTINEL|https?:|\//.test(e.rejectedHost ?? "") && !/SENTINEL/.test(e.message));
+        return true;
+      });
+      assert.equal(f.calls.length, 1, "no se siguió el salto rechazado");
+    }
+    // sin Location / 300 → rechazado sin host
+    await assert.rejects(fetcher2(routedFetch({ [URL_OK]: () => new Response(null, { status: 302 }) }).impl).fetch(URL_OK, LIMITS),
+      (e: unknown) => e instanceof SourceFetchError && e.code === "ORIGIN_REDIRECT_REJECTED" && e.rejectedHost === undefined);
+  });
+
+  await test("24. sin headers sensibles entre saltos: solo `accept`, credentials omit, iguales en cada salto", async () => {
+    const f = routedFetch({ [URL_OK]: redirectTo("https://cdn.example/a"), "https://cdn.example/a": ok(Buffer.from("z")) });
+    await fetcher2(f.impl).fetch(URL_OK, LIMITS);
+    for (const c of f.calls) {
+      assert.deepEqual(c.init?.headers, { accept: "*/*" });
+      assert.equal(c.init?.credentials, "omit");
+      assert.equal(c.init?.redirect, "manual");
+      const names = Object.keys((c.init?.headers ?? {}) as Record<string, string>).map((k) => k.toLowerCase());
+      for (const bad of ["authorization", "cookie", "proxy-authorization", "x-api-key"]) assert.ok(!names.includes(bad));
+    }
+  });
+
+  await test("25. configError: allowlist vacía (o inválida) → 'ATTACHMENT_SOURCE_ALLOWED_HOSTS'; válida → null", () => {
+    assert.equal(createEmozionFetcher({ allowedHosts: () => [] }).configError?.(), "ATTACHMENT_SOURCE_ALLOWED_HOSTS");
+    assert.equal(createEmozionFetcher({ allowedHosts: () => [HOST] }).configError?.(), null);
+  });
+
   console.log(`\nattachment-copy: ${passed} ok, ${failures.length} fail`);
   if (failures.length) process.exit(1);
 }

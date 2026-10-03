@@ -16,6 +16,7 @@ import {
   parseTransientSourceUrls,
   initialStorageFields,
   describeSourceUrlShape,
+  hostnameForLog,
   isProbeActive,
   maybeProbeSourceUrls,
   __resetAttachmentSourceStateForTests,
@@ -231,6 +232,36 @@ test("16. probe inactivo con PROBE_UNTIL vencido o modo off/on: no loguea", () =
     assert.equal(maybeProbeSourceUrls("e", atts, { ATTACHMENT_SOURCE_PROBE_UNTIL: FUTURE }, NOW), false);
   });
   assert.equal(logs.length, 0);
+});
+
+test("17. allowlist ESTRICTA: una entrada inválida (IP, privada, con esquema/puerto/path) invalida toda la lista → []", () => {
+  for (const bad of [`${HOST},10.0.0.1`, `${HOST},localhost`, `https://${HOST}`, `${HOST}:443`, `${HOST}/x`, `${HOST},corp.internal`, "-bad.example", "nodot"]) {
+    assert.deepEqual(getAllowedHosts({ ATTACHMENT_SOURCE_ALLOWED_HOSTS: bad }), [], bad);
+  }
+  // y con lista inválida "on" no es efectivo
+  const r = captureConsole(() => {
+    assert.equal(resolveCaptureMode({ ...ON_ENV, ATTACHMENT_SOURCE_ALLOWED_HOSTS: `${HOST},10.0.0.1` }, R2_OK).mode, "off");
+  });
+  assert.equal(r.warns.length, 1);
+});
+
+test("18. validateSourceUrl rechaza IP literal (v4/v6, incl. decimal), hosts privados y credenciales aunque estén en la allowlist", () => {
+  const rej = (u: string, hosts: string[]) => assert.deepEqual(validateSourceUrl(u, hosts), { ok: false, code: "SOURCE_URL_REJECTED" }, u);
+  rej("https://10.0.0.5/x", ["10.0.0.5"]);
+  rej("https://2130706433/x", ["127.0.0.1"]);           // decimal → 127.0.0.1
+  rej("https://[::1]/x", ["::1"]);
+  rej("https://files.localhost/x", ["files.localhost"]);
+  rej("https://nas.local/x", ["nas.local"]);
+  rej("https://svc.internal/x", ["svc.internal"]);
+  rej(`https://u:p@${HOST}/x`, [HOST]);
+  assert.equal(validateSourceUrl(`https://${HOST}:8443/x`, [HOST]).ok, true, "puerto no estándar con host público: ok");
+});
+
+test("19. hostnameForLog: SOLO el hostname (sin esquema/puerto/path/query/fragment); IPv6/basura → 'invalid'", () => {
+  assert.equal(hostnameForLog("https://Evil.Example:8443/SENTINEL?q=SENTINEL#SENTINEL"), "evil.example");
+  assert.equal(hostnameForLog("https://10.0.0.5/x"), "10.0.0.5");
+  assert.equal(hostnameForLog("https://[::1]/x"), "invalid");
+  assert.equal(hostnameForLog("no url"), "invalid");
 });
 
 console.log(`\nattachment-source: ${passed} ok, ${failures.length} fail`);

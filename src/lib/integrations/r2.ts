@@ -107,7 +107,16 @@ export function getR2Client(): { client: S3Client; bucket: string } {
 // Cliente mínimo que necesitan las operaciones — permite inyectar un stub en tests sin
 // depender de la forma completa de S3Client.
 export interface R2SendClient {
-  send(command: unknown): Promise<any>;
+  send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<any>;
+}
+
+/** Opciones por operación. `abortSignal` se pasa al SDK (cancelación real de la request). */
+export interface R2OpOptions {
+  abortSignal?: AbortSignal;
+}
+
+function sendOptions(op: R2OpOptions): { abortSignal?: AbortSignal } | undefined {
+  return op.abortSignal ? { abortSignal: op.abortSignal } : undefined;
 }
 
 // ── Content-MD5: base64 canónico de exactamente 16 bytes ────────────────────────────
@@ -128,6 +137,10 @@ function normalizeError(e: unknown): R2StorageError {
   const code = err?.Code ?? "";
   const status = err?.$metadata?.httpStatusCode;
 
+  // Cancelada por AbortSignal (antes que cualquier otra clasificación)
+  if (name === "AbortError" || (err as { code?: string })?.code === "ABORT_ERR") {
+    return new R2StorageError("ABORTED", "Operación R2 cancelada", e);
+  }
   // No encontrado
   if (name === "NotFound" || name === "NoSuchKey" || code === "NoSuchKey" || status === 404) {
     return new R2StorageError("NOT_FOUND", "Objeto no encontrado", e);
@@ -168,6 +181,7 @@ export async function putObject(
   client: R2SendClient,
   bucket: string,
   input: PutR2ObjectInput,
+  op: R2OpOptions = {},
 ): Promise<PutR2ObjectResult> {
   // Stream sin longitud → error claro, no fallo opaco del SDK.
   const isStream = typeof (input.body as Readable)?.pipe === "function";
@@ -201,7 +215,7 @@ export async function putObject(
 
   let res: any;
   try {
-    res = await client.send(command);
+    res = await client.send(command, sendOptions(op));
   } catch (e) {
     throw normalizeError(e);
   }
@@ -225,10 +239,11 @@ export async function headObject(
   client: R2SendClient,
   bucket: string,
   key: string,
+  op: R2OpOptions = {},
 ): Promise<HeadR2ObjectResult> {
   let res: any;
   try {
-    res = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    res = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), sendOptions(op));
   } catch (e) {
     throw normalizeError(e);
   }
@@ -254,10 +269,11 @@ export async function getObject(
   client: R2SendClient,
   bucket: string,
   key: string,
+  op: R2OpOptions = {},
 ): Promise<GetR2ObjectResult> {
   let res: any;
   try {
-    res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), sendOptions(op));
   } catch (e) {
     throw normalizeError(e);
   }

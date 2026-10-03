@@ -28,6 +28,8 @@ export interface ReservedRow {
   id: string;
   sourceFetchUrl: string;
   source: AttachmentSource;
+  /** Tamaño informado por el proveedor (file_size); si > 0 la descarga debe coincidir. */
+  sizeBytes: number | null;
   storageAttemptCount: number;
   prev_status: StorageStatus;
   prev_next: Date | null;
@@ -60,5 +62,5 @@ export function buildReserveQuery(p: ReserveParams): Prisma.Sql {
         "updatedAt" = CAST(${now} AS timestamp)
     FROM cand
     WHERE a.id = cand.id
-    RETURNING a.id, a."sourceFetchUrl", a."source", a."storageAttemptCount", cand.prev_status, cand.prev_next`;
+    RETURNING a.id, a."sourceFetchUrl", a."source", a."sizeBytes", a."storageAttemptCount", cand.prev_status, cand.prev_next`;
 }

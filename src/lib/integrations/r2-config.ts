@@ -17,6 +17,8 @@ export type R2ErrorCode =
   | "CHECKSUM_MISMATCH"
   // If-None-Match:"*" sobre una key existente (412 / PreconditionFailed).
   | "PRECONDITION_FAILED"
+  // La operación se canceló por AbortSignal (deadline / timeout / aborto del caller).
+  | "ABORTED"
   | "PERMANENT"
   | "UNKNOWN";
 

@@ -296,6 +296,28 @@ async function main() {
     );
   });
 
+  // 10. AbortSignal: head/put/get lo pasan al SDK (send(command, { abortSignal })); sin señal → sin opciones
+  await test("10. head/put/get pasan abortSignal al SDK; sin señal no mandan opciones", async () => {
+    const seen: any[] = [];
+    const stub: R2SendClient = { async send(_c: unknown, o?: any) { seen.push(o); return { Body: Readable.from([Buffer.from("x")]) }; } };
+    const ctrl = new AbortController();
+    await headObject(stub, "b", "k", { abortSignal: ctrl.signal });
+    await putObject(stub, "b", { key: "k", body: Buffer.from("x"), contentType: "x", contentLength: 1 }, { abortSignal: ctrl.signal });
+    await getObject(stub, "b", "k", { abortSignal: ctrl.signal });
+    await headObject(stub, "b", "k");
+    assert.equal(seen[0].abortSignal, ctrl.signal);
+    assert.equal(seen[1].abortSignal, ctrl.signal);
+    assert.equal(seen[2].abortSignal, ctrl.signal);
+    assert.equal(seen[3], undefined);
+  });
+
+  // 11. AbortError del SDK → ABORTED (antes que cualquier otra clasificación)
+  await test("11. AbortError → R2StorageError ABORTED", async () => {
+    for (const err of [{ name: "AbortError" }, { name: "AbortError", $metadata: { httpStatusCode: 500 } }, { code: "ABORT_ERR" }]) {
+      await assert.rejects(() => getObject(makeThrowingStub(err), "b", "k"), (e: unknown) => e instanceof R2StorageError && e.code === "ABORTED", JSON.stringify(err));
+    }
+  });
+
   console.log(`\nr2 adapter: ${passed} ok, ${failures.length} fail`);
   if (failures.length) process.exit(1);
 }

@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import type { R2SendClient } from "../../integrations/r2";
 import { FetchAbortedError, SourceFetchError, type FetchedObject, type SourceFetcher, type SourceFetchLimits } from "./source-fetcher";
 import { MAX_ATTEMPTS, PREFLIGHT_KEY, objectKeyFor, type CopyErrorCode } from "./constants";
+import { createEmozionFetcher } from "./emozion-fetcher";
 
 const TEST_DB = "tkl_b63c3_smoke";
 
@@ -52,9 +53,25 @@ class FakeR2 implements R2SendClient {
   preconditionFailures = 0;
   getCalls = 0;
   deleteCalls = 0;
-  async send(command: any): Promise<any> {
+  /** Operaciones que se "cuelgan" hasta que se aborte su señal (como el SDK con abortSignal). */
+  hang = new Set<"head" | "put" | "get">();
+  /** PUT que SÍ llega a guardar pero cuya respuesta se pierde (cuelga hasta el abort). */
+  putStoresThenHangs = false;
+  private hangUntilAbort(options?: { abortSignal?: AbortSignal }): Promise<never> {
+    return new Promise((_, reject) => {
+      const sig = options?.abortSignal;
+      // Sin señal el test fallaría colgado: rechazar tras 5 s para que quede en evidencia.
+      if (!sig) { setTimeout(() => reject(new Error("FakeR2: operación colgada SIN abortSignal")), 5000); return; }
+      const fire = () => reject({ name: "AbortError" });
+      if (sig.aborted) fire(); else sig.addEventListener("abort", fire, { once: true });
+    });
+  }
+  async send(command: any, options?: { abortSignal?: AbortSignal }): Promise<any> {
     const name = command?.constructor?.name;
     const input = command?.input ?? {};
+    if (name === "HeadObjectCommand" && this.hang.has("head")) return this.hangUntilAbort(options);
+    if (name === "PutObjectCommand" && this.hang.has("put")) { this.putCalls++; return this.hangUntilAbort(options); }
+    if (name === "GetObjectCommand" && this.hang.has("get")) { this.getCalls++; return this.hangUntilAbort(options); }
     if (name === "HeadObjectCommand") {
       if (this.headAuthError) throw { name: "AccessDenied", $metadata: { httpStatusCode: 403 } };
       if (!this.objects.has(input.Key)) throw { name: "NotFound", $metadata: { httpStatusCode: 404 } };
@@ -67,6 +84,7 @@ class FakeR2 implements R2SendClient {
       if (input.ContentMD5 && input.ContentMD5 !== md5b64(body)) throw { name: "BadDigest", $metadata: { httpStatusCode: 400 } };
       if (input.IfNoneMatch === "*" && this.objects.has(input.Key)) { this.preconditionFailures++; throw { name: "PreconditionFailed", $metadata: { httpStatusCode: 412 } }; }
       this.objects.set(input.Key, { body, metadata: input.Metadata });
+      if (this.putStoresThenHangs) return this.hangUntilAbort(options);
       return { ETag: '"e"' };
     }
     if (name === "GetObjectCommand") {
@@ -136,22 +154,28 @@ async function main() {
   let clock = new Date();
   const now = () => new Date(clock.getTime());
   const ENV_ON = { ATTACHMENT_COPY_JOB_ENABLED: "true" }; // captura ausente = "off"
-  const run = (r2: FakeR2, fetcher: FakeFetcher, opts: { signal?: AbortSignal; limit?: number; env?: Record<string, string> } = {}) =>
+  const run = (r2: FakeR2, fetcher: SourceFetcher, opts: { signal?: AbortSignal; limit?: number; env?: Record<string, string>; deadlineMs?: number; r2OpTimeoutMs?: number } = {}) =>
     captured(() => runAttachmentCopy(
-      { deadline: Date.now() + 30_000, signal: opts.signal, limit: opts.limit ?? 50 },
-      { prisma, r2: { client: r2, bucket: BUCKET }, fetchers: [fetcher], now, random: () => 0.5, env: opts.env ?? ENV_ON },
+      { deadline: Date.now() + (opts.deadlineMs ?? 30_000), signal: opts.signal, limit: opts.limit ?? 50 },
+      { prisma, r2: { client: r2, bucket: BUCKET }, fetchers: [fetcher], now, random: () => 0.5, env: opts.env ?? ENV_ON, ...(opts.r2OpTimeoutMs ? { r2OpTimeoutMs: opts.r2OpTimeoutMs } : {}) },
     ));
+  /** Fetcher REAL de Emozion con fetch falso ruteado por URL (Response nueva por llamada). */
+  const realFetcher = (routes: Record<string, () => Response>, hosts: string[] = ["files.example", "cdn.example"]) =>
+    createEmozionFetcher({
+      allowedHosts: () => hosts,
+      fetchImpl: (async (url: string) => { const r = routes[url]; if (!r) throw new TypeError("no route"); return r(); }) as unknown as typeof fetch,
+    });
 
   const cust = await prisma.customer.create({ data: { phone: "+5491100000001", displayName: "Cliente" } });
   const conv = await prisma.conversation.create({ data: { customerId: cust.id, status: "SIN_ASIGNAR", source: "EMOZION", externalConversationId: "80001" } });
 
   let seq = 0;
   const urlFor = (n: number) => `https://files.example/rails/active_storage/blobs/redirect/SENTINEL_SIGNED_${n}/SENTINEL_receta_${n}.jpg`;
-  async function mkAtt(o: { url?: string | null; status?: "PENDING" | "FAILED" | "COPYING" | "NO_ORIGIN"; attempts?: number; next?: Date | null; capturedAt?: Date | null; lease?: string | null; createdAt?: Date } = {}) {
+  async function mkAtt(o: { url?: string | null; status?: "PENDING" | "FAILED" | "COPYING" | "NO_ORIGIN"; attempts?: number; next?: Date | null; capturedAt?: Date | null; lease?: string | null; createdAt?: Date; sizeBytes?: number | null } = {}) {
     seq++;
     return prisma.conversationAttachment.create({
       data: {
-        conversationId: conv.id, source: "EMOZION", sourceExternalId: `emozion-attachment:${90000 + seq}`, mediaType: "image", sizeBytes: 10,
+        conversationId: conv.id, source: "EMOZION", sourceExternalId: `emozion-attachment:${90000 + seq}`, mediaType: "image", sizeBytes: o.sizeBytes === undefined ? null : o.sizeBytes,
         storageStatus: o.status ?? "PENDING",
         sourceFetchUrl: o.url === undefined ? urlFor(seq) : o.url,
         sourceFetchCapturedAt: o.capturedAt === undefined ? now() : o.capturedAt,
@@ -421,6 +445,181 @@ async function main() {
       assert.equal(res.copy.reserved, 0);
       assert.deepEqual([await row(hist.id), await row(histNoOrigin.id)], before);
       assert.equal(await prisma.syncLog.count(), 0);
+    });
+
+    // ── Correcciones Codex sobre C3 ────────────────────────────────────────────────────
+    console.log("\n== B6.3-C3 fix: descarga completa, redirecciones, cancelación R2, config ==");
+
+    /** Corre una descarga "dudosa" y verifica: no STORED, reintentable con el código, URL intacta, sin PUT. */
+    async function expectDubious(make: () => Response, code: string, attOpts: { sizeBytes?: number | null } = {}) {
+      await reset();
+      const r2 = new FakeR2();
+      const a = await mkAtt(attOpts);
+      const res = await run(r2, realFetcher({ [a.sourceFetchUrl!]: make }));
+      assert.equal(res.copy.stored, 0); assert.equal(res.copy.retryScheduled, 1);
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "FAILED"); assert.equal(r.storageLastError, code);
+      assert.equal(r.sourceFetchUrl, a.sourceFetchUrl, "URL intacta"); assert.equal(r.storageAttemptCount, 1);
+      assert.ok(r.storageNextRetryAt && r.storageNextRetryAt > now(), "con backoff");
+      assert.equal(r2.putCalls, 0, "nada se sube con un cuerpo dudoso");
+      await assertNoUrlInSinks();
+    }
+
+    await check("11a. cuerpo truncado (7 de 100, Content-Length 100) → no STORED, INCOMPLETE_BODY, URL intacta", async () => {
+      await expectDubious(() => new Response(Buffer.alloc(7, 1), { status: 200, headers: { "content-length": "100" } }), "INCOMPLETE_BODY");
+    });
+
+    await check("11b. stream que se corta a mitad → INCOMPLETE_BODY", async () => {
+      await expectDubious(() => {
+        let n = 0;
+        return new Response(new ReadableStream<Uint8Array>({ pull(c) { if (n++ < 2) c.enqueue(new Uint8Array(10)); else c.error(new Error("reset")); } }), { status: 200 });
+      }, "INCOMPLETE_BODY");
+    });
+
+    await check("11c. 0 bytes → EMPTY_BODY; 206 → INCOMPLETE_RESPONSE", async () => {
+      await expectDubious(() => new Response(new Uint8Array(0), { status: 200 }), "EMPTY_BODY");
+      await expectDubious(() => new Response(Buffer.from("parcial"), { status: 206, headers: { "content-range": "bytes 0-6/100" } }), "INCOMPLETE_RESPONSE");
+    });
+
+    await check("11d. sizeBytes ≠ recibido → SIZE_MISMATCH; gzip con Content-Length distinto y sizeBytes igual → STORED", async () => {
+      await expectDubious(() => new Response(Buffer.alloc(40, 3), { status: 200 }), "SIZE_MISMATCH", { sizeBytes: 50 });
+      await reset();
+      const r2 = new FakeR2();
+      const a = await mkAtt({ sizeBytes: 40 });
+      const res = await run(r2, realFetcher({ [a.sourceFetchUrl!]: () => new Response(Buffer.alloc(40, 4), { status: 200, headers: { "content-length": "12", "content-encoding": "gzip" } }) }));
+      assert.equal(res.copy.stored, 1);
+      assert.equal((await row(a.id)).storageSizeBytes, 40);
+    });
+
+    const redirect = (location: string, status = 302) => () => new Response(null, { status, headers: { location } });
+    await check("12a. 1 y 3 redirecciones permitidas → STORED", async () => {
+      await reset();
+      const r2 = new FakeR2();
+      const a1 = await mkAtt(), a3 = await mkAtt();
+      const body = Buffer.from("contenido-redirigido");
+      const routes = {
+        [a1.sourceFetchUrl!]: redirect("https://cdn.example/one"),
+        "https://cdn.example/one": () => new Response(body, { status: 200 }),
+        [a3.sourceFetchUrl!]: redirect("https://cdn.example/h1", 301),
+        "https://cdn.example/h1": redirect("/h2", 307),
+        "https://cdn.example/h2": redirect("https://files.example/h3", 308),
+        "https://files.example/h3": () => new Response(body, { status: 200 }),
+      };
+      const res = await run(r2, realFetcher(routes));
+      assert.equal(res.copy.stored, 2);
+      for (const a of [a1, a3]) assert.equal((await row(a.id)).storageStatus, "STORED");
+    });
+
+    await check("12b. 4 redirecciones → TOO_MANY_REDIRECTS reintentable", async () => {
+      await reset();
+      const r2 = new FakeR2();
+      const a = await mkAtt();
+      const routes = {
+        [a.sourceFetchUrl!]: redirect("https://cdn.example/1"), "https://cdn.example/1": redirect("https://cdn.example/2"),
+        "https://cdn.example/2": redirect("https://cdn.example/3"), "https://cdn.example/3": redirect("https://cdn.example/4"),
+        "https://cdn.example/4": () => new Response(Buffer.from("x"), { status: 200 }),
+      };
+      await run(r2, realFetcher(routes));
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "FAILED"); assert.equal(r.storageLastError, "TOO_MANY_REDIRECTS"); assert.ok(r.sourceFetchUrl);
+    });
+
+    await check("12c. salto a host no permitido / http / IP privada → rechazado; SyncLog SOLO con el hostname", async () => {
+      for (const [loc, host] of [
+        ["https://evil.example/SENTINEL_PATH/receta.pdf?SENTINEL_Q=1#SENTINEL_F", "evil.example"],
+        ["http://cdn.example/SENTINEL_DOWNGRADE", "cdn.example"],
+        ["https://10.0.0.5/SENTINEL_IP", "10.0.0.5"],
+      ] as const) {
+        await reset();
+        const r2 = new FakeR2();
+        const a = await mkAtt();
+        await run(r2, realFetcher({ [a.sourceFetchUrl!]: redirect(loc) }));
+        const r = await row(a.id);
+        assert.equal(r.storageStatus, "FAILED"); assert.equal(r.storageLastError, "ORIGIN_REDIRECT_REJECTED"); assert.ok(r.sourceFetchUrl);
+        const log = await prisma.syncLog.findFirstOrThrow({ where: { source: "ATTACHMENT_STORAGE" } });
+        const w = JSON.stringify(log.warnings);
+        assert.ok(w.includes(`REDIRECT_REJECTED_HOST:${host}`), `registra el hostname (${host})`);
+        assert.ok(!/SENTINEL|receta|https?:|\/\//.test(JSON.stringify(log)), "ninguna otra parte de la URL en el SyncLog");
+      }
+    });
+
+    await check("13a. R2 colgado en preflight → termina antes del deadline + margen, sin reservar", async () => {
+      await reset();
+      const r2 = new FakeR2(); r2.hang.add("head");
+      const f = new FakeFetcher();
+      const a = await mkAtt();
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("x") });
+      const t0 = Date.now();
+      const res = await run(r2, f, { deadlineMs: 5_000, r2OpTimeoutMs: 300 });
+      assert.ok(Date.now() - t0 < 2_000, `terminó rápido (${Date.now() - t0} ms)`);
+      assert.equal(res.copy.preflight, "failed"); assert.equal(res.copy.reserved, 0);
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "PENDING"); assert.equal(r.storageAttemptCount, 0);
+      const log = await prisma.syncLog.findFirstOrThrow({ where: { source: "ATTACHMENT_STORAGE" } });
+      assert.ok(JSON.stringify(log.warnings).includes("PREFLIGHT_FAILED:copy.preflight|r2_timeout"));
+    });
+
+    for (const op of ["put", "get"] as const) {
+      await check(`13b. R2 colgado en ${op.toUpperCase()} → corta por timeout propio, libera sin consumir intento, corta la corrida`, async () => {
+        await reset();
+        const r2 = new FakeR2(); r2.hang.add(op);
+        const f = new FakeFetcher();
+        const a = await mkAtt({ status: "FAILED", attempts: 2, next: new Date(now().getTime() - 1000) });
+        const b = await mkAtt();
+        for (const x of [a, b]) f.behaviors.set(x.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from(`b-${x.id}`) });
+        const t0 = Date.now();
+        const res = await run(r2, f, { deadlineMs: 5_000, r2OpTimeoutMs: 300 });
+        assert.ok(Date.now() - t0 < 2_000, `terminó rápido (${Date.now() - t0} ms)`);
+        assert.equal(res.copy.stopReason, "r2_timeout"); assert.equal(res.copy.stored, 0); assert.equal(res.copy.released, 2);
+        const ra = await row(a.id), rb = await row(b.id);
+        assert.equal(ra.storageStatus, "FAILED"); assert.equal(ra.storageAttemptCount, 2, "no consume intento"); assert.ok(ra.sourceFetchUrl);
+        assert.equal(rb.storageStatus, "PENDING"); assert.equal(rb.storageAttemptCount, 0); assert.equal(rb.storageLeaseId, null);
+      });
+    }
+
+    await check("13c. el deadline de la corrida corta un PUT colgado (timeout por op mayor) → libera sin penalizar", async () => {
+      await reset();
+      const r2 = new FakeR2(); r2.hang.add("put");
+      const f = new FakeFetcher();
+      const a = await mkAtt();
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes: Buffer.from("x") });
+      const t0 = Date.now();
+      const res = await run(r2, f, { deadlineMs: 600, r2OpTimeoutMs: 60_000 });
+      assert.ok(Date.now() - t0 < 600 + 1_000, `cortó en el deadline + margen (${Date.now() - t0} ms)`);
+      assert.equal(res.copy.stopReason, "deadline"); assert.equal(res.copy.aborted, false); assert.equal(res.copy.released, 1);
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "PENDING"); assert.equal(r.storageAttemptCount, 0);
+    });
+
+    await check("14. PUT cortado (llegó a guardar) → liberado; reintento recibe 412 → relectura con mismo hash → STORED", async () => {
+      await reset();
+      const r2 = new FakeR2(); r2.putStoresThenHangs = true;
+      const f = new FakeFetcher();
+      const a = await mkAtt();
+      const bytes = Buffer.from("subido-pero-respuesta-perdida");
+      f.behaviors.set(a.sourceFetchUrl!, { kind: "ok", bytes });
+      const first = await run(r2, f, { r2OpTimeoutMs: 300 });
+      assert.equal(first.copy.stopReason, "r2_timeout"); assert.equal(first.copy.released, 1);
+      assert.ok(r2.objects.has(objectKeyFor(a.id)), "el objeto quedó en R2");
+      assert.equal((await row(a.id)).storageAttemptCount, 0);
+      r2.putStoresThenHangs = false;
+      const second = await run(r2, f, { r2OpTimeoutMs: 300 });
+      assert.equal(second.copy.stored, 1); assert.equal(r2.preconditionFailures, 1); assert.equal(r2.deleteCalls, 0);
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "STORED"); assert.equal(r.storageChecksumSha256, sha256(bytes)); assert.equal(r.storageAttemptCount, 1);
+    });
+
+    await check("15. allowlist vacía → aborto CONFIG antes de reservar (no se queman intentos)", async () => {
+      await reset();
+      const r2 = new FakeR2();
+      const a = await mkAtt();
+      const res = await run(r2, realFetcher({}, []));
+      assert.equal(res.copy.aborted, true); assert.equal(res.copy.stopReason, "config"); assert.equal(res.copy.reserved, 0);
+      assert.equal(res.copy.preflight, "skipped");
+      const r = await row(a.id);
+      assert.equal(r.storageStatus, "PENDING"); assert.equal(r.storageAttemptCount, 0);
+      const log = await prisma.syncLog.findFirstOrThrow({ where: { source: "ATTACHMENT_STORAGE" } });
+      assert.equal(log.status, "ERROR"); assert.ok(JSON.stringify(log.warnings).includes("CONFIG_INVALID:ATTACHMENT_SOURCE_ALLOWED_HOSTS"));
     });
 
     await check("10. ningún log (stdout/stderr) ni SyncLog contiene la URL / filename", async () => {
