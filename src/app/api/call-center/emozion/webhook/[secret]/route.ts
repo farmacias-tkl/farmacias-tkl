@@ -32,6 +32,7 @@ import {
   maybeProbeSourceUrls,
 } from "@/lib/call-center/attachment-source";
 import { getR2Config } from "@/lib/integrations/r2";
+import { safeErrorCode } from "@/lib/call-center/safe-error";
 
 /** ¿Config R2 completa? (para el gate de captura "on", E3). Nunca expone valores. */
 function r2ConfigValid(): boolean {
@@ -260,7 +261,9 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
     console.log("[emozion-webhook]", JSON.stringify({ eventId: ev.id, eventType, accountId, externalConversationId, externalMessageId, status, error }));
   } catch (e) {
     // No se pudo ni persistir → 5xx para que Emozion reintente (única red de seguridad).
-    console.error("[emozion-webhook] persist failed:", e instanceof Error ? e.message : String(e));
+    // B6.3-C2b: código seguro, NUNCA e.message (Prisma incluye los args: payload con PII y
+    // transientSourceUrls).
+    console.error("[emozion-webhook] persist failed:", safeErrorCode(e, "route.create"));
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 
@@ -278,7 +281,7 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
       const result = await processWebhookEvent(eventId);
       console.log("[emozion-webhook] processed", JSON.stringify({ eventId, eventType, status: result.status, outcome: result.outcome }));
     } catch (e) {
-      console.error("[emozion-webhook] processor threw:", e instanceof Error ? e.message : String(e));
+      console.error("[emozion-webhook] processor threw:", JSON.stringify({ eventId, code: safeErrorCode(e, "route.process") }));
     }
   }
 

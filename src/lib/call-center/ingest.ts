@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { canTransition } from "./transitions";
 import { initialStorageFields, type AttachmentSourceCtx } from "./attachment-source";
+import { tagErrorStage } from "./safe-error";
 import type {
   NormalizedConversation,
   NormalizedMessage,
@@ -119,6 +120,7 @@ export async function upsertMessageFromEmozion(
     messageId = existing.id;
     created = false;
   } else {
+    // B6.3-C2b: el stage se etiqueta en el error (sin cambiar su tipo) para el código seguro.
     const msg = await tx.conversationMessage.create({
       data: {
         conversationId,
@@ -132,7 +134,7 @@ export async function upsertMessageFromEmozion(
         externalMessageId: n.externalMessageId,
         sentAt: n.sentAt,
       },
-    });
+    }).catch((e: unknown) => { throw tagErrorStage(e, "ingest.message"); });
     messageId = msg.id;
     created = true;
   }
@@ -164,7 +166,7 @@ export async function upsertMessageFromEmozion(
         // NUNCA: mediaUrl/thumb_url/source_url/filename/bytes/storageProvider/storageKey
       },
       select: { id: true },
-    });
+    }).catch((e: unknown) => { throw tagErrorStage(e, "ingest.attachment"); });
     attachmentsCreated++;
   }
 

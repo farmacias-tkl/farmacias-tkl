@@ -511,6 +511,35 @@ async function main() {
       assert.equal(after!.storageStatus, "NO_ORIGIN"); assert.equal(after!.sourceFetchUrl, null);
     });
 
+    // B6.3-C2b: fallo REAL de Prisma en el create del adjunto (sizeBytes > INT4) con captura "on"
+    // y URL sentinel + texto de cliente sentinel → los sumideros NO contienen ninguno.
+    await check("B6.3-C2b. fallo real del create (overflow INT) → error/SyncLog/logs sin URL ni texto de cliente", async () => {
+      const PII = "SENTINEL_CLIENTE_TXT necesito mi receta";
+      const raw = rawMsg({ convId: CONV, msgId: 27008, sourceId: "wamid-b63err", mt: "incoming", content: PII, senderId: 555, senderType: null,
+        attachments: [rawAtt(32008, "image", 9999999999, "B63ERR")] });
+      const { id } = await fromRaw(raw, { capture: ON });
+      const syncBefore = await prisma.syncLog.count();
+      // Captura TODO lo que se escriba a stdout/stderr durante el procesamiento.
+      let captured = "";
+      const ow = process.stdout.write.bind(process.stdout), ew = process.stderr.write.bind(process.stderr);
+      (process.stdout as any).write = (c: any, ...a: any[]) => { captured += String(c); return true; };
+      (process.stderr as any).write = (c: any, ...a: any[]) => { captured += String(c); return true; };
+      let r;
+      try { r = await processWebhookEvent(id); } finally { (process.stdout as any).write = ow; (process.stderr as any).write = ew; }
+      assert.equal(r.status, "ERROR");
+      assert.ok(!/SENTINEL|necesito|receta|https?:\/\//.test(r.error ?? ""), "ProcessResult.error sin datos");
+      const we = await prisma.webhookEvent.findUnique({ where: { id }, select: { status: true, error: true } });
+      assert.equal(we!.status, "ERROR");
+      assert.ok(we!.error!.startsWith("ingest.attachment|Prisma"), `código seguro con stage etiquetado (fue: ${we!.error})`);
+      assert.ok(!/SENTINEL|necesito|receta|https?:\/\/|emozion\.example/.test(we!.error!), "WebhookEvent.error sin URL ni texto de cliente");
+      const logs = await prisma.syncLog.findMany({ orderBy: { createdAt: "desc" }, take: (await prisma.syncLog.count()) - syncBefore });
+      assert.equal(logs.length, 1, "un SyncLog de fallo");
+      assert.ok(!/SENTINEL|necesito|receta|https?:\/\/|emozion\.example/.test(JSON.stringify(logs)), "SyncLog sin URL ni texto de cliente");
+      assert.equal((captured.match(/SENTINEL/g) ?? []).length, 0, "0 apariciones del sentinel en stdout/stderr");
+      assert.equal(await transientIsSqlNull(id), false, "ERROR conserva transientSourceUrls (lo limpia M3)");
+      assert.equal(await prisma.conversationAttachment.count({ where: { sourceExternalId: "emozion-attachment:32008" } }), 0, "rollback");
+    });
+
     // Invariante: ningún PROCESSED con transientSourceUrls no nulo
     await check("B6.3-inv. cero WebhookEvent PROCESSED con transientSourceUrls IS NOT NULL", async () => {
       const rows = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*)::bigint AS n FROM "WebhookEvent" WHERE status = 'PROCESSED' AND "transientSourceUrls" IS NOT NULL`;

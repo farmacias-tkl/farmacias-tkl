@@ -6,6 +6,7 @@ import {
   applyStatusChangedFromEmozion,
 } from "./ingest";
 import { parseTransientSourceUrls } from "./attachment-source";
+import { safeErrorCode } from "./safe-error";
 import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent } from "./emozion-types";
 
 /**
@@ -28,9 +29,22 @@ import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent }
 
 type DomainOutcome = "processed" | "needsRetry" | "insufficientData" | "error";
 
+/**
+ * Códigos FIJOS de ProcessError (B6.3-C2b): lo único que llega a los sumideros
+ * (WebhookEvent.error / SyncLog) vía safeErrorCode. Sin texto libre ni valores.
+ */
+type ProcessErrorCode =
+  | "PAYLOAD_MISSING"
+  | "CONVERSATION_PAYLOAD_INVALID"
+  | "MESSAGE_PAYLOAD_INVALID"
+  | "STATUS_PAYLOAD_INVALID"
+  | "MESSAGE_OUT_OF_ORDER"
+  | "STATUS_OUT_OF_ORDER"
+  | "EVENT_TYPE_UNSUPPORTED";
+
 class ProcessError extends Error {
-  constructor(public readonly outcome: DomainOutcome, message: string) {
-    super(message);
+  constructor(public readonly outcome: DomainOutcome, public readonly code: ProcessErrorCode) {
+    super(code);
     this.name = "ProcessError";
   }
 }
@@ -82,15 +96,15 @@ export function isDomainIdempotencyUniqueViolation(e: unknown): boolean {
 // El payload persistido serializa Dates a ISO (JSON). Re-hidratamos antes de pasar a ingest.
 const toDate = (v: unknown): Date | null => (v ? new Date(v as string) : null);
 function hydrateConversation(c: any): NormalizedConversation {
-  if (!c || typeof c !== "object") throw new ProcessError("error", "payload.conversation ausente/ inválido");
+  if (!c || typeof c !== "object") throw new ProcessError("error", "CONVERSATION_PAYLOAD_INVALID");
   return { ...c, firstResponseAt: toDate(c.firstResponseAt), closedAt: toDate(c.closedAt), externalCreatedAt: toDate(c.externalCreatedAt) };
 }
 function hydrateMessage(m: any): NormalizedMessage {
-  if (!m || typeof m !== "object") throw new ProcessError("error", "payload.message ausente/ inválido");
+  if (!m || typeof m !== "object") throw new ProcessError("error", "MESSAGE_PAYLOAD_INVALID");
   return { ...m, sentAt: m.sentAt ? new Date(m.sentAt) : new Date(0) };
 }
 function hydrateStatusEvent(s: any): NormalizedStatusEvent {
-  if (!s || typeof s !== "object") throw new ProcessError("error", "payload.statusEvent ausente/ inválido");
+  if (!s || typeof s !== "object") throw new ProcessError("error", "STATUS_PAYLOAD_INVALID");
   return { ...s, closedAt: toDate(s.closedAt) };
 }
 
@@ -110,7 +124,7 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
   try {
     await prisma.$transaction(async (tx) => {
       const payload = ev.payload as any;
-      if (!payload || typeof payload !== "object") throw new ProcessError("error", "WebhookEvent sin payload normalizado");
+      if (!payload || typeof payload !== "object") throw new ProcessError("error", "PAYLOAD_MISSING");
 
       switch (ev.eventType) {
         case "conversation_created": {
@@ -134,7 +148,8 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
               warnings.push(...rc.warnings);
               conv = { id: rc.conversationId };
             } else {
-              throw new ProcessError("needsRetry", "message_created fuera de orden y sin datos de conversación en el payload");
+              // message_created fuera de orden y sin datos de conversación en el payload.
+              throw new ProcessError("needsRetry", "MESSAGE_OUT_OF_ORDER");
             }
           }
           // B6.3-C2: origen transitorio de adjuntos (fuera de payload). capturedAt = receivedAt
@@ -147,11 +162,12 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
         case "conversation_status_changed": {
           const r = await applyStatusChangedFromEmozion(tx, hydrateStatusEvent(payload.statusEvent));
           warnings.push(...r.warnings);
-          if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", r.warnings.join("; ") || "status change fuera de orden");
+          // status change sobre conversación inexistente (fuera de orden).
+          if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", "STATUS_OUT_OF_ORDER");
           break;
         }
         default:
-          throw new ProcessError("error", `eventType no soportado en processor: ${ev.eventType}`);
+          throw new ProcessError("error", "EVENT_TYPE_UNSUPPORTED");
       }
     });
     domainOk = true;
@@ -167,15 +183,16 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
       // P2002 de OTRO constraint (p.ej. Customer.phone — carrera de cliente recurrente) o
       // sin target → NO idempotente. NO se marca PROCESSED: fluye como ERROR por la misma
       // estructura de atomicidad (la marca se escribe FUERA de la tx rolleada, abajo).
-      const tgt = getUniqueViolationTarget(e);
+      // B6.3-C2b: código seguro (incluye P2002 + target solo si son nombres de columna).
       outcome = "error";
-      errorMsg = `P2002 no idempotente (constraint: ${tgt && tgt.length ? tgt.join(",") : "desconocido"})`;
+      errorMsg = safeErrorCode(e, "processor.tx");
     } else if (e instanceof ProcessError) {
       outcome = e.outcome;
-      errorMsg = e.message;
+      errorMsg = safeErrorCode(e, "processor.tx"); // "processor.tx|ProcessError|<código fijo>|"
     } else {
+      // B6.3-C2b: NUNCA e.message (Prisma incluye los args: URLs de origen, texto de clientes).
       outcome = "error";
-      errorMsg = e instanceof Error ? e.message : String(e);
+      errorMsg = safeErrorCode(e, "processor.tx");
     }
   }
 
