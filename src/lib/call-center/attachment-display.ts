@@ -125,5 +125,5 @@ export function deriveStorageDisplay(input: { storageStatus: StorageStatusValue 
 export const STORAGE_DISPLAY_META: Record<StorageDisplay, { label: string; bg: string; fg: string }> = {
   STORED: { label: "Guardado en TKL", bg: "#D1FAE5", fg: "#065F46" },
   IN_PROGRESS: { label: "Copia en curso", bg: "#FEF3C7", fg: "#92400E" },
-  NOT_COPIED: { label: "No copiado — disponible solo en Emozion", bg: "#F3F4F6", fg: "#374151" },
+  NOT_COPIED: { label: "Sin copia en TKL · Consultar en Emozion", bg: "#F3F4F6", fg: "#374151" },
 };

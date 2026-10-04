@@ -141,7 +141,7 @@ test("9. histórico PENDING sin origen → NOT_COPIED", () => {
 test("10. etiquetas del badge", () => {
   assert.equal(STORAGE_DISPLAY_META.STORED.label, "Guardado en TKL");
   assert.equal(STORAGE_DISPLAY_META.IN_PROGRESS.label, "Copia en curso");
-  assert.equal(STORAGE_DISPLAY_META.NOT_COPIED.label, "No copiado — disponible solo en Emozion");
+  assert.equal(STORAGE_DISPLAY_META.NOT_COPIED.label, "Sin copia en TKL · Consultar en Emozion");
   for (const m of Object.values(STORAGE_DISPLAY_META)) assert.ok(m.label.length > 0 && m.bg !== m.fg);
 });
 

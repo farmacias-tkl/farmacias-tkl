@@ -191,17 +191,48 @@ async function main() {
       }
     });
 
-    await check("C5-3. detalle: la URL NUNCA se carga en memoria (las queries solo seleccionan columnas whitelist + id)", async () => {
-      const queries: string[] = [];
+    const { buildAttachmentDetailQuery } = await import("./attachment-detail-read");
+
+    /** Prisma espía: registra cada $queryRaw y cualquier acceso a conversationAttachment.* */
+    function spyPrisma() {
+      const raw: string[] = [];
+      let modelCalls = 0;
       const spy = new Proxy(prisma, {
         get(target, prop, recv) {
-          if (prop !== "conversationAttachment") return Reflect.get(target, prop, recv);
-          return { findMany: (args: any) => { queries.push(JSON.stringify(args.select)); return (target as any).conversationAttachment.findMany(args); } };
+          if (prop === "$queryRaw") return (q: any, ...rest: any[]) => { raw.push(q?.text ?? String(q)); return (target as any).$queryRaw(q, ...rest); };
+          if (prop === "conversationAttachment") { modelCalls++; return Reflect.get(target, prop, recv); }
+          return Reflect.get(target, prop, recv);
         },
       }) as typeof prisma;
+      return { spy, raw, modelCalls: () => modelCalls };
+    }
+
+    await check("C5-3. detalle: UNA sola sentencia; el SQL no selecciona sourceFetchUrl (solo dentro de IS NOT NULL) ni columnas sensibles", async () => {
+      const { spy, raw, modelCalls } = spyPrisma();
       await loadAttachmentsForDetail(convC.id, spy);
-      assert.equal(queries.length, 2);
-      for (const q of queries) assert.ok(!/sourceFetchUrl|storageKey|storageBucket|storageLeaseId|storageLastError|Checksum/.test(q), `select sin columnas sensibles: ${q}`);
+      assert.equal(raw.length, 1, "exactamente UNA consulta de adjuntos");
+      assert.equal(modelCalls(), 0, "sin consultas extra vía el modelo");
+      const sql = buildAttachmentDetailQuery("x").text.replace(/\s+/g, " ");
+      assert.equal(raw[0].replace(/\s+/g, " "), sql);
+      const selectList = sql.slice(sql.indexOf("SELECT") + 6, sql.indexOf(" FROM "));
+      assert.equal((selectList.match(/sourceFetchUrl/g) ?? []).length, 1, "sourceFetchUrl aparece una sola vez…");
+      assert.ok(selectList.includes(`("sourceFetchUrl" IS NOT NULL) AS "hasSource"`), "…y solo dentro de la expresión IS NOT NULL");
+      assert.ok(!/storageKey|storageBucket|storageLeaseId|storageLastError|Checksum|sourceExternalId|originalFileName|transientSourceUrls/.test(sql));
+      assert.ok(sql.includes(`WHERE "conversationId" = $1`), "parametrizado");
+    });
+
+    await check("C5-4. carrera: estado y origen salen de la MISMA fila (copia que termina = STORED con URL anulada → STORED; PENDING con URL → IN_PROGRESS)", async () => {
+      const convD = await prisma.conversation.create({ data: { customerId: cust.id, status: "SIN_ASIGNAR", source: "EMOZION", externalConversationId: "70004" } });
+      const finished = await prisma.conversationAttachment.create({ data: { conversationId: convD.id, source: "EMOZION", sourceExternalId: "emozion-attachment:SENTINEL_SRCEXT_D1", mediaType: "image", documentType: "UNKNOWN", status: "RECEIVED", storageStatus: "PENDING", sourceFetchUrl: URL_SENTINEL, sourceFetchCapturedAt: new Date(), createdAt: new Date("2026-10-04T00:00:01Z") }, select: { id: true } });
+      const pending = await prisma.conversationAttachment.create({ data: { conversationId: convD.id, source: "EMOZION", sourceExternalId: "emozion-attachment:SENTINEL_SRCEXT_D2", mediaType: "image", documentType: "UNKNOWN", status: "RECEIVED", storageStatus: "PENDING", sourceFetchUrl: URL_SENTINEL, sourceFetchCapturedAt: new Date(), createdAt: new Date("2026-10-04T00:00:02Z") }, select: { id: true } });
+      // La copia "termina" (mismo update que hace el worker: STORED + URL anulada).
+      await prisma.conversationAttachment.update({ where: { id: finished.id }, data: { storageStatus: "STORED", sourceFetchUrl: null } });
+      const { spy, raw } = spyPrisma();
+      const items = await loadAttachmentsForDetail(convD.id, spy);
+      assert.equal(raw.length, 1, "una sola sentencia: no hay ventana entre leer estado y leer origen");
+      assert.deepEqual(items.map((i) => [i.id, i.storageDisplay]), [[finished.id, "STORED"], [pending.id, "IN_PROGRESS"]]);
+      const json = JSON.stringify(items);
+      assert.ok(!json.includes("SENTINEL") && !json.includes("files.example"));
     });
   } finally {
     await (await import("../prisma")).prisma.$disconnect().catch(() => {});
