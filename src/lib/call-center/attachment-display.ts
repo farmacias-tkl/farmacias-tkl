@@ -93,3 +93,37 @@ export function groupAttachmentsByMessage<T extends { messageId: string | null }
   }
   return { byMessage, orphans };
 }
+
+// ── Copia a storage propio (B6.3-C5) ──────────────────────────────────────────────────
+
+/** Espejo de Prisma StorageStatus (sin importar Prisma: módulo puro). */
+export type StorageStatusValue = "PENDING" | "COPYING" | "STORED" | "FAILED" | "NO_ORIGIN" | "DELETED";
+
+/** Único valor de storage que llega a la UI (derivado en el server; nada más de storage sale). */
+export type StorageDisplay = "STORED" | "IN_PROGRESS" | "NOT_COPIED";
+
+/**
+ * Estado de copia visible por adjunto. `hasSource` = el adjunto tiene origen transitorio
+ * (sourceFetchUrl presente), calculado en el server SIN cargar la URL.
+ *  - STORED → STORED
+ *  - COPYING → IN_PROGRESS
+ *  - PENDING / FAILED con origen → IN_PROGRESS (la copia va a ocurrir / reintentar)
+ *  - todo lo demás (NO_ORIGIN, FAILED sin origen = terminal, PENDING sin origen = histórico,
+ *    DELETED) → NOT_COPIED
+ */
+export function deriveStorageDisplay(input: { storageStatus: StorageStatusValue | string; hasSource: boolean }): StorageDisplay {
+  switch (input.storageStatus) {
+    case "STORED": return "STORED";
+    case "COPYING": return "IN_PROGRESS";
+    case "PENDING":
+    case "FAILED": return input.hasSource ? "IN_PROGRESS" : "NOT_COPIED";
+    default: return "NOT_COPIED";
+  }
+}
+
+/** Etiqueta + colores del badge (mismo esquema que STATUS_META). El texto lleva el significado. */
+export const STORAGE_DISPLAY_META: Record<StorageDisplay, { label: string; bg: string; fg: string }> = {
+  STORED: { label: "Guardado en TKL", bg: "#D1FAE5", fg: "#065F46" },
+  IN_PROGRESS: { label: "Copia en curso", bg: "#FEF3C7", fg: "#92400E" },
+  NOT_COPIED: { label: "No copiado — disponible solo en Emozion", bg: "#F3F4F6", fg: "#374151" },
+};

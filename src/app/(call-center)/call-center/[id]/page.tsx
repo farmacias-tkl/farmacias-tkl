@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { ConversationMessageAuthor } from "@prisma/client";
 import { STATUS_META } from "@/lib/call-center/status-display";
 import { formatDateTimeAR } from "@/lib/dates/format";
-import { formatAttachmentMeta, groupAttachmentsByMessage } from "@/lib/call-center/attachment-display";
+import { formatAttachmentMeta, groupAttachmentsByMessage, STORAGE_DISPLAY_META, type StorageDisplay } from "@/lib/call-center/attachment-display";
+import { loadAttachmentsForDetail } from "@/lib/call-center/attachment-detail-read";
 import ConversationActions from "./ConversationActions";
 
 export const metadata = { title: "Call Center — Conversación" };
@@ -37,24 +38,22 @@ export default async function ConversationDetailPage({
         orderBy: { changedAt: "asc" },
         include: { changedBy: { select: { name: true } } },
       },
-      // B5: metadata de adjuntos a NIVEL CONVERSACIÓN (no anidada bajo messages), para poder
-      // detectar huérfanos (messageId null por SetNull, o que no matchea ningún mensaje) y NO
-      // tragárnoslos en silencio. SELECT WHITELIST: solo metadata; sin sourceExternalId/URLs/
-      // mimeType/originalFileName/source/columnas de storage futuras (B6). Es metadata-only.
-      attachments: {
-        orderBy: { createdAt: "asc" },
-        select: { id: true, messageId: true, mediaType: true, sizeBytes: true, documentType: true, status: true, createdAt: true },
-      },
     },
   });
 
   if (!conv) notFound();
 
+  // B5: metadata de adjuntos a NIVEL CONVERSACIÓN (no anidada bajo messages), para poder
+  // detectar huérfanos (messageId null por SetNull, o que no matchea ningún mensaje) y NO
+  // tragárnoslos en silencio. B6.3-C5: + storageDisplay derivado en el server (whitelist;
+  // ninguna columna de storage ni la URL de origen llegan al render). Ver attachment-detail-read.
+  const attachments = await loadAttachmentsForDetail(conv.id);
+
   const m = STATUS_META[conv.status];
 
   // B5: anclar cada adjunto a su mensaje vía messageId; los huérfanos van a un bloque al pie.
   const messageIds = new Set(conv.messages.map((msg) => msg.id));
-  const { byMessage: attachmentsByMessage, orphans: orphanAttachments } = groupAttachmentsByMessage(conv.attachments, messageIds);
+  const { byMessage: attachmentsByMessage, orphans: orphanAttachments } = groupAttachmentsByMessage(attachments, messageIds);
 
   return (
     <main style={{ maxWidth: 820, margin: "0 auto", padding: "32px 24px" }}>
@@ -173,17 +172,29 @@ export default async function ConversationDetailPage({
 }
 
 // Línea de metadata de un adjunto (B5). SOLO texto: tipo · tamaño · clasificación (+ estado).
-// NO preview, NO thumbnail, NO link, NO descarga — ver/bajar el archivo es B3-B/B6 (storage).
-// El módulo no usa emojis → prefijo textual "Adjunto:".
+// NO preview, NO thumbnail, NO link, NO descarga — ver/bajar el archivo es B3-B/B6.5 (storage).
+// El módulo no usa emojis → prefijo textual "Adjunto:". B6.3-C5: + badge del estado de copia.
 function AttachmentLine({
   att,
 }: {
-  att: { mediaType: string | null; sizeBytes: number | null; documentType: string | null; status: string | null };
+  att: { mediaType: string | null; sizeBytes: number | null; documentType: string | null; status: string | null; storageDisplay: StorageDisplay };
 }) {
   return (
     <div style={{ fontSize: 12.5, color: "#6b7280", marginTop: 4 }}>
-      <span style={{ fontWeight: 600 }}>Adjunto:</span> {formatAttachmentMeta(att)}
+      <span style={{ fontWeight: 600 }}>Adjunto:</span> {formatAttachmentMeta(att)}{" "}
+      <StorageBadge value={att.storageDisplay} />
     </div>
+  );
+}
+
+// Badge del estado de copia a storage propio (B6.3-C5). El TEXTO lleva el significado (no solo
+// el color); mismo estilo de píldora que el badge de estado de la conversación.
+function StorageBadge({ value }: { value: StorageDisplay }) {
+  const meta = STORAGE_DISPLAY_META[value];
+  return (
+    <span style={{ display: "inline-block", marginLeft: 4, padding: "1px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: meta.bg, color: meta.fg, whiteSpace: "nowrap" }}>
+      {meta.label}
+    </span>
   );
 }
 

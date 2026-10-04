@@ -148,6 +148,61 @@ async function main() {
       assert.equal(before, after, "el listado de metadata no audita");
       assert.equal(after, 0, "sin AuditLog en B3-A");
     });
+
+    // ── B6.3-C5: detalle de conversación con storageDisplay ─────────────────────────────
+    console.log("\n== B6.3-C5: storageDisplay en el detalle ==");
+    const { loadAttachmentsForDetail } = await import("./attachment-detail-read");
+    const URL_SENTINEL = "https://files.example/rails/active_storage/blobs/SENTINEL_URL_TOKEN/receta.pdf";
+    const convC = await prisma.conversation.create({ data: { customerId: cust.id, status: "SIN_ASIGNAR", source: "EMOZION", externalConversationId: "70003" } });
+    let n = 0;
+    const mk = (storageStatus: "PENDING" | "COPYING" | "STORED" | "FAILED" | "NO_ORIGIN" | "DELETED", withUrl: boolean) =>
+      prisma.conversationAttachment.create({
+        data: {
+          conversationId: convC.id, source: "EMOZION", sourceExternalId: `emozion-attachment:SENTINEL_SRCEXT_C${++n}`, mediaType: "image", sizeBytes: 100 + n,
+          documentType: "UNKNOWN", status: "RECEIVED", createdAt: new Date(Date.UTC(2026, 9, 4, 0, 0, n)), storageStatus,
+          ...(withUrl ? { sourceFetchUrl: URL_SENTINEL, sourceFetchCapturedAt: new Date() } : {}),
+          // columnas de storage con sentinelas: NINGUNA debe llegar al detalle
+          storageKey: `call-center/attachments/v1/SENTINEL_KEY_${n}`, storageBucket: "SENTINEL_BUCKET", storageLeaseId: withUrl ? `SENTINEL_LEASE_${n}` : null,
+          storageLastError: "SENTINEL_LASTERROR", storageChecksumSha256: "SENTINEL_SHA256", storageProvider: "SENTINEL_PROVIDER",
+        },
+        select: { id: true },
+      });
+    const expected: [string, string][] = [];
+    for (const [st, url, disp] of [
+      ["STORED", false, "STORED"], ["COPYING", true, "IN_PROGRESS"], ["PENDING", true, "IN_PROGRESS"], ["FAILED", true, "IN_PROGRESS"],
+      ["FAILED", false, "NOT_COPIED"], ["NO_ORIGIN", false, "NOT_COPIED"], ["PENDING", false, "NOT_COPIED"], ["DELETED", false, "NOT_COPIED"],
+    ] as const) {
+      expected.push([(await mk(st, url)).id, disp]);
+    }
+    const DETAIL_KEYS = ["id", "messageId", "mediaType", "sizeBytes", "documentType", "status", "createdAt", "storageDisplay"];
+
+    await check("C5-1. detalle: storageDisplay derivado correcto por adjunto (incluye histórico PENDING sin URL → NOT_COPIED)", async () => {
+      const items = await loadAttachmentsForDetail(convC.id, prisma);
+      assert.equal(items.length, expected.length);
+      for (const [id, disp] of expected) assert.equal(items.find((i) => i.id === id)?.storageDisplay, disp, id);
+    });
+
+    await check("C5-2. detalle: keys EXACTAS y NINGÚN campo prohibido ni la URL en el JSON serializado", async () => {
+      const items = await loadAttachmentsForDetail(convC.id, prisma);
+      for (const it of items) assert.deepEqual(Object.keys(it).sort(), [...DETAIL_KEYS].sort());
+      const json = JSON.stringify(items);
+      for (const tok of [...FORBIDDEN, "storageStatus", "storageLeaseId", "transientSourceUrls", "SENTINEL", "files.example", "receta"]) {
+        assert.ok(!json.includes(tok), `no debe aparecer "${tok}"`);
+      }
+    });
+
+    await check("C5-3. detalle: la URL NUNCA se carga en memoria (las queries solo seleccionan columnas whitelist + id)", async () => {
+      const queries: string[] = [];
+      const spy = new Proxy(prisma, {
+        get(target, prop, recv) {
+          if (prop !== "conversationAttachment") return Reflect.get(target, prop, recv);
+          return { findMany: (args: any) => { queries.push(JSON.stringify(args.select)); return (target as any).conversationAttachment.findMany(args); } };
+        },
+      }) as typeof prisma;
+      await loadAttachmentsForDetail(convC.id, spy);
+      assert.equal(queries.length, 2);
+      for (const q of queries) assert.ok(!/sourceFetchUrl|storageKey|storageBucket|storageLeaseId|storageLastError|Checksum/.test(q), `select sin columnas sensibles: ${q}`);
+    });
   } finally {
     await (await import("../prisma")).prisma.$disconnect().catch(() => {});
     console.log("\n== teardown ==");

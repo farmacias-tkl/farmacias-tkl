@@ -10,6 +10,10 @@ import {
   getAttachmentStatusLabel,
   formatAttachmentMeta,
   groupAttachmentsByMessage,
+  deriveStorageDisplay,
+  STORAGE_DISPLAY_META,
+  type StorageStatusValue,
+  type StorageDisplay,
 } from "./attachment-display";
 
 let passed = 0;
@@ -109,6 +113,36 @@ test("7. agrupar: sin adjuntos para un mensaje → map sin esa key", () => {
   const { byMessage, orphans } = groupAttachmentsByMessage([], new Set(["m1"]));
   assert.equal(byMessage.get("m1"), undefined);
   assert.deepEqual(orphans, []);
+});
+
+// 8. B6.3-C5 — deriveStorageDisplay: tabla COMPLETA (todos los StorageStatus × hasSource)
+test("8. deriveStorageDisplay: tabla completa estado × hasSource", () => {
+  const table: [StorageStatusValue, boolean, StorageDisplay][] = [
+    ["STORED", true, "STORED"], ["STORED", false, "STORED"],
+    ["COPYING", true, "IN_PROGRESS"], ["COPYING", false, "IN_PROGRESS"],
+    ["PENDING", true, "IN_PROGRESS"], ["PENDING", false, "NOT_COPIED"],   // PENDING sin origen = histórico
+    ["FAILED", true, "IN_PROGRESS"], ["FAILED", false, "NOT_COPIED"],     // FAILED sin origen = terminal
+    ["NO_ORIGIN", true, "NOT_COPIED"], ["NO_ORIGIN", false, "NOT_COPIED"],
+    ["DELETED", true, "NOT_COPIED"], ["DELETED", false, "NOT_COPIED"],
+  ];
+  for (const [storageStatus, hasSource, expected] of table) {
+    assert.equal(deriveStorageDisplay({ storageStatus, hasSource }), expected, `${storageStatus}/${hasSource}`);
+  }
+  // valor desconocido → NOT_COPIED (conservador)
+  assert.equal(deriveStorageDisplay({ storageStatus: "ALGO_NUEVO", hasSource: true }), "NOT_COPIED");
+});
+
+// 9. histórico (PENDING sin URL) → NOT_COPIED
+test("9. histórico PENDING sin origen → NOT_COPIED", () => {
+  assert.equal(deriveStorageDisplay({ storageStatus: "PENDING", hasSource: false }), "NOT_COPIED");
+});
+
+// 10. etiquetas exactas (el TEXTO lleva el significado, no solo el color)
+test("10. etiquetas del badge", () => {
+  assert.equal(STORAGE_DISPLAY_META.STORED.label, "Guardado en TKL");
+  assert.equal(STORAGE_DISPLAY_META.IN_PROGRESS.label, "Copia en curso");
+  assert.equal(STORAGE_DISPLAY_META.NOT_COPIED.label, "No copiado — disponible solo en Emozion");
+  for (const m of Object.values(STORAGE_DISPLAY_META)) assert.ok(m.label.length > 0 && m.bg !== m.fg);
 });
 
 console.log(`\nattachment-display: ${passed} ok, ${failures.length} fail`);
