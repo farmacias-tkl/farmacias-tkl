@@ -15,11 +15,11 @@ SIAF Windows DBF
      ▼
 scripts/server/siaf_to_drive.py
      │
-     │ Genera 33 CSVs (11 sucursales × 3 archivos)
+     │ Genera 4 CSV por sucursal (44); el dashboard consume 3
      ▼
 \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario\
      │
-     │ Drive Desktop sincroniza a Drive
+     │ El script sube cada CSV por Drive API (Service Account)
      ▼
 Google Drive — carpeta diario/
      │
@@ -55,7 +55,8 @@ C:\TKL\siaf_sync\
 ├── siaf_to_drive.py            ← script principal
 ├── credentials.json            ← Service Account de Google (NO commitear)
 ├── tkl_sync_control.json       ← registro de hasta qué fecha procesó cada sucursal
-└── tkl_sync.log                ← log rotativo
+├── tkl_sync.log                ← log: C:\TKL\siaf_sync\tkl_sync.log (acumula todas las corridas)
+└── respaldo\                   ← copias del script y del control antes de cada actualización
 
 C:\_Datos\_administracion\temporal_sucursales\
 └── (carpetas con DBF de cada sucursal — leído por el script)
@@ -83,8 +84,8 @@ Carpeta `TKL-SIAF-CSV/` con dos subcarpetas:
 **Por qué dos carpetas**: la carpeta `historico/` puede tener cientos
 de filas por sucursal (años de datos). Si Vercel tuviera que leerla en
 cada sync, podría timeoutear (limit 60s en Hobby, 300s en Pro). La
-carpeta `diario/` típicamente tiene 1 fila por sucursal (la de ayer),
-así el sync es rápido.
+carpeta `diario/` tiene solo los días procesados en la última corrida
+de cada sucursal (normalmente uno), así el sync es rápido.
 
 ### 3. Webhook en Vercel
 
@@ -124,11 +125,24 @@ así el sync es rápido.
 python siaf_to_drive.py
 ```
 
-Procesa días pendientes desde la última fecha registrada en
-`control.json` hasta **ayer**. Sobreescribe los CSVs en `diario/` con
-solo esos días (típicamente 1 fila por archivo).
-
 Caso típico: el cron diario.
+
+- **Fechas pendientes.** Cada sucursal procesa desde la fecha guardada
+  en `tkl_sync_control.json` más un día hasta ayer, y guarda el último
+  día que efectivamente procesó, es decir, el último con datos. Si la
+  tarea no corrió alguna noche, la siguiente procesa juntos todos los
+  días pendientes.
+- **Días sin ventas.** Si en ese rango la sucursal no tiene ningún día
+  con datos, el log dice `sin datos procesables`, la fecha guardada no
+  avanza, no se reescriben ni se suben sus archivos (en `diario/` y en
+  Drive quedan los de su última corrida con datos) y esos días se
+  vuelven a revisar la noche siguiente. Si los días sin ventas son los
+  últimos del rango, la fecha guardada queda en el último día con datos
+  y esos días también se vuelven a revisar.
+- **`diario/` se reemplaza cada noche.** Para cada sucursal con datos,
+  sus 4 archivos de `diario/` se reescriben solo con los días
+  procesados en esa corrida (no acumulan) y se suben a Drive. Lo de las
+  noches anteriores no queda en `diario/`; solo `historico/` acumula.
 
 ### Modo BACKFILL un día
 
@@ -161,7 +175,9 @@ minutos de proceso y mucha I/O sobre los DBF.
 
 ## CSVs generados
 
-Por cada sucursal, el script genera **3 archivos**:
+Por cada sucursal, el script genera **4 archivos**. El dashboard
+consume **3** (`_ventas`, `_vendedores` y `_ossocial`); `_coseguros`
+todavía no se carga en Neon y `sync-sales.ts` lo ignora (ver más abajo).
 
 ### `{Sucursal}_ventas.csv`
 
@@ -199,6 +215,31 @@ America,2026-04-21,PAR,PARTICULAR,950000.00,12000.00,938000.00,75,210
 `PAR` = ventas particulares (sin obra social). El script las agrupa
 internamente bajo esa clave para que el merge de unidades funcione
 (antes era `""` y se renderizaba como `"PAR"` solo en la escritura).
+
+### `{Sucursal}_coseguros.csv`
+
+Una fila por código de coseguro por día (`CPBTEMI.COSEGURO` y
+`TOTCOSEG`, con los mismos filtros de comprobantes que ventas).
+
+```csv
+fecha,codigo_coseguro,nombre_coseguro,comprobantes,notas_credito,importe_coseguro
+```
+
+- El nombre sale del `OS.DBF` de cada sucursal; si el código no figura,
+  se usa el código como nombre.
+- Devoluciones (NCR o `TOTBRUTO < 0`): `TOTCOSEG` negativo se suma tal
+  cual; positivo se resta una sola vez.
+- `TOTCOSEG = 0` se conserva; vacío o ilegible se informa en el log
+  (`PROBLEMA`) y ese comprobante queda fuera del CSV.
+- Si la sucursal vendió pero no tuvo coseguros, el archivo queda solo
+  con el encabezado.
+- Clave de una fila: sucursal + `fecha` + `codigo_coseguro`. Es la que
+  usa el merge de `historico/` y la que tiene que usar una futura carga
+  en Neon.
+- **No lo consume el dashboard.** `CSV_FILENAME_RE` en
+  `src/lib/integrations/google-drive.ts` acepta solo
+  `ventas|vendedores|ossocial`, así que este archivo no se descarga ni
+  cambia la cantidad de sucursales del `SyncLog`.
 
 ---
 
@@ -296,7 +337,8 @@ de timestamps en SIAF.
 
 1. **Lee la carpeta `diario/`** vía Drive API (`downloadSalesCSVs`).
 2. **Agrupa por sucursal** (esperan 11 sets, cada uno con 3 archivos:
-   ventas, vendedores, ossocial).
+   ventas, vendedores, ossocial). `{Sucursal}_coseguros.csv` no matchea
+   el patrón y se ignora.
 3. **Resuelve `branchId`** vía `resolveBranchId(name, branches)` que
    matchea contra `branch.name` y `branch.aliases`.
 4. **Parsea los 3 CSVs** con tolerancia a errores: si un CSV falla, se
@@ -390,7 +432,8 @@ Análogo pero para el Excel de saldos bancarios.
 python C:\TKL\siaf_sync\siaf_to_drive.py --date 2026-04-20
 ```
 
-Esperar a que Drive Desktop sincronice (1-2 min). Después dispatch
+El script sube los CSV a Drive al terminar cada sucursal. Ojo: reescribe
+`diario/` de **todas** las sucursales con ese día. Después dispatch
 manual del workflow GitHub:
 
 `repo → Actions → Daily Sync → Run workflow → source: all`.
@@ -449,8 +492,22 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
 "
 ```
 
-4. Mandar al admin del servidor TKL para instalar.
-5. Reemplazar `siaf_to_drive.py` en `C:\TKL\siaf_sync\`.
+4. Mandar al admin del servidor TKL para instalar, con el SHA-256 de la
+   versión nueva.
+5. Instalar con respaldo y verificación de hash, sin correrlo a mano:
+   - **Respaldo:** copiar el script actual a
+     `C:\TKL\siaf_sync\respaldo\siaf_to_drive_AAAAMMDD.py` y
+     `tkl_sync_control.json` a
+     `C:\TKL\siaf_sync\respaldo\tkl_sync_control_AAAAMMDD.json`;
+     verificar con `certutil -hashfile … SHA256` que el respaldo es la
+     versión que estaba instalada.
+   - **Instalación:** copiar la versión nueva sobre
+     `C:\TKL\siaf_sync\siaf_to_drive.py` y verificar su hash. Fuera de
+     02:00–04:00. La primera ejecución es la tarea de las 03:00.
+   - **Vuelta atrás:** copiar el respaldo sobre `siaf_to_drive.py` y
+     verificar el hash. `tkl_sync_control.json` **no** se restaura
+     (restaurarlo hace reprocesar días y reescribir `diario/`).
+   - Comandos completos en `scripts/server/INSTALACION.md`, sección 10.
 
 ---
 

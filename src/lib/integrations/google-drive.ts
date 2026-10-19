@@ -66,14 +66,17 @@ export async function getBalancesFileBuffer(folderId: string) {
 // ============================================================================
 // SALES CSVs — archivos generados por scripts/server/siaf_to_drive.py
 //
-// El script Python escribe 33 archivos fijos (11 sucursales × 3 tipos):
+// El script Python escribe 4 archivos fijos por sucursal (11 × 4 = 44):
 //   {Sucursal}_ventas.csv       — agregados diarios
 //   {Sucursal}_vendedores.csv   — breakdown por vendedor
 //   {Sucursal}_ossocial.csv     — breakdown por obra social
+//   {Sucursal}_coseguros.csv    — coseguros por día y código (acá NO se lee:
+//                                 CSV_FILENAME_RE no lo matchea y se saltea)
 //
-// Los nombres son fijos y los archivos acumulan historial entre runs.
-// Google Drive Desktop sincroniza la carpeta de red del server → folder Drive
-// configurada en GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID.
+// Los nombres son fijos. En diario/ (la carpeta configurada en
+// GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID) cada run reemplaza el contenido con los
+// días procesados en ese run; solo historico/ acumula. El script sube los CSV
+// directo por Drive API con su Service Account (sin Drive Desktop).
 // ============================================================================
 
 export type SalesCSVKind = "ventas" | "vendedores" | "ossocial";
@@ -94,7 +97,9 @@ export interface BranchCSVSet {
 
 const CSV_FILENAME_RE = /^(.+?)_(ventas|vendedores|ossocial)\.csv$/i;
 
-/** Descarga los 3 CSVs por sucursal y los agrupa.
+/** Descarga los 3 CSVs que consume el sync (ventas, vendedores, ossocial) por
+ *  sucursal y los agrupa. Cualquier otro archivo de la carpeta, como
+ *  {Sucursal}_coseguros.csv, se ignora sin descargarlo.
  *  Si un archivo falta para una sucursal, su campo queda undefined. */
 export async function downloadSalesCSVs(folderId: string): Promise<BranchCSVSet[]> {
   const drive = getDriveClient();

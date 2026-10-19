@@ -28,6 +28,13 @@ Uso:
       Escribe los CSV acumulativos completos en `historico/`. Pide
       confirmación interactiva antes.
 
+  python siaf_to_drive.py --prueba --sucursal Tekiel --desde 2026-01-01 [--hasta 2026-10-12] --salida C:\\carpeta
+    → modo PRUEBA: una sucursal y un período; escribe los 4 CSV y el log
+      SOLO en --salida. No sube a Drive, no lee ni escribe control.json, no
+      toca historico/ ni diario/ ni el log del sync. --hasta por defecto es
+      ayer (último día completo). Si la carpeta ya tiene esos archivos, no
+      sobrescribe y termina.
+
 Arquitectura de carpetas:
   \\\\192.168.0.250\\TKL_sync_IA\\TKL-SIAF-CSV\\
     ├── historico/  → CSV acumulativos completos (carga inicial vía
@@ -37,10 +44,13 @@ Arquitectura de carpetas:
                       (sobreescribe; lo descarga el sync de Vercel cada
                       mañana sin riesgo de timeout).
 
-Salida por sucursal (3 archivos):
+Salida por sucursal (4 archivos):
   {Sucursal}_ventas.csv       — una fila por día (total_ventas = SUM TOTBRUTO)
   {Sucursal}_vendedores.csv   — una fila por vendedor por día
   {Sucursal}_ossocial.csv     — una fila por obra social por día
+  {Sucursal}_coseguros.csv    — una fila por coseguro por día (CPBTEMI.COSEGURO /
+                                TOTCOSEG; sin bruto: la venta ya está en los otros
+                                tres, bajo la obra social principal)
 
 Requiere:
   - pip install dbfread
@@ -62,7 +72,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from dbfread import DBF
+from dbfread import DBF, FieldParser
 
 # Lazy import de libs Google Drive: el script sigue funcionando si no estan
 # instaladas (fallback a solo escribir en disco con warning).
@@ -124,17 +134,23 @@ CODIGOS_EXCLUIR: set[str] = {
 # LOGGING
 # =============================================================================
 
-LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler(str(LOG_PATH), encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
 log = logging.getLogger("tkl-sync")
+
+
+def configure_logging(log_path: Path) -> None:
+    """Se configura en main() y no al importar: en modo --prueba el log va a la
+    carpeta de salida y no se toca LOG_PATH. En los modos normales queda igual
+    que antes (LOG_PATH + stdout, mismo formato)."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(str(log_path), encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
 
 # =============================================================================
 # DETECCIÓN DE CÓDIGOS DE VENTA
@@ -232,11 +248,38 @@ def normalize_fecha(val: Any) -> str | None:
     return None
 
 
-def read_dbf_safely(path: Path, name: str) -> list[dict] | None:
+class CoseguroIlegible:
+    """Valor de COSEGURO o TOTCOSEG que dbfread no pudo interpretar. Nunca se toma como 0."""
+    __slots__ = ("raw",)
+
+    def __init__(self, raw: bytes):
+        self.raw = bytes(raw)
+
+    def __repr__(self) -> str:
+        return f"<ilegible: {len(self.raw)} bytes>"
+
+
+class CoseguroFieldParser(FieldParser):
+    """Parser de CPBTEMI: igual al de dbfread, salvo en COSEGURO y TOTCOSEG, donde un valor
+    que no se puede interpretar se devuelve como CoseguroIlegible en lugar de abortar la
+    lectura. Los demás campos se leen exactamente como antes (un error sigue abortando)."""
+    CAMPOS = ("COSEGURO", "TOTCOSEG")
+
+    def parse(self, field, data):
+        if field.name.strip().upper() in self.CAMPOS:
+            try:
+                return FieldParser.parse(self, field, data)
+            except Exception:
+                return CoseguroIlegible(data)
+        return FieldParser.parse(self, field, data)
+
+
+def read_dbf_safely(path: Path, name: str, parserclass: type | None = None) -> list[dict] | None:
     """Lee un DBF. Reintenta 1 vez a los 30s si falla. None si el archivo no existe."""
     if not path.exists():
         log.warning(f"[{name}] DBF no existe: {path.name}")
         return None
+    extra = {"parserclass": parserclass} if parserclass is not None else {}
     for attempt in range(2):
         try:
             dbf = DBF(
@@ -244,6 +287,7 @@ def read_dbf_safely(path: Path, name: str) -> list[dict] | None:
                 encoding=DBF_ENCODING,
                 ignore_missing_memofile=True,
                 char_decode_errors="replace",
+                **extra,
             )
             return [dict(r) for r in dbf]
         except Exception as e:
@@ -335,6 +379,141 @@ def classify_payment(tarjeta: str, os_code: str) -> str:
     return "efectivo"
 
 # =============================================================================
+# COSEGUROS (CPBTEMI.COSEGURO + CPBTEMI.TOTCOSEG, uno por comprobante)
+# =============================================================================
+# El importe por comprobante es CPBTEMI.TOTCOSEG (DETMOV.COSEG no sirve: a veces
+# repite el valor en cada línea). No se invierte el signo automáticamente:
+#   - TOTCOSEG negativo en una devolución (NCR o TOTBRUTO < 0): se suma tal cual,
+#     igual que TOTBRUTO, y resta una sola vez.
+#   - TOTCOSEG positivo en una devolución con TOTBRUTO negativo: la evidencia del
+#     mismo comprobante es que es una devolución, así que se resta (una vez) y se
+#     informa en el log.
+#   - TOTCOSEG positivo en una NCR con TOTBRUTO no negativo: sin evidencia, se suma
+#     como viene y se informa como problema.
+# Cero, ilegible y vacío no son lo mismo: 0 es un dato válido (cuenta y suma 0); un
+# valor ilegible o vacío se informa y ese comprobante queda fuera del CSV.
+
+COSEGUROS_FIELDS = [
+    "fecha", "codigo_coseguro", "nombre_coseguro",
+    "comprobantes", "notas_credito", "importe_coseguro",
+]
+_MAX_LOG_AJUSTES = 20
+
+
+def _codigo_legible(c: str) -> bool:
+    return "�" not in c and all(ch.isprintable() for ch in c)
+
+
+def aggregate_coseguros(
+    recs: list[dict],
+    fecha_iso: str,
+    sucursal: str,
+    os_map: dict[str, str],
+    diag: dict[str, Any],
+) -> list[dict]:
+    """Filas de {Sucursal}_coseguros.csv para un día. recs = los CPBTEMI del día que
+    ya pasaron incluir_registro (los mismos filtros que las ventas). diag acumula
+    los conteos y problemas de la sucursal para el resumen del log."""
+    agg: dict[str, list] = {}       # código -> [comprobantes, notas_credito, importe]
+    for r in recs:
+        codigo_cpbt = safe_str(r.get("CODIGO")).upper()
+        ref = f"[{sucursal}] {fecha_iso} {codigo_cpbt} {safe_str(r.get('NUMERO'))}"
+        raw_cod, raw_imp = r.get("COSEGURO"), r.get("TOTCOSEG")
+
+        if isinstance(raw_cod, CoseguroIlegible) or not _codigo_legible(safe_str(raw_cod)):
+            diag["problemas"] += 1
+            log.warning(f"{ref}: PROBLEMA código de coseguro ilegible ({raw_cod!r}) — comprobante fuera de coseguros.csv")
+            continue
+        cod = safe_str(raw_cod)
+
+        if not cod:
+            if isinstance(raw_imp, CoseguroIlegible):
+                diag["problemas"] += 1
+                log.warning(f"{ref}: PROBLEMA TOTCOSEG ilegible ({raw_imp!r}) en un comprobante sin código de coseguro")
+            elif raw_imp is not None and safe_float(raw_imp) != 0:
+                diag["importe_sin_codigo"] += 1
+                log.warning(f"{ref}: importe de coseguro sin código de coseguro (TOTCOSEG={safe_float(raw_imp)}) — no se incluye")
+            continue
+
+        if isinstance(raw_imp, CoseguroIlegible):
+            diag["problemas"] += 1
+            log.warning(f"{ref}: PROBLEMA TOTCOSEG ilegible ({raw_imp!r}) con coseguro {cod!r} — "
+                        "no se toma como 0; comprobante fuera de coseguros.csv")
+            continue
+        if raw_imp is None:
+            diag["problemas"] += 1
+            log.warning(f"{ref}: PROBLEMA TOTCOSEG vacío con coseguro {cod!r} — "
+                        "no se toma como 0; comprobante fuera de coseguros.csv")
+            continue
+
+        importe = safe_float(raw_imp)
+        bruto = safe_float(r.get("TOTBRUTO"))
+        es_ncr = codigo_cpbt == "NCR"
+        devolucion = es_ncr or bruto < 0
+        if devolucion:
+            if importe < 0:
+                diag["devol_negativo"] += 1
+            elif importe == 0:
+                diag["devol_cero"] += 1
+            elif bruto < 0:
+                diag["devol_positivo_restado"] += 1
+                if diag["devol_positivo_restado"] <= _MAX_LOG_AJUSTES:
+                    log.info(f"{ref}: devolución con TOTCOSEG positivo ({importe}) y TOTBRUTO negativo ({bruto}) — "
+                             "se resta una vez")
+                importe = -importe
+            else:
+                diag["problemas"] += 1
+                log.warning(f"{ref}: PROBLEMA NCR con TOTCOSEG positivo ({importe}) y TOTBRUTO no negativo ({bruto}) — "
+                            "sin evidencia de signo, se suma como viene")
+        elif importe < 0:
+            diag["problemas"] += 1
+            log.warning(f"{ref}: PROBLEMA TOTCOSEG negativo ({importe}) en un comprobante que no es devolución — "
+                        "se suma como viene")
+
+        if cod == safe_str(r.get("OS")):
+            diag["problemas"] += 1
+            log.warning(f"{ref}: PROBLEMA el mismo código {cod!r} figura como obra social principal y como coseguro")
+        if cod not in os_map and cod not in diag["fuera_de_os"]:
+            diag["fuera_de_os"].add(cod)
+            log.warning(f"[{sucursal}] código de coseguro {cod!r} no está en OS.DBF — se usa el código como nombre")
+
+        a = agg.setdefault(cod, [0, 0, 0.0])
+        a[0] += 1
+        a[1] += 1 if es_ncr else 0
+        a[2] += importe
+        diag["comprobantes"] += 1
+
+    return [
+        {
+            "fecha":            fecha_iso,
+            "codigo_coseguro":  cod,
+            "nombre_coseguro":  os_map.get(cod, cod),
+            "comprobantes":     n,
+            "notas_credito":    ncr,
+            "importe_coseguro": round(importe, 2) + 0.0,   # + 0.0: evita "-0.0"
+        }
+        for cod, (n, ncr, importe) in sorted(agg.items())
+    ]
+
+
+def new_coseguros_diag() -> dict[str, Any]:
+    return {"comprobantes": 0, "devol_negativo": 0, "devol_cero": 0, "devol_positivo_restado": 0,
+            "importe_sin_codigo": 0, "problemas": 0, "fuera_de_os": set()}
+
+
+def log_coseguros_diag(sucursal: str, diag: dict[str, Any]) -> None:
+    log.info(
+        f"[{sucursal}] coseguros: comprobantes={diag['comprobantes']} · devoluciones con coseguro: "
+        f"TOTCOSEG negativo={diag['devol_negativo']} (se suma tal cual), cero={diag['devol_cero']}, "
+        f"positivo con TOTBRUTO negativo={diag['devol_positivo_restado']} (se resta una vez) · "
+        f"importes sin código={diag['importe_sin_codigo']} · problemas={diag['problemas']} · "
+        f"códigos fuera de OS.DBF={sorted(diag['fuera_de_os'])}"
+    )
+    if diag["devol_positivo_restado"] > _MAX_LOG_AJUSTES:
+        log.info(f"[{sucursal}] (se detallaron {_MAX_LOG_AJUSTES} de {diag['devol_positivo_restado']} "
+                 "devoluciones con TOTCOSEG positivo)")
+
+# =============================================================================
 # DETERMINACIÓN DE FECHAS A PROCESAR
 # =============================================================================
 
@@ -372,18 +551,20 @@ def process_branch(
     sucursal: str,
     date_filter: set[str] | None,
     yesterday: date,
-) -> tuple[list[dict], list[dict], list[dict], set[str]]:
-    """Devuelve (ventas_rows, vendedores_rows, ossocial_rows, processed_dates)."""
-    folder = BASE_PATH / folder_code
+    folder: Path | None = None,
+) -> tuple[list[dict], list[dict], list[dict], list[dict], set[str]]:
+    """Devuelve (ventas_rows, vendedores_rows, ossocial_rows, coseguros_rows, processed_dates).
+    folder: carpeta SIAF de la sucursal (por defecto BASE_PATH / folder_code)."""
+    folder = folder if folder is not None else BASE_PATH / folder_code
 
     # Referencias por sucursal
     vendor_map = leer_usr_dbf(folder / "USR.DBF", sucursal)
     os_map     = leer_os_dbf(folder / "OS.DBF",  sucursal)
 
-    # Fuente principal
-    cpbtemi = read_dbf_safely(folder / "CPBTEMI.DBF", sucursal)
+    # Fuente principal. CoseguroFieldParser solo cambia COSEGURO y TOTCOSEG (ilegible ≠ 0).
+    cpbtemi = read_dbf_safely(folder / "CPBTEMI.DBF", sucursal, parserclass=CoseguroFieldParser)
     if cpbtemi is None:
-        return ([], [], [], set())
+        return ([], [], [], [], set())
 
     yesterday_str = yesterday.strftime("%Y%m%d")
     records_by_date: dict[str, list[dict]] = defaultdict(list)
@@ -401,7 +582,7 @@ def process_branch(
         records_by_date[fecha_str].append(r)
 
     if not records_by_date:
-        return ([], [], [], set())
+        return ([], [], [], [], set())
 
     # cpbt_meta: fuente de verdad para resolver cada línea de DETMOV. Construido
     # desde los CPBTEMI ya filtrados, indexa por (NUMERO, fecha_yyyymmdd) y por
@@ -439,7 +620,9 @@ def process_branch(
     ventas_rows:     list[dict] = []
     vendedores_rows: list[dict] = []
     ossocial_rows:   list[dict] = []
+    coseguros_rows:  list[dict] = []
     processed:       set[str]   = set()
+    coseguros_diag = new_coseguros_diag()
 
     for date_str in sorted(records_by_date.keys()):
         recs = records_by_date[date_str]
@@ -551,9 +734,12 @@ def process_branch(
                 "unidades":     agg["unidades"],
             })
 
+        coseguros_rows.extend(aggregate_coseguros(recs, fecha_iso, sucursal, os_map, coseguros_diag))
+
         processed.add(date_str)
 
-    return (ventas_rows, vendedores_rows, ossocial_rows, processed)
+    log_coseguros_diag(sucursal, coseguros_diag)
+    return (ventas_rows, vendedores_rows, ossocial_rows, coseguros_rows, processed)
 
 
 def _resolve_meta(
@@ -912,13 +1098,116 @@ def confirm_full_reset() -> bool:
     return resp.strip() == "SI"
 
 
+def _abs(p: Path) -> str:
+    # abspath no toca el disco ni la red (resolve() podría intentar abrir rutas UNC).
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
+def _dentro_de(p: Path, base: Path) -> bool:
+    a, b = _abs(p), _abs(base)
+    return a == b or a.startswith(b.rstrip("\\/") + os.sep)
+
+
+def run_prueba(args: argparse.Namespace) -> None:
+    """Modo --prueba: una sucursal y un período; escribe los 4 CSV y el log SOLO en
+    --salida. No sube a Drive, no lee ni escribe control.json, no toca historico/
+    ni diario/ ni LOG_PATH. Lee los DBF de SIAF igual que el modo normal (solo lectura)."""
+    faltan = [f"--{n}" for n in ("sucursal", "desde", "salida") if not getattr(args, n)]
+    if faltan:
+        raise SystemExit(f"--prueba necesita {', '.join(faltan)}")
+    if args.date or args.full_reset:
+        raise SystemExit("--prueba no se combina con --date ni con --full-reset")
+    por_nombre = {v.lower(): (k, v) for k, v in FOLDER_MAP.items()}
+    if args.sucursal.lower() not in por_nombre:
+        raise SystemExit(f"Sucursal desconocida '{args.sucursal}'. Opciones: {', '.join(FOLDER_MAP.values())}")
+    folder_code, sucursal = por_nombre[args.sucursal.lower()]
+    folder = Path(args.siaf_dir) if args.siaf_dir else BASE_PATH / folder_code
+
+    salida = Path(args.salida)
+    for prohibida in (DESTINO_HISTORICO, DESTINO_DIARIO, CONTROL_FILE.parent, LOG_PATH.parent, folder):
+        if _dentro_de(salida, prohibida):
+            raise SystemExit(f"--salida no puede estar dentro de {prohibida}")
+
+    desde = parse_cli_date(args.desde)
+    ultimo_completo = date.today() - timedelta(days=1)
+    hasta = parse_cli_date(args.hasta) if args.hasta else ultimo_completo
+    recortado = hasta > ultimo_completo
+    hasta = min(hasta, ultimo_completo)
+    if desde > hasta:
+        raise SystemExit(f"Período vacío: --desde {desde} es posterior a {hasta} (último día completo: {ultimo_completo})")
+
+    paths = {
+        "ventas":     salida / f"{sucursal}_ventas.csv",
+        "vendedores": salida / f"{sucursal}_vendedores.csv",
+        "ossocial":   salida / f"{sucursal}_ossocial.csv",
+        "coseguros":  salida / f"{sucursal}_coseguros.csv",
+        "log":        salida / f"{sucursal}_prueba.log",
+    }
+    existentes = [p.name for p in paths.values() if p.exists()]
+    if existentes:
+        raise SystemExit(f"En {salida} ya existen {existentes}: usá una carpeta nueva (no se sobrescribe nada)")
+
+    configure_logging(paths["log"])
+    log.info("=" * 60)
+    log.info("=== MODO PRUEBA (sin Drive, sin control.json, sin historico/ ni diario/) ===")
+    log.info(f"Sucursal: {sucursal} · carpeta SIAF (solo lectura): {folder}")
+    log.info(f"Período: {desde} → {hasta}" + (" (--hasta recortado al último día completo)" if recortado else ""))
+    log.info(f"Salida: {salida}")
+
+    date_filter: set[str] = set()
+    d = desde
+    while d <= hasta:
+        date_filter.add(d.strftime("%Y%m%d"))
+        d += timedelta(days=1)
+
+    ventas_rows, vendedores_rows, ossocial_rows, coseguros_rows, processed = process_branch(
+        folder_code, sucursal, date_filter, hasta, folder=folder,
+    )
+    n_ventas     = write_csv_simple(paths["ventas"],     ventas_rows,     VENTAS_FIELDS)
+    n_vendedores = write_csv_simple(paths["vendedores"], vendedores_rows, VENDEDORES_FIELDS)
+    n_ossocial   = write_csv_simple(paths["ossocial"],   ossocial_rows,   OSSOCIAL_FIELDS)
+    n_coseguros  = write_csv_simple(paths["coseguros"],  coseguros_rows,  COSEGUROS_FIELDS)
+    log.info(f"[{sucursal}] {len(processed)} día(s) con datos | ventas.csv={n_ventas}, vendedores.csv={n_vendedores}, "
+             f"ossocial.csv={n_ossocial}, coseguros.csv={n_coseguros}")
+
+    total_cos: dict[str, list] = defaultdict(lambda: [0, 0, 0.0])
+    for r in coseguros_rows:
+        t = total_cos[r["codigo_coseguro"]]
+        t[0] += r["comprobantes"]
+        t[1] += r["notas_credito"]
+        t[2] += r["importe_coseguro"]
+    for cod, (n, ncr, imp) in sorted(total_cos.items(), key=lambda kv: -kv[1][0]):
+        log.info(f"[{sucursal}] período · {cod}: comprobantes={n} (NCR {ncr}) importe={round(imp, 2)}")
+    log.info(f"[{sucursal}] período · TOTAL coseguros: comprobantes={sum(t[0] for t in total_cos.values())} "
+             f"importe={round(sum(t[2] for t in total_cos.values()), 2)}")
+    log.info("=== Fin modo prueba ===")
+    sys.exit(0 if processed else 1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extrae ventas de SIAF a CSV en carpeta de red")
     parser.add_argument("--date", help="Backfill de una fecha específica (YYYY-MM-DD)")
     parser.add_argument("--full-reset", action="store_true",
                         help="Borra control.json y reprocesa todo el historial (pide confirmación)")
+    parser.add_argument("--prueba", action="store_true",
+                        help="Modo prueba: una sucursal y un período, los 4 CSV solo en --salida; "
+                             "sin Drive, sin control.json, sin historico/ ni diario/")
+    parser.add_argument("--sucursal", help="(--prueba) Nombre de la sucursal, p. ej. Tekiel")
+    parser.add_argument("--desde", help="(--prueba) Primer día, YYYY-MM-DD")
+    parser.add_argument("--hasta", help="(--prueba) Último día, YYYY-MM-DD (por defecto ayer, el último día completo)")
+    parser.add_argument("--salida", help="(--prueba) Carpeta donde se escriben los CSV y el log")
+    parser.add_argument("--siaf-dir", help="(--prueba) Carpeta SIAF de la sucursal (por defecto BASE_PATH\\<código>)")
     args = parser.parse_args()
 
+    if args.prueba:
+        run_prueba(args)
+        return
+    solo_prueba = [f"--{n.replace('_', '-')}" for n in ("sucursal", "desde", "hasta", "salida", "siaf_dir")
+                   if getattr(args, n)]
+    if solo_prueba:
+        raise SystemExit(f"{', '.join(solo_prueba)} solo se usan con --prueba")
+
+    configure_logging(LOG_PATH)
     log.info("=" * 60)
     log.info("=== Inicio sync TKL SIAF ===")
     log.info("=" * 60)
@@ -995,7 +1284,7 @@ def main() -> None:
                 ok_count += 1
                 continue
 
-            ventas_rows, vendedores_rows, ossocial_rows, processed = process_branch(
+            ventas_rows, vendedores_rows, ossocial_rows, coseguros_rows, processed = process_branch(
                 folder_code, sucursal, date_filter, yesterday,
             )
 
@@ -1007,22 +1296,26 @@ def main() -> None:
             ventas_path     = output_dir / f"{sucursal}_ventas.csv"
             vendedores_path = output_dir / f"{sucursal}_vendedores.csv"
             ossocial_path   = output_dir / f"{sucursal}_ossocial.csv"
+            coseguros_path  = output_dir / f"{sucursal}_coseguros.csv"
 
             if is_historical_run:
                 n_ventas     = merge_and_write_csv(ventas_path,     ventas_rows,     VENTAS_FIELDS,     ["fecha"])
                 n_vendedores = merge_and_write_csv(vendedores_path, vendedores_rows, VENDEDORES_FIELDS, ["fecha", "codigo_vendedor"])
                 n_ossocial   = merge_and_write_csv(ossocial_path,   ossocial_rows,   OSSOCIAL_FIELDS,   ["fecha", "codigo_os"])
+                n_coseguros  = merge_and_write_csv(coseguros_path,  coseguros_rows,  COSEGUROS_FIELDS,  ["fecha", "codigo_coseguro"])
             else:
                 n_ventas     = write_csv_simple(ventas_path,     ventas_rows,     VENTAS_FIELDS)
                 n_vendedores = write_csv_simple(vendedores_path, vendedores_rows, VENDEDORES_FIELDS)
                 n_ossocial   = write_csv_simple(ossocial_path,   ossocial_rows,   OSSOCIAL_FIELDS)
+                n_coseguros  = write_csv_simple(coseguros_path,  coseguros_rows,  COSEGUROS_FIELDS)
 
             log.info(f"[{sucursal}] ✓ {len(processed)} día(s) procesados | "
-                     f"ventas.csv={n_ventas}, vendedores.csv={n_vendedores}, ossocial.csv={n_ossocial}")
+                     f"ventas.csv={n_ventas}, vendedores.csv={n_vendedores}, ossocial.csv={n_ossocial}, "
+                     f"coseguros.csv={n_coseguros}")
 
-            # Subir los 3 CSV a Drive (no aborta si falla — solo logea por archivo)
+            # Subir los 4 CSV a Drive (no aborta si falla — solo logea por archivo)
             if drive_service is not None:
-                for p in (ventas_path, vendedores_path, ossocial_path):
+                for p in (ventas_path, vendedores_path, ossocial_path, coseguros_path):
                     upload_csv_to_drive(drive_service, p, drive_folder_id, sucursal)
 
             if force_date is None:

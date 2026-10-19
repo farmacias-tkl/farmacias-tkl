@@ -24,15 +24,23 @@ del sistema SIAF hacia la carpeta de red de Farmacias TKL.
 - `historico/` se escribe **una sola vez** durante la carga inicial
   (`--full-reset` o primera corrida sin control.json). Contiene los CSV
   acumulativos completos de todo el historial. Lo lee `load-sales-history.ts`.
-- `diario/` se sobrescribe **todas las noches** con SOLO los días procesados
-  en ese run (típicamente 1 fila = ayer). Lo descarga el sync diario en Vercel
-  vía GitHub Actions, sin riesgo de timeout porque son archivos chicos.
+- `diario/` se reemplaza **todas las noches** con SOLO los días procesados
+  en ese run (normalmente uno; ver sección 7). Lo descarga el sync diario en
+  Vercel vía GitHub Actions, sin riesgo de timeout porque son archivos chicos.
 
-**Compartir con el Service Account de Google Drive:** ambas carpetas deben estar
-sincronizadas con Drive (Drive Desktop) y compartidas con el Service Account
-configurado en Vercel (`GOOGLE_SERVICE_ACCOUNT_JSON`). La variable
-`GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID` en Vercel debe apuntar a la carpeta `diario/`
-de Drive (no a `historico/` ni a la carpeta padre).
+**Archivos por sucursal:** el script genera **4** CSV por sucursal (44 en
+total): `_ventas`, `_vendedores`, `_ossocial` y `_coseguros`. El dashboard
+consume **3**; `_coseguros.csv` el sync de Vercel lo ignora.
+
+**Subida a Google Drive:** el script sube cada CSV directo por Drive API con
+el Service Account de `GOOGLE_SERVICE_ACCOUNT_JSON` (variable de entorno) o,
+si no está, de `credentials.json` junto al script. Las carpetas `historico/` y
+`diario/` de Drive tienen que estar compartidas con ese Service Account como
+**Editor**. Un archivo que todavía no existe en Drive el script lo **crea**, y
+eso puede fallar si la carpeta está en "Mi unidad" y la cuenta no tiene cuota
+propia (ver sección 10). Vercel lee con `GOOGLE_SERVICE_ACCOUNT_JSON` (solo
+lectura); la variable `GOOGLE_DRIVE_SIAF_CSV_FOLDER_ID` en Vercel debe apuntar
+a la carpeta `diario/` de Drive (no a `historico/` ni a la carpeta padre).
 
 **NOTA sobre la carpeta de saldos:** La administración sube el Excel de saldos
 bancarios a `\\192.168.0.250\TKL_sync_IA\TKL-Saldos\`. **Este script NO toca
@@ -136,18 +144,18 @@ python siaf_to_drive.py
 [2026-04-22 03:00:01] [INFO] Modo: HISTÓRICO (acumulativo)
 [2026-04-22 03:00:01] [INFO] Destino: \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico
 [2026-04-22 03:00:02] [INFO] [America] procesando — full-history (primera vez)
-[2026-04-22 03:00:45] [INFO] [America] ✓ 547 día(s) procesados | ventas.csv=547, vendedores.csv=8234, ossocial.csv=6102
+[2026-04-22 03:00:45] [INFO] [America] ✓ 547 día(s) procesados | ventas.csv=547, vendedores.csv=8234, ossocial.csv=6102, coseguros.csv=3150
 [2026-04-22 03:00:45] [INFO] [Facultad] procesando — full-history (primera vez)
 ...
 [2026-04-22 03:08:22] [INFO] === Fin sync: ✓ 11 OK   ✗ 0 con errores   de 11 sucursales ===
 ```
 
 **Verificá** que en `\\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico\`
-aparecieron 33 archivos CSV (3 por sucursal × 11 sucursales).
+aparecieron 44 archivos CSV (4 por sucursal × 11 sucursales).
 
 A partir de la segunda corrida (cuando ya existe `control.json`), el script
-pasa a **modo DIARIO** y escribe en `diario/` con solo el día procesado
-(sobreescribe).
+pasa a **modo DIARIO** y reemplaza los archivos de `diario/` con solo los días
+procesados (ver sección 7).
 
 **Carga inicial a la base de datos**: una vez que `historico/` está poblado,
 correr desde la PC de desarrollo `npx tsx scripts/load-sales-history.ts`
@@ -222,8 +230,21 @@ Por ejemplo:
 ```
 
 **Cómo funciona:**
-- Cada noche, el script lee este archivo, procesa solo los días nuevos
-  (desde la última fecha + 1 hasta ayer), y lo actualiza.
+- **Fechas pendientes.** Cada sucursal procesa desde la fecha guardada en
+  `tkl_sync_control.json` más un día hasta ayer, y guarda el último día que
+  efectivamente procesó, es decir, el último con datos. Si la tarea no corrió
+  alguna noche, la siguiente procesa juntos todos los días pendientes.
+- **Días sin ventas.** Si en ese rango la sucursal no tiene ningún día con
+  datos, el log dice `sin datos procesables`, la fecha guardada no avanza, no
+  se reescriben ni se suben sus archivos (en `diario/` y en Drive quedan los
+  de su última corrida con datos) y esos días se vuelven a revisar la noche
+  siguiente. Si los días sin ventas son los últimos del rango, la fecha
+  guardada queda en el último día con datos y esos días también se vuelven a
+  revisar.
+- **`diario/` se reemplaza cada noche.** Para cada sucursal con datos, sus 4
+  archivos de `diario/` se reescriben solo con los días procesados en esa
+  corrida (no acumulan) y se suben a Drive. Lo de las noches anteriores no
+  queda en `diario/`; solo `historico/` acumula.
 - Sin este archivo, el script re-procesaría todo el historial cada vez
   (tarda mucho más).
 
@@ -245,8 +266,10 @@ Te va a pedir confirmación escrita ("SI" en mayúsculas) antes de borrar.
 ### Revisar el log
 
 ```
-notepad C:\_Datos\_administracion\tkl_sync.log
+notepad C:\TKL\siaf_sync\tkl_sync.log
 ```
+
+El log acumula todas las corridas: lo último está al final.
 
 Cada línea tiene el formato:
 ```
@@ -276,7 +299,9 @@ Buscar en el log las líneas `[ERROR]` para ver qué pasó.
 Hay dos carpetas a revisar:
 
 **`historico/`** — solo se escribe en la primera corrida o con `--full-reset`.
-Después de la carga inicial debería tener 33 archivos con TODO el historial:
+Después de la carga inicial debería tener 44 archivos con TODO el historial
+(si la carga inicial se hizo antes de que existiera `_coseguros.csv`, tiene
+33 y los coseguros no están):
 
 ```
 \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\historico\
@@ -285,18 +310,22 @@ Después de la carga inicial debería tener 33 archivos con TODO el historial:
   ...
 ```
 
-**`diario/`** — se sobreescribe cada noche. En modo normal típicamente
-contiene 33 archivos chicos con 1 fila de ventas (la de ayer) y N filas
-en vendedores/ossocial:
+**`diario/`** — se reemplaza cada noche (sección 7). Contiene 44 archivos
+chicos, 4 por sucursal, con los días procesados en su última corrida con
+datos (normalmente uno):
 
 ```
 \\192.168.0.250\TKL_sync_IA\TKL-SIAF-CSV\diario\
-  America_ventas.csv     ← 1 fila (ayer)
-  America_vendedores.csv ← N filas (vendedores que trabajaron ayer)
+  America_ventas.csv     ← 1 fila por día procesado
+  America_vendedores.csv ← N filas (vendedores de esos días)
+  America_ossocial.csv   ← N filas (obras sociales de esos días)
+  America_coseguros.csv  ← N filas (coseguros de esos días; puede tener solo encabezado)
   ...
 ```
 
-Abrí uno con Excel o Notepad — debe tener encabezado + al menos 1 fila.
+Abrí uno con Excel o Notepad: `_ventas` debe tener encabezado + al menos 1
+fila. Una sucursal sin ventas en los días pendientes conserva los archivos de
+su última corrida con datos.
 
 ---
 
@@ -357,3 +386,90 @@ El script no arrancó. Verificar:
 
 ### Contacto
 Problemas o dudas no cubiertas acá: **Daniel** (administrador del sistema).
+
+---
+
+## 10. Actualizar el script: respaldo, instalación y vuelta atrás
+
+Todo en una consola `cmd` en el servidor, fuera de 02:00–04:00 (tarea de las
+03:00 y sync de ventas de las 04:00). Se necesita el SHA-256 de la versión
+instalada y el de la nueva, que vienen con la entrega.
+
+### 10.1 Antes de instalar
+
+```
+schtasks /query /tn "TKL Sync SIAF" /v /fo list
+```
+
+"Tarea a ejecutar" tiene que mostrar `C:\TKL\siaf_sync\siaf_to_drive.py` y el
+estado no puede ser "En ejecución".
+
+Si la versión nueva genera un archivo que todavía no existe en Drive, la
+primera noche el Service Account lo tiene que **crear**. Antes de instalar,
+comprobar que puede hacerlo en la carpeta de ventas (no en la de saldos), o
+que el dueño de la carpeta suba antes esos archivos (lo indica la entrega).
+
+### 10.2 Respaldo
+
+Cambiar `AAAAMMDD` por la fecha del día:
+
+```
+set F=AAAAMMDD
+mkdir C:\TKL\siaf_sync\respaldo
+copy C:\TKL\siaf_sync\siaf_to_drive.py C:\TKL\siaf_sync\respaldo\siaf_to_drive_%F%.py
+copy C:\TKL\siaf_sync\tkl_sync_control.json C:\TKL\siaf_sync\respaldo\tkl_sync_control_%F%.json
+certutil -hashfile C:\TKL\siaf_sync\respaldo\siaf_to_drive_%F%.py SHA256
+```
+
+- El hash tiene que ser el de la versión instalada. Si no coincide, no seguir.
+- Si `mkdir` dice que la carpeta ya existe, no hay problema.
+- Si un `copy` pregunta si sobrescribir, responder **No** y usar otra fecha.
+- `tkl_sync_control.json` solo se copia: el original no se toca.
+
+### 10.3 Instalación
+
+Con la versión nueva en una carpeta aparte (por ejemplo
+`C:\TKL\nueva\siaf_to_drive.py`):
+
+```
+certutil -hashfile C:\TKL\nueva\siaf_to_drive.py SHA256
+copy /Y C:\TKL\nueva\siaf_to_drive.py C:\TKL\siaf_sync\siaf_to_drive.py
+certutil -hashfile C:\TKL\siaf_sync\siaf_to_drive.py SHA256
+```
+
+- Los dos hashes tienen que ser el de la versión nueva. Si el segundo no
+  coincide, volver atrás enseguida (10.4).
+- **No correr nada a mano**: ni "Ejecutar" en el Programador de tareas, ni
+  `python siaf_to_drive.py`, `--date` o `--full-reset`. La primera ejecución
+  es la tarea de las 03:00, que no se modifica.
+
+### 10.4 Vuelta atrás (un minuto)
+
+Con el mismo `F` del respaldo:
+
+```
+set F=AAAAMMDD
+copy /Y C:\TKL\siaf_sync\respaldo\siaf_to_drive_%F%.py C:\TKL\siaf_sync\siaf_to_drive.py
+certutil -hashfile C:\TKL\siaf_sync\siaf_to_drive.py SHA256
+```
+
+- El hash tiene que volver a ser el de la versión anterior. No hace falta
+  correr nada: la próxima tarea de las 03:00 usa la versión restaurada.
+- **`tkl_sync_control.json` no se restaura.** Restaurarlo hace reprocesar días
+  y reescribir `diario/`. La copia se usa solo si el archivo quedara dañado.
+- Los archivos nuevos que haya dejado la versión nueva en `diario/` y en Drive
+  pueden quedar si el sync de Vercel los ignora.
+
+### 10.5 Revisión de la mañana siguiente
+
+Ver en `C:\TKL\siaf_sync\tkl_sync.log` la última corrida (empieza en la
+última línea `=== Inicio sync TKL SIAF ===`):
+
+- `Fin sync` con 0 errores, y sin `[ERROR]` ni `Traceback` nuevos.
+- Cada sucursal con datos procesados (línea `día(s) procesados`) tiene que
+  haber subido **todos** sus archivos a Drive: una línea `Drive UPDATE` o
+  `Drive CREATE` por archivo, y ningún `Drive upload fallo`.
+- Una sucursal con `sin datos procesables` queda pendiente: se comprueba en la
+  próxima corrida en que tenga datos.
+- "11 OK" en `Fin sync` no alcanza: una falla de subida a Drive no cuenta
+  como error de la sucursal.
