@@ -297,6 +297,15 @@ model BankBalanceSnapshot {
 cuenta, fecha). El sync hace `upsert` para tolerar reintentos del mismo
 día.
 
+### `CoseguroDaily` — coseguros por sucursal, día y código (solo consultas)
+
+Una fila por sucursal, fecha y código de coseguro, cargada desde
+`{Sucursal}_coseguros.csv`. Clave única `(branchId, date, code)`; una recarga
+reemplaza la fila. El dashboard no la lee. `amount` es cobertura secundaria de
+ventas que ya están en `SalesSnapshot`: **no se suma a ventas**. SQL del gate:
+`prisma/gates/2026-10-19-coseguro-daily.sql`. Carga, histórico y consultas:
+[siaf-coseguros.md](../integrations/siaf-coseguros.md).
+
 ### `SalesSnapshot` — ventas diarias por sucursal
 
 ```prisma
@@ -371,7 +380,8 @@ Cada llamada a `syncBalances()` y `syncSales()` escribe un row.
 El webhook del call center (`source = EMOZION`) solo escribe cuando un
 evento falla (`ERROR`/`PARTIAL`); el éxito queda en `WebhookEvent`. El job de copia
 de adjuntos (`source = ATTACHMENT_STORAGE`) solo escribe en fallo, TTL, aborto,
-alerta o reintentos.
+alerta o reintentos. La carga de coseguros (`source = SALES_COSEGUROS`) escribe un
+row por corrida cuando está activa (`COSEGUROS_SYNC_ENABLED=true`).
 Diagnóstico de saldos/ventas:
 
 ```sql

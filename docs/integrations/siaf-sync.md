@@ -93,7 +93,9 @@ de cada sucursal (normalmente uno), así el sync es rápido.
 
 **Auth**: Bearer token (`SYNC_WEBHOOK_SECRET`).
 
-**Body**: `{ "source": "all" | "balances" | "sales" }`.
+**Body**: `{ "source": "all" | "balances" | "sales" | "coseguros" }`.
+`"all"` = saldos + ventas (no incluye coseguros, que va siempre en su
+propia llamada; ver [siaf-coseguros.md](siaf-coseguros.md)).
 
 **Output**: JSON con resultados por source.
 
@@ -177,7 +179,8 @@ minutos de proceso y mucha I/O sobre los DBF.
 
 Por cada sucursal, el script genera **4 archivos**. El dashboard
 consume **3** (`_ventas`, `_vendedores` y `_ossocial`); `_coseguros`
-todavía no se carga en Neon y `sync-sales.ts` lo ignora (ver más abajo).
+lo ignora `sync-sales.ts` y lo carga aparte, solo para consultas, la tabla
+`CoseguroDaily` (ver más abajo y [siaf-coseguros.md](siaf-coseguros.md)).
 
 ### `{Sucursal}_ventas.csv`
 
@@ -234,12 +237,17 @@ fecha,codigo_coseguro,nombre_coseguro,comprobantes,notas_credito,importe_cosegur
 - Si la sucursal vendió pero no tuvo coseguros, el archivo queda solo
   con el encabezado.
 - Clave de una fila: sucursal + `fecha` + `codigo_coseguro`. Es la que
-  usa el merge de `historico/` y la que tiene que usar una futura carga
-  en Neon.
+  usa el merge de `historico/` y la clave única de `CoseguroDaily`.
 - **No lo consume el dashboard.** `CSV_FILENAME_RE` en
   `src/lib/integrations/google-drive.ts` acepta solo
-  `ventas|vendedores|ossocial`, así que este archivo no se descarga ni
-  cambia la cantidad de sucursales del `SyncLog`.
+  `ventas|vendedores|ossocial`, así que `downloadSalesCSVs` no lo
+  descarga y no cambia la cantidad de sucursales del `SyncLog` de
+  `SALES_API`.
+- **Carga en Neon, solo para consultas.** Con su propia llamada
+  (`/api/sync/trigger` con `source: "coseguros"`, workflow
+  `coseguros-sync.yml`; `sales` y `all` no la corren) se carga en
+  `CoseguroDaily` con su propio `SyncLog` (`SALES_COSEGUROS`), si
+  `COSEGUROS_SYNC_ENABLED=true`. Ver [siaf-coseguros.md](siaf-coseguros.md).
 
 ---
 

@@ -1,0 +1,44 @@
+name: Daily Sync — Coseguros (solo consultas)
+
+# Carga {Sucursal}_coseguros.csv (Drive diario/) a CoseguroDaily con SU PROPIA
+# llamada, separada de la de ventas: daily-sync.yml no cambia y "all" no incluye
+# coseguros. Los CSV los sube siaf_to_drive.py a las 03:00 ART; ventas corre a las
+# 04:00 (servidor) y 04:30 (respaldo). Esta corre a las 05:00 ART.
+# Mientras COSEGUROS_SYNC_ENABLED no sea "true" en Vercel, el endpoint responde
+# DISABLED y no hace nada. Una carga incompleta (PARTIAL/ERROR) marca el run en rojo.
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # 08:00 UTC = 05:00 ART
+  workflow_dispatch:
+
+jobs:
+  coseguros:
+    name: Sync Coseguros
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger coseguros
+        run: |
+          URL="${{ secrets.DASHBOARD_URL }}"
+          URL="${URL%/}"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${URL}/api/sync/trigger" \
+            -H "Authorization: Bearer ${{ secrets.SYNC_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"source": "coseguros"}' \
+            --max-time 120)
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "Status: $HTTP_STATUS"
+          echo "Response: $BODY"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Coseguros: HTTP $HTTP_STATUS"
+            exit 1
+          fi
+          STATUS=$(echo "$BODY" | jq -r '.results.coseguros.status // "SIN_ESTADO"')
+          MESSAGE=$(echo "$BODY" | jq -r '.results.coseguros.message // ""')
+          case "$STATUS" in
+            SUCCESS)  echo "Coseguros completa: $MESSAGE" ;;
+            DISABLED) echo "Coseguros apagada (COSEGUROS_SYNC_ENABLED): no se hizo nada" ;;
+            *)        echo "::error::Coseguros $STATUS: $MESSAGE"; exit 1 ;;
+          esac

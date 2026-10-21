@@ -39,6 +39,8 @@ Los 3 runs llaman al mismo endpoint `POST /api/sync/trigger` con
    ```
    `EMOZION` (webhook del call center) y `ATTACHMENT_STORAGE` (job de copia de adjuntos)
    solo loguean fallos/alertas; se excluyen para que no tapen los runs de saldos/ventas.
+   `SALES_COSEGUROS` (carga de coseguros, solo consultas) tiene su propia consulta en
+   [siaf-coseguros.md](../integrations/siaf-coseguros.md).
 3. **Dashboard ejecutivo**: abrir `https://dashboard.YOUR_DOMAIN/executive`.
    No debe mostrar banner de stale (excepto domingos para saldos).
 

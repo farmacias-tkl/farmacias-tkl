@@ -141,6 +141,7 @@ model Branch {
   overtimeRecords      OvertimeRecord[]
   bankBalanceSnapshots BankBalanceSnapshot[]
   salesSnapshots       SalesSnapshot[]
+  coseguros            CoseguroDaily[]
   vacationRequests     VacationRequest[]
   timeEvents           TimeEvent[]
 
@@ -589,6 +590,7 @@ enum SyncSource {
   SALES_API
   EMOZION
   ATTACHMENT_STORAGE // job de copia de adjuntos a storage privado (B6.3). Al final: coincide con ADD VALUE.
+  SALES_COSEGUROS // carga de {Sucursal}_coseguros.csv a CoseguroDaily. Al final: coincide con ADD VALUE.
 }
 
 enum SyncTrigger {
@@ -643,6 +645,29 @@ model SalesSnapshot {
   @@unique([branchId, snapshotDate])
   @@index([snapshotDate(sort: Desc)])
   @@index([branchId, snapshotDate(sort: Desc)])
+}
+
+// Coseguros por sucursal, día y código ({Sucursal}_coseguros.csv de SIAF).
+// Solo para consultas: el dashboard no lo lee. El importe es cobertura
+// secundaria de ventas que ya están en SalesSnapshot; no se suma a ventas.
+model CoseguroDaily {
+  id          String   @id @default(cuid())
+  branchId    String
+  date        DateTime @db.Date
+  code        String
+  name        String
+  receipts    Int // comprobantes con coseguro, NCR incluidas
+  creditNotes Int // de esos, cuántos son NCR
+  amount      Decimal  @db.Decimal(15, 2) // negativo o cero es válido
+  sourceFile  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([branchId, date, code])
+  @@index([date])
+  @@index([code, date])
 }
 
 model SyncLog {

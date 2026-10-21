@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncBalances } from "@/lib/sync/sync-balances";
 import { syncSales } from "@/lib/sync/sync-sales";
+import { syncCoseguros } from "@/lib/sync/sync-coseguros";
 
 export const runtime = "nodejs";
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const source: string = body?.source ?? "balances";
 
-  const valid = ["balances", "sales", "all"];
+  const valid = ["balances", "sales", "all", "coseguros"];
   if (!valid.includes(source)) {
     return NextResponse.json({ error: "Unknown source", valid }, { status: 400 });
   }
@@ -40,6 +41,22 @@ export async function POST(request: NextRequest) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(`sales: ${msg}`);
       results.sales = { status: "ERROR", message: msg };
+    }
+  }
+
+  // Coseguros: SOLO con su propia llamada ("all" no la incluye). Apagada salvo
+  // COSEGUROS_SYNC_ENABLED="true"; termina dentro de COSEGUROS_DEADLINE_MS y deja
+  // su SyncLog (SALES_COSEGUROS). Ver src/lib/sync/sync-coseguros.ts.
+  if (source === "coseguros") {
+    try {
+      const r = await syncCoseguros();
+      if (r?.status === "ERROR") errors.push(`coseguros: ${r.message}`);
+      results.coseguros = r ??
+        { status: "DISABLED", message: 'COSEGUROS_SYNC_ENABLED no es "true": no se hizo nada' };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`coseguros: ${msg}`);
+      results.coseguros = { status: "ERROR", message: msg };
     }
   }
 
