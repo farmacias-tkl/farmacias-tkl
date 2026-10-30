@@ -158,7 +158,8 @@ export const can = {
   reassignEmployee: (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
   // Vacaciones
-  createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
+  // RRHH (HR) solo ve: no crea, aprueba, rechaza, deshace, cancela ni cambia cobertura.
+  createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
   // Aprobar, rechazar y deshacer la aprobación (decisión final de supervisión).
   approveVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
   // Paso 2 (solo con VACATIONS_RRHH_STEP=true). RRHH (HR) solo revisa: ve lista,
@@ -167,7 +168,9 @@ export const can = {
   confirmVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
   // Cambiar o quitar el rotativo de una solicitud (también desde Rotativas).
   changeVacationCoverage: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  cancelVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
+  cancelVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  // Cancelar una ya aprobada (reversión excepcional, motivo obligatorio). Encargado/a no.
+  cancelApprovedVacation: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
   manageCoverage:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
   // Ausencias

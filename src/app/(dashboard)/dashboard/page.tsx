@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLE_LABELS, can } from "@/lib/permissions";
+import { ROLE_LABELS, can, canAccessRoute } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
 import {
   Users, MapPin, Wrench, ClipboardList, AlertTriangle,
@@ -12,8 +12,6 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { countVacationKpis } from "@/lib/vacations/kpis";
 
-// Roles que ven /vacaciones (los mismos de ROUTE_ACCESS).
-const VACATION_ROLES: UserRole[] = ["SUPERVISOR", "BRANCH_MANAGER", "HR", "OWNER", "ADMIN"];
 
 function ClockIcon(props: any) {
   return (
@@ -80,10 +78,23 @@ export default async function DashboardPage() {
 
   // Vacaciones: mismos criterios que los indicadores de /vacaciones.
   // Encargado/a sin sucursal: no ve otras sucursales (queda en 0).
-  const showVacations = VACATION_ROLES.includes(role as UserRole);
+  const showVacations = canAccessRoute(role as UserRole, "/vacaciones");
   const vacationKpis = !showVacations ? null
     : role === "BRANCH_MANAGER" && !branchId ? { solicitadas: 0, hoy: 0 }
     : await countVacationKpis(prisma, { branchId: role === "BRANCH_MANAGER" ? branchId : null });
+
+  // Rotativas: coberturas y rotaciones activas que incluyen hoy (mismo criterio que la pantalla Rotativas).
+  const showRotativas = canAccessRoute(role as UserRole, "/rotativas");
+  const rotativasHoy = !showRotativas ? 0 : await prisma.employeeBranchAssignment.count({
+    where: {
+      status: "ACTIVE",
+      type: { in: ["ROTATION", "TEMPORARY_COVERAGE"] },
+      startDate: { lte: todayEnd },
+      OR: [{ endDate: null }, { endDate: { gte: today } }],
+    },
+  });
+  const upcomingModules = UPCOMING_MODULES
+    .filter(m => m.roles.includes(role as UserRole) || m.roles.includes("ALL" as UserRole));
 
   const todayFormatted = today.toLocaleDateString("es-AR", {
     weekday: "long", day: "numeric", month: "long",
@@ -223,12 +234,10 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      {/* Vacaciones */}
-      {vacationKpis && (
-        <section>
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            Vacaciones
-          </h3>
+      {/* Vacaciones y Rotativas */}
+      {(vacationKpis || showRotativas) && (
+        <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {vacationKpis && (
           <Link href="/vacaciones" className="card p-4 flex items-center gap-4 hover:shadow-md transition-shadow">
             <div className="inline-flex p-2 rounded-lg bg-indigo-50 shrink-0">
               <CalendarDays className="w-5 h-5 text-indigo-600" />
@@ -247,6 +256,20 @@ export default async function DashboardPage() {
             </div>
             <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
           </Link>
+          )}
+          {showRotativas && (
+            <Link href="/rotativas" className="card p-4 flex items-center gap-4 hover:shadow-md transition-shadow">
+              <div className="inline-flex p-2 rounded-lg bg-violet-50 shrink-0">
+                <RotateCcw className="w-5 h-5 text-violet-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-2xl font-bold text-gray-900 leading-none">{rotativasHoy}</p>
+                <p className="text-sm font-medium text-gray-700 mt-1">Rotativas y coberturas</p>
+                <p className="text-xs text-gray-400 mt-0.5">Asignaciones activas hoy</p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+            </Link>
+          )}
         </section>
       )}
 
@@ -309,16 +332,16 @@ export default async function DashboardPage() {
       )}
 
       {/* Modulos proximos */}
+      {upcomingModules.length > 0 && (
       <section>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
           Proximos modulos
         </h3>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {UPCOMING_MODULES
-            .filter(m => m.roles.includes(role as UserRole) || m.roles.includes("ALL" as UserRole))
-            .map(m => <UpcomingModuleCard key={m.label} module={m} />)}
+          {upcomingModules.map(m => <UpcomingModuleCard key={m.label} module={m} />)}
         </div>
       </section>
+      )}
     </div>
   );
 }
@@ -413,11 +436,6 @@ type ModuleDef = {
   actions: string[]; roles: (UserRole | "ALL")[];
 };
 const UPCOMING_MODULES: ModuleDef[] = [
-  {
-    label: "Rotativas y coberturas", icon: RotateCcw, href: "/rotativas",
-    actions: ["Ver disponibilidad del plantel","Asignar rotativos a vacantes","Detectar conflictos"],
-    roles: ["SUPERVISOR","HR","ADMIN"],
-  },
   {
     label: "Mantenimiento", icon: Wrench, href: "/mantenimiento",
     actions: ["Registrar tickets con prioridad","Asignar al personal","Seguimiento hasta resolucion"],

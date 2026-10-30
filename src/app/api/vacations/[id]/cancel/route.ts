@@ -3,12 +3,12 @@
  *
  * Estados:
  *   - CANCELLED → 409.
- *   - APPROVED  → solo SUPERVISOR / HR / ADMIN / OWNER. Motivo OBLIGATORIO.
- *                 BRANCH_MANAGER NO puede cancelar una solicitud aprobada.
+ *   - APPROVED  → solo SUPERVISOR / ADMIN / OWNER (can.cancelApprovedVacation).
+ *                 Motivo OBLIGATORIO. BRANCH_MANAGER y RRHH (HR, solo ve) NO.
  *                 Audita igual que las demás cancelaciones (VACATION_CANCELLED
  *                 + VacationStateHistory). El detail.fromStatus = "APPROVED"
  *                 distingue las reversiones excepcionales en el AuditLog.
- *   - Resto     → cualquier rol con can.cancelVacation. Motivo opcional.
+ *   - Resto     → cualquier rol con can.cancelVacation (no HR). Motivo opcional.
  *                 BRANCH_MANAGER restringido a su sucursal.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -43,13 +43,11 @@ export async function POST(
   let note: string | undefined;
 
   if (vacation.status === "APPROVED") {
-    // Reversión excepcional: SUPERVISOR / HR / ADMIN / OWNER, motivo obligatorio.
-    // BRANCH_MANAGER queda explícitamente fuera.
-    const canCancelApproved =
-      role === "SUPERVISOR" || role === "HR" || role === "ADMIN" || role === "OWNER";
-    if (!canCancelApproved) {
+    // Reversión excepcional: SUPERVISOR / ADMIN / OWNER, motivo obligatorio.
+    // BRANCH_MANAGER y RRHH quedan explícitamente fuera.
+    if (!can.cancelApprovedVacation(role)) {
       return NextResponse.json(
-        { error: "Solo Supervisor, RRHH, ADMIN u OWNER pueden cancelar una solicitud aprobada" },
+        { error: "Solo Supervisor, ADMIN u OWNER pueden cancelar una solicitud aprobada" },
         { status: 403 },
       );
     }

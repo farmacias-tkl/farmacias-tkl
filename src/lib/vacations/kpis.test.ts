@@ -52,12 +52,18 @@ console.log("\nCriterios");
   assert("kpi válido / inválido", isVacationKpi("hoy") && !isVacationKpi("pendingRrhh") && !isVacationKpi(null));
 }
 
-console.log("\nRRHH (HR) solo revisa");
+console.log("\nRRHH (HR) solo ve");
 {
   const hr = { user: { role: "HR" as const } };
   assert("HR no aprueba, rechaza ni deshace (supervisor-approve/reject, undo-approval)", !can.approveVacation("HR") && requireCan(can.approveVacation, hr)?.status === 403);
   assert("HR no aprueba ni rechaza el paso 2 (rrhh-approve/reject)", !can.confirmVacation("HR") && requireCan(can.confirmVacation, hr)?.status === 403);
   assert("HR no cambia la cobertura (vacations/[id]/coverage POST y assignments vinculadas)", !can.changeVacationCoverage("HR"));
+  assert("HR no crea solicitudes (POST /api/vacations)", !can.createVacation("HR") && requireCan(can.createVacation, hr)?.status === 403);
+  assert("HR no cancela (ni pendientes ni aprobadas)", !can.cancelVacation("HR") && !can.cancelApprovedVacation("HR"));
+  assert("Supervisor/Admin/Owner cancelan aprobadas; Encargado/a no", can.cancelApprovedVacation("SUPERVISOR") && can.cancelApprovedVacation("ADMIN")
+    && can.cancelApprovedVacation("OWNER") && !can.cancelApprovedVacation("BRANCH_MANAGER"));
+  assert("Encargado/a y Supervisor siguen creando y cancelando pendientes", can.createVacation("BRANCH_MANAGER") && can.cancelVacation("BRANCH_MANAGER")
+    && can.createVacation("SUPERVISOR") && can.cancelVacation("SUPERVISOR"));
   assert("HR ve la pantalla y la API de vacaciones (lista, calendario, detalle, métricas, saldos)",
     canAccessRoute("HR", "/vacaciones") && canAccessRoute("HR", "/api/vacations") && canAccessRoute("HR", "/api/vacations/metrics")
     && canAccessRoute("HR", "/api/employees"));

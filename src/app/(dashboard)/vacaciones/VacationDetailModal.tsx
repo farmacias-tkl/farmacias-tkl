@@ -91,7 +91,7 @@ function fmtDate(d: string | Date): string {
 }
 
 export default function VacationDetailModal({
-  open, vacationId, role, userId, onClose, onChanged,
+  open, vacationId, role, onClose, onChanged,
 }: Props) {
   const [view, setView]   = useState<"detail" | "coverage" | ActionKind>("detail");
   const [note, setNote]   = useState("");
@@ -125,8 +125,7 @@ export default function VacationDetailModal({
   const canSupervisorAct  = role ? can.approveVacation(role) : false;
   const canRrhhAct        = role ? can.confirmVacation(role) : false;
   const canCancelStd      = role ? can.cancelVacation(role) : false;
-  const canCancelApproved = role === "SUPERVISOR" || role === "HR" || role === "ADMIN" || role === "OWNER";
-  const isOwner           = !!userId && v?.requestedByUserId === userId;
+  const canCancelApproved = role ? can.cancelApprovedVacation(role) : false;
 
   // Acciones disponibles según estado
   const availableActions: ActionKind[] = [];
@@ -142,7 +141,7 @@ export default function VacationDetailModal({
     if (v.status !== "CANCELLED") {
       const canDoCancel =
         v.status === "APPROVED" ? canCancelApproved
-        : (canCancelStd || isOwner);
+        : canCancelStd;
       if (canDoCancel) availableActions.push("cancel");
     }
   }
