@@ -10,6 +10,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { countVacationKpis } from "@/lib/vacations/kpis";
+
+// Roles que ven /vacaciones (los mismos de ROUTE_ACCESS).
+const VACATION_ROLES: UserRole[] = ["SUPERVISOR", "BRANCH_MANAGER", "HR", "OWNER", "ADMIN"];
 
 function ClockIcon(props: any) {
   return (
@@ -73,6 +77,13 @@ export default async function DashboardPage() {
     prisma.employee.count({ where: empWhere }),
     prisma.branch.count({ where: { active: true, showInOperative: true } }),
   ]);
+
+  // Vacaciones: mismos criterios que los indicadores de /vacaciones.
+  // Encargado/a sin sucursal: no ve otras sucursales (queda en 0).
+  const showVacations = VACATION_ROLES.includes(role as UserRole);
+  const vacationKpis = !showVacations ? null
+    : role === "BRANCH_MANAGER" && !branchId ? { solicitadas: 0, hoy: 0 }
+    : await countVacationKpis(prisma, { branchId: role === "BRANCH_MANAGER" ? branchId : null });
 
   const todayFormatted = today.toLocaleDateString("es-AR", {
     weekday: "long", day: "numeric", month: "long",
@@ -211,6 +222,33 @@ export default async function DashboardPage() {
           )}
         </div>
       </section>
+
+      {/* Vacaciones */}
+      {vacationKpis && (
+        <section>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            Vacaciones
+          </h3>
+          <Link href="/vacaciones" className="card p-4 flex items-center gap-4 hover:shadow-md transition-shadow">
+            <div className="inline-flex p-2 rounded-lg bg-indigo-50 shrink-0">
+              <CalendarDays className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div className="flex gap-8 flex-1">
+              <div>
+                <p className="text-2xl font-bold text-gray-900 leading-none">{vacationKpis.solicitadas}</p>
+                <p className="text-sm font-medium text-gray-700 mt-1">Solicitadas</p>
+                <p className="text-xs text-gray-400 mt-0.5">Pendientes de supervisión</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900 leading-none">{vacationKpis.hoy}</p>
+                <p className="text-sm font-medium text-gray-700 mt-1">De vacaciones hoy</p>
+                <p className="text-xs text-gray-400 mt-0.5">{isBranchManager ? "En tu sucursal" : "En toda la cadena"}</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+          </Link>
+        </section>
+      )}
 
       {/* Detalle ausentes hoy */}
       {absencesHoy.length > 0 && (
@@ -375,11 +413,6 @@ type ModuleDef = {
   actions: string[]; roles: (UserRole | "ALL")[];
 };
 const UPCOMING_MODULES: ModuleDef[] = [
-  {
-    label: "Vacaciones", icon: CalendarDays, href: "/vacaciones",
-    actions: ["Solicitar y aprobar por sucursal","Ver calendario de ausencias","Detectar conflictos antes de aprobar"],
-    roles: ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  },
   {
     label: "Rotativas y coberturas", icon: RotateCcw, href: "/rotativas",
     actions: ["Ver disponibilidad del plantel","Asignar rotativos a vacantes","Detectar conflictos"],

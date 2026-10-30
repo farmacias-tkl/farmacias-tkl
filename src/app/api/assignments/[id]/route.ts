@@ -69,6 +69,10 @@ export async function PATCH(
   if (!assignment) {
     return NextResponse.json({ error: "Asignacion no encontrada" }, { status: 404 });
   }
+  // Cobertura vinculada a vacaciones: solo Supervisor/Admin la cambian (RRHH solo revisa).
+  if (assignment.vacationRequestId && !can.changeVacationCoverage(session!.user.role)) {
+    return NextResponse.json({ error: "La cobertura de vacaciones solo la cambia Supervisión" }, { status: 403 });
+  }
 
   const body = await req.json();
   const parsed = patchSchema.safeParse(body);

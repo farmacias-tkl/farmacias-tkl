@@ -52,6 +52,7 @@ export default function RotativasPage() {
 
   const sessionReady = status === "authenticated";
   const canManage    = role ? can.reassignEmployee(role) : false;
+  const canChangeVacationCoverage = role ? can.changeVacationCoverage(role) : false;
 
   const { data: assignRes, isLoading } = useQuery({
     queryKey: ["assignments", { view, branchFilter, statusFilter }],
@@ -291,7 +292,8 @@ export default function RotativasPage() {
       ) : (
         <div className="space-y-2">
           {assignments.map((a: any) => (
-            <AssignmentCard key={a.id} assignment={a} canManage={canManage}
+            <AssignmentCard key={a.id} assignment={a}
+              canManage={canManage && (!a.vacationRequest || canChangeVacationCoverage)}
               onCancel={id => setCancelId(id)}
               onComplete={id => updateStatus(id, "COMPLETED")} />
           ))}

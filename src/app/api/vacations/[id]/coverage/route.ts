@@ -69,7 +69,7 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   const session = await auth();
-  const permErr = requireCan(can.approveVacation, session);
+  const permErr = requireCan(can.changeVacationCoverage, session);
   if (permErr) return NextResponse.json({ error: permErr.error }, { status: permErr.status });
 
   const parsed = postSchema.safeParse(await req.json().catch(() => ({})));

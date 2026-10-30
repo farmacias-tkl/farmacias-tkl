@@ -1,23 +1,22 @@
 "use client";
+// Los 4 indicadores de Vacaciones. Cada uno, al tocarlo, filtra la lista por
+// ese criterio (definición en src/lib/vacations/kpis.ts); tocarlo de nuevo
+// saca el filtro.
 import { useQuery } from "@tanstack/react-query";
-import { Clock, CheckCircle2, XCircle, Sun, Users, AlertTriangle } from "lucide-react";
+import { Clock, CheckCircle2, XCircle, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { VacationKpi } from "@/lib/vacations/kpis";
 
-interface MetricsResponse {
-  pendingSupervisor:        number;
-  pendingRrhh:              number;
-  approvedThisMonth:        number;
-  rejectedThisMonth:        number;
-  approvedActiveToday:      number;
-  pendingActiveToday:       number;
+export interface MetricsResponse {
+  solicitadas: number;
+  aprobadas:   number;
+  rechazadas:  number;
+  hoy:         number;
+  rrhhStep:    boolean;
 }
 
-interface Props {
-  branchId?: string | null;
-}
-
-export default function VacationMetrics({ branchId }: Props) {
-  const { data, isLoading } = useQuery<{ data: MetricsResponse }>({
+export function useVacationMetrics(branchId?: string | null) {
+  return useQuery<{ data: MetricsResponse }>({
     queryKey: ["vacations-metrics", branchId ?? "all"],
     queryFn: async () => {
       const p = new URLSearchParams();
@@ -28,45 +27,64 @@ export default function VacationMetrics({ branchId }: Props) {
     },
     staleTime: 30_000,
   });
+}
 
+const CARDS: Array<{ kpi: VacationKpi; label: string; icon: any; tone: Tone; hint: string }> = [
+  { kpi: "solicitadas", label: "Solicitadas",       icon: Clock,        tone: "yellow", hint: "Pendientes de aprobación de supervisión" },
+  { kpi: "aprobadas",   label: "Aprobadas",         icon: CheckCircle2, tone: "green",  hint: "Aprobadas en curso o futuras" },
+  { kpi: "rechazadas",  label: "Rechazadas",        icon: XCircle,      tone: "red",    hint: "Rechazadas este mes" },
+  { kpi: "hoy",         label: "De vacaciones hoy", icon: Sun,          tone: "indigo", hint: "Aprobadas cuyo período incluye hoy" },
+];
+
+export default function VacationMetrics({ branchId, active, onSelect }: {
+  branchId?: string | null;
+  active: VacationKpi | null;
+  onSelect: (kpi: VacationKpi | null) => void;
+}) {
+  const { data, isLoading } = useVacationMetrics(branchId);
   const m = data?.data;
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-      <KpiCard label="Pend. supervisor" value={m?.pendingSupervisor}      icon={Clock}        tone="yellow" loading={isLoading} />
-      <KpiCard label="Pend. RRHH"       value={m?.pendingRrhh}            icon={Clock}        tone="blue"   loading={isLoading} />
-      <KpiCard label="Aprob. este mes"  value={m?.approvedThisMonth}      icon={CheckCircle2} tone="green"  loading={isLoading} />
-      <KpiCard label="Rech. este mes"   value={m?.rejectedThisMonth}      icon={XCircle}      tone="red"    loading={isLoading} />
-      <KpiCard label="De vacaciones hoy" value={m?.approvedActiveToday}   icon={Sun}          tone="indigo" loading={isLoading} />
-      <KpiCard
-        label="Pendientes activas hoy"
-        value={m?.pendingActiveToday}
-        icon={AlertTriangle}
-        tone="amber"
-        loading={isLoading}
-        hint="Solicitudes PENDING_* cuyo rango incluye hoy"
-      />
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      {CARDS.map((c) => (
+        <KpiCard
+          key={c.kpi}
+          label={c.label}
+          value={m?.[c.kpi]}
+          icon={c.icon}
+          tone={c.tone}
+          hint={c.hint}
+          loading={isLoading}
+          selected={active === c.kpi}
+          onClick={() => onSelect(active === c.kpi ? null : c.kpi)}
+        />
+      ))}
     </div>
   );
 }
 
-type Tone = "yellow" | "blue" | "green" | "red" | "indigo" | "amber";
+type Tone = "yellow" | "green" | "red" | "indigo";
 
-const TONE: Record<Tone, { ring: string; iconBg: string; iconText: string }> = {
-  yellow: { ring: "ring-yellow-100", iconBg: "bg-yellow-50", iconText: "text-yellow-600" },
-  blue:   { ring: "ring-blue-100",   iconBg: "bg-blue-50",   iconText: "text-blue-600" },
-  green:  { ring: "ring-green-100",  iconBg: "bg-green-50",  iconText: "text-green-600" },
-  red:    { ring: "ring-red-100",    iconBg: "bg-red-50",    iconText: "text-red-600" },
-  indigo: { ring: "ring-indigo-100", iconBg: "bg-indigo-50", iconText: "text-indigo-600" },
-  amber:  { ring: "ring-amber-100",  iconBg: "bg-amber-50",  iconText: "text-amber-600" },
+const TONE: Record<Tone, { ring: string; iconBg: string; iconText: string; selected: string }> = {
+  yellow: { ring: "ring-yellow-100", iconBg: "bg-yellow-50", iconText: "text-yellow-600", selected: "ring-2 ring-yellow-400" },
+  green:  { ring: "ring-green-100",  iconBg: "bg-green-50",  iconText: "text-green-600",  selected: "ring-2 ring-green-400" },
+  red:    { ring: "ring-red-100",    iconBg: "bg-red-50",    iconText: "text-red-600",    selected: "ring-2 ring-red-400" },
+  indigo: { ring: "ring-indigo-100", iconBg: "bg-indigo-50", iconText: "text-indigo-600", selected: "ring-2 ring-indigo-400" },
 };
 
-function KpiCard({ label, value, icon: Icon, tone, loading, hint }: {
-  label: string; value: number | undefined; icon: any; tone: Tone; loading: boolean; hint?: string;
+function KpiCard({ label, value, icon: Icon, tone, loading, hint, selected, onClick }: {
+  label: string; value: number | undefined; icon: any; tone: Tone; loading: boolean; hint: string;
+  selected: boolean; onClick: () => void;
 }) {
   const t = TONE[tone];
   return (
-    <div className={cn("card px-3 py-2.5 flex items-center gap-2.5", t.ring)} title={hint}>
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      aria-pressed={selected}
+      className={cn("card px-3 py-2.5 flex items-center gap-2.5 text-left hover:shadow-md transition-shadow", selected ? t.selected : t.ring)}
+    >
       <div className={cn("rounded-md p-2 shrink-0", t.iconBg)}>
         <Icon className={cn("w-4 h-4", t.iconText)} />
       </div>
@@ -76,6 +94,6 @@ function KpiCard({ label, value, icon: Icon, tone, loading, hint }: {
           {loading ? "—" : (value ?? 0)}
         </p>
       </div>
-    </div>
+    </button>
   );
 }

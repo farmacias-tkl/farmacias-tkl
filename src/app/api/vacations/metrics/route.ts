@@ -1,106 +1,35 @@
 /**
  * GET /api/vacations/metrics
  *
- * Devuelve contadores agregados para el dashboard superior.
+ * Los 4 indicadores de la pantalla Vacaciones (definición en
+ * src/lib/vacations/kpis.ts): solicitadas, aprobadas (en curso o futuras),
+ * rechazadas este mes y de vacaciones hoy.
  * Filtros: branchId opcional. BRANCH_MANAGER forzado a su sucursal.
  *
- * Métricas:
- *   - pendingSupervisor    — count total en PENDING_SUPERVISOR
- *   - pendingRrhh          — count total en PENDING_RRHH
- *   - approvedThisMonth    — APPROVED con rrhhActionAt dentro del mes
- *   - rejectedThisMonth    — REJECTED con supervisorActionAt o rrhhActionAt en el mes
- *   - approvedActiveToday  — APPROVED cuyo rango incluye hoy
- *   - pendingActiveToday   — PENDING_SUPERVISOR + PENDING_RRHH cuyo rango incluye hoy
+ * rrhhStep: si el paso de RRHH está activo (VACATIONS_RRHH_STEP=true), para
+ * que la pantalla muestre o no PENDING_RRHH en el filtro de estados.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/permissions";
+import { countVacationKpis } from "@/lib/vacations/kpis";
+import { isRrhhStepEnabled } from "@/lib/vacations/config";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
   const authErr = requireAuth(session);
   if (authErr) return NextResponse.json({ error: authErr.error }, { status: authErr.status });
 
-  const sp = req.nextUrl.searchParams;
-  let branchId = sp.get("branchId") ?? undefined;
+  const rrhhStep = isRrhhStepEnabled();
+  let branchId = req.nextUrl.searchParams.get("branchId") ?? undefined;
   if (session!.user.role === "BRANCH_MANAGER") {
     branchId = session!.user.branchId ?? undefined;
     if (!branchId) {
-      return NextResponse.json({
-        data: {
-          pendingSupervisor: 0, pendingRrhh: 0,
-          approvedThisMonth: 0, rejectedThisMonth: 0,
-          approvedActiveToday: 0, pendingActiveToday: 0,
-        },
-      });
+      return NextResponse.json({ data: { solicitadas: 0, aprobadas: 0, rechazadas: 0, hoy: 0, rrhhStep } });
     }
   }
-  const branchFilter = branchId ? { branchId } : {};
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const today      = new Date(); today.setHours(0, 0, 0, 0);
-  const todayEnd   = new Date(today); todayEnd.setHours(23, 59, 59, 999);
-
-  const [
-    pendingSupervisor,
-    pendingRrhh,
-    approvedThisMonth,
-    rejectedThisMonth,
-    approvedActiveToday,
-    pendingActiveToday,
-  ] = await Promise.all([
-    prisma.vacationRequest.count({
-      where: { ...branchFilter, status: "PENDING_SUPERVISOR" },
-    }),
-    prisma.vacationRequest.count({
-      where: { ...branchFilter, status: "PENDING_RRHH" },
-    }),
-    prisma.vacationRequest.count({
-      where: {
-        ...branchFilter,
-        status: "APPROVED",
-        rrhhActionAt: { gte: monthStart, lte: monthEnd },
-      },
-    }),
-    prisma.vacationRequest.count({
-      where: {
-        ...branchFilter,
-        status: "REJECTED",
-        OR: [
-          { rrhhActionAt:       { gte: monthStart, lte: monthEnd } },
-          { supervisorActionAt: { gte: monthStart, lte: monthEnd } },
-        ],
-      },
-    }),
-    prisma.vacationRequest.count({
-      where: {
-        ...branchFilter,
-        status: "APPROVED",
-        startDate: { lte: todayEnd },
-        endDate:   { gte: today },
-      },
-    }),
-    prisma.vacationRequest.count({
-      where: {
-        ...branchFilter,
-        status: { in: ["PENDING_SUPERVISOR", "PENDING_RRHH"] },
-        startDate: { lte: todayEnd },
-        endDate:   { gte: today },
-      },
-    }),
-  ]);
-
-  return NextResponse.json({
-    data: {
-      pendingSupervisor,
-      pendingRrhh,
-      approvedThisMonth,
-      rejectedThisMonth,
-      approvedActiveToday,
-      pendingActiveToday,
-    },
-  });
+  const counts = await countVacationKpis(prisma, { branchId });
+  return NextResponse.json({ data: { ...counts, rrhhStep } });
 }

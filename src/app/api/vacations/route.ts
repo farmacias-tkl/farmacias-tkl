@@ -4,7 +4,9 @@
  *                        las advertencias no bloquean)
  *
  * GET filtros extra: withoutCoverage=true (aprobadas sin rotativo),
- *                    withWarnings=true (aprobadas con "Aprobar igual").
+ *                    withWarnings=true (aprobadas con "Aprobar igual"),
+ *                    kpi=solicitadas|aprobadas|rechazadas|hoy (los indicadores
+ *                    de la pantalla; definición en src/lib/vacations/kpis.ts).
  *
  * BRANCH_MANAGER: forzado a su sucursal en backend.
  */
@@ -14,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
 import { validateVacationRequest } from "@/lib/vacations/validation";
+import { isVacationKpi, kpiWhere } from "@/lib/vacations/kpis";
 import { Prisma } from "@prisma/client";
 
 const createSchema = z.object({
@@ -39,6 +42,7 @@ export async function GET(req: NextRequest) {
   const pendingOnly = sp.get("pendingOnly") === "true";
   const withoutCoverage = sp.get("withoutCoverage") === "true"; // aprobadas sin rotativo
   const withWarnings    = sp.get("withWarnings") === "true";    // aprobadas con "Aprobar igual"
+  const kpi             = sp.get("kpi");
   const page        = Math.max(1, parseInt(sp.get("page") ?? "1"));
   const limit       = Math.min(200, parseInt(sp.get("limit") ?? "50"));
 
@@ -62,6 +66,7 @@ export async function GET(req: NextRequest) {
   }
   if (withoutCoverage) where.withoutCoverage = true;
   if (withWarnings)    where.approvedWithWarnings = true;
+  if (isVacationKpi(kpi)) where.AND = [kpiWhere(kpi)];
 
   if (month) {
     const [y, m] = month.split("-").map(Number);

@@ -12,7 +12,8 @@ import {
 import VacationFormPanel from "./VacationFormPanel";
 import VacationCard, { STATUS_META } from "./VacationCard";
 import VacationCalendar from "./VacationCalendar";
-import VacationMetrics from "./VacationMetrics";
+import VacationMetrics, { useVacationMetrics } from "./VacationMetrics";
+import type { VacationKpi } from "@/lib/vacations/kpis";
 import VacationDetailModal from "./VacationDetailModal";
 import EmployeeSearchInput from "./EmployeeSearchInput";
 
@@ -32,6 +33,8 @@ export default function VacacionesPage() {
   const [pendingOnly, setPendingOnly] = useState(false);
   // Marcas de aprobadas: sin cobertura / aprobadas con advertencias ("Aprobar igual")
   const [flagFilter,  setFlagFilter]  = useState<"" | "withoutCoverage" | "withWarnings">("");
+  // Indicador tocado (filtra por su criterio; null = ninguno)
+  const [kpiFilter,   setKpiFilter]   = useState<VacationKpi | null>(null);
   // Mes visible del calendario; default hoy
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   // Modal de detalle
@@ -52,6 +55,16 @@ export default function VacacionesPage() {
   // Branch efectivo aplicado al filtro y a las queries
   const effectiveBranchId = isBranchManager ? (userBranchId ?? "") : branchFilter;
 
+  // PENDING_RRHH solo aparece en el filtro si el paso de RRHH está activo.
+  const { data: metricsRes } = useVacationMetrics(effectiveBranchId || null);
+  const rrhhStep = metricsRes?.data?.rrhhStep === true;
+  const statusOptions = Object.entries(STATUS_META).filter(([k]) => rrhhStep || k !== "PENDING_RRHH");
+
+  const selectKpi = (kpi: VacationKpi | null) => {
+    setKpiFilter(kpi);
+    if (kpi) { setStatusFilter(""); setPendingOnly(false); setViewMode("list"); }
+  };
+
   // Rango del calendario: la grilla 7x6 cubre desde un día previo al mes
   // hasta varios después. Pedimos exactamente ese rango al backend.
   const calendarRange = useMemo(() => {
@@ -63,7 +76,7 @@ export default function VacacionesPage() {
 
   // Lista: filtros de la pestaña Lista
   const { data: listRes, isLoading: listLoading } = useQuery({
-    queryKey: ["vacations-list", { branch: effectiveBranchId, statusFilter, emp: empFilter?.id, pendingOnly, flagFilter }],
+    queryKey: ["vacations-list", { branch: effectiveBranchId, statusFilter, emp: empFilter?.id, pendingOnly, flagFilter, kpiFilter }],
     queryFn: async () => {
       const p = new URLSearchParams({ limit: "100" });
       if (effectiveBranchId) p.set("branchId", effectiveBranchId);
@@ -71,6 +84,7 @@ export default function VacacionesPage() {
       if (empFilter?.id)     p.set("employeeId", empFilter.id);
       if (pendingOnly)       p.set("pendingOnly", "true");
       if (flagFilter)        p.set(flagFilter, "true");
+      if (kpiFilter)         p.set("kpi", kpiFilter);
       const res = await fetch(`/api/vacations?${p}`);
       if (!res.ok) throw new Error("Error al cargar vacaciones");
       return res.json();
@@ -80,7 +94,7 @@ export default function VacacionesPage() {
 
   // Calendario: trae todo el rango de la grilla visible
   const { data: calRes, isLoading: calLoading } = useQuery({
-    queryKey: ["vacations-cal", { branch: effectiveBranchId, statusFilter, flagFilter, emp: empFilter?.id, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
+    queryKey: ["vacations-cal", { branch: effectiveBranchId, statusFilter, flagFilter, kpiFilter, emp: empFilter?.id, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
     queryFn: async () => {
       const p = new URLSearchParams({
         limit: "200",
@@ -91,6 +105,7 @@ export default function VacacionesPage() {
       if (statusFilter)      p.set("status", statusFilter);
       if (empFilter?.id)     p.set("employeeId", empFilter.id);
       if (flagFilter)        p.set(flagFilter, "true");
+      if (kpiFilter)         p.set("kpi", kpiFilter);
       const res = await fetch(`/api/vacations?${p}`);
       if (!res.ok) throw new Error("Error al cargar vacaciones");
       return res.json();
@@ -125,7 +140,7 @@ export default function VacacionesPage() {
       </div>
 
       {/* Métricas top */}
-      <VacationMetrics branchId={effectiveBranchId || null} />
+      <VacationMetrics branchId={effectiveBranchId || null} active={kpiFilter} onSelect={selectKpi} />
 
       {/* Form */}
       {showForm && (
@@ -168,9 +183,9 @@ export default function VacacionesPage() {
             {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-auto">
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setKpiFilter(null); }} className="input w-auto">
           <option value="">Todos los estados</option>
-          {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          {statusOptions.map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
         <select value={flagFilter} onChange={e => setFlagFilter(e.target.value as typeof flagFilter)} className="input w-auto">
           <option value="">Todas las marcas</option>
@@ -179,7 +194,7 @@ export default function VacacionesPage() {
         </select>
         {viewMode === "list" && (
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-            <input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} className="rounded" />
+            <input type="checkbox" checked={pendingOnly} onChange={e => { setPendingOnly(e.target.checked); setKpiFilter(null); }} className="rounded" />
             Solo pendientes
           </label>
         )}

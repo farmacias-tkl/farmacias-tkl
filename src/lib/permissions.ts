@@ -159,9 +159,14 @@ export const can = {
 
   // Vacaciones
   createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
+  // Aprobar, rechazar y deshacer la aprobación (decisión final de supervisión).
   approveVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  // RRHH confirma el paso 2 (después de aprobar el supervisor).
-  confirmVacation: (role: UserRole) => ["HR","SUPERVISOR","ADMIN"].includes(role),
+  // Paso 2 (solo con VACATIONS_RRHH_STEP=true). RRHH (HR) solo revisa: ve lista,
+  // calendario, detalle y saldos, pero no aprueba, rechaza, deshace ni cambia
+  // la cobertura; por eso HR no está acá ni en approveVacation.
+  confirmVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  // Cambiar o quitar el rotativo de una solicitud (también desde Rotativas).
+  changeVacationCoverage: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
   cancelVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
   manageCoverage:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
