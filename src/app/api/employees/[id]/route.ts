@@ -1,12 +1,21 @@
 /**
  * GET   /api/employees/[id]
  * PATCH /api/employees/[id]
+ *
+ * PATCH acepta también los campos de personal real (sucursal de contrato,
+ * sucursal donde trabaja, puesto secundario, DT, rotativo, horas semanales,
+ * tareas adicionales). Si cambia la sucursal donde trabaja se cierra la
+ * asignación PERMANENT abierta y se abre otra desde hoy (como createAssignment).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
+import { addDays, utcDay } from "@/lib/personal/dates";
+import {
+  DUPLICATE_PERSON_ERROR, checkPersonalRefs, isDuplicatePerson, nameKeyFor, personalFieldsSchema,
+} from "@/lib/personal/employee-fields";
 
 const patchSchema = z.object({
   firstName:         z.string().min(1).optional(),
@@ -16,6 +25,9 @@ const patchSchema = z.object({
   notes:             z.string().optional().nullable(),
   active:            z.boolean().optional(),
   hireDate:          z.string().optional().nullable().transform(d => d ? new Date(d) : undefined),
+  currentBranchId:   z.string().min(1).optional().nullable(),
+  isRotating:        z.boolean().optional(),
+  ...personalFieldsSchema,
 });
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -71,14 +83,59 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Datos inválidos", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const updated = await prisma.employee.update({
-    where: { id: params.id },
-    data:  parsed.data,
-    include: {
-      position:      { select: { id: true, name: true } },
-      currentBranch: { select: { id: true, name: true } },
-    },
+  const data = parsed.data;
+  if (
+    session!.user.role === "BRANCH_MANAGER" &&
+    data.currentBranchId !== undefined &&
+    data.currentBranchId !== session!.user.branchId
+  ) {
+    return NextResponse.json({ error: "Solo podes asignar empleados a tu sucursal" }, { status: 403 });
+  }
+
+  const final = {
+    firstName:           data.firstName ?? existing.firstName,
+    lastName:            data.lastName ?? existing.lastName,
+    positionId:          data.positionId ?? existing.positionId,
+    secondaryPositionId: data.secondaryPositionId !== undefined ? data.secondaryPositionId : existing.secondaryPositionId,
+    contractBranchId:    data.contractBranchId !== undefined ? data.contractBranchId : existing.contractBranchId,
+    currentBranchId:     data.currentBranchId !== undefined ? data.currentBranchId : existing.currentBranchId,
+  };
+  const refErr = await checkPersonalRefs(prisma, final);
+  if (refErr) return NextResponse.json({ error: refErr }, { status: 400 });
+  const nameKey = nameKeyFor(final.lastName, final.firstName, final.contractBranchId);
+  const branchChanged = data.currentBranchId !== undefined && data.currentBranchId !== existing.currentBranchId;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const emp = await tx.employee.update({
+      where: { id: params.id },
+      data:  { ...data, ...(nameKey !== undefined && nameKey !== existing.nameKey ? { nameKey } : {}) },
+      include: {
+        position:      { select: { id: true, name: true } },
+        currentBranch: { select: { id: true, name: true } },
+      },
+    });
+    if (branchChanged) {
+      const today = utcDay(new Date());
+      await tx.employeeBranchAssignment.updateMany({
+        where: { employeeId: emp.id, type: "PERMANENT", endDate: null },
+        data:  { endDate: addDays(today, -1) },
+      });
+      if (data.currentBranchId) {
+        await tx.employeeBranchAssignment.create({
+          data: {
+            employeeId: emp.id, branchId: data.currentBranchId, type: "PERMANENT", status: "ACTIVE",
+            startDate: today, endDate: null, reason: "Cambio de sucursal (edición manual)",
+            assignedByUserId: session!.user.id,
+          },
+        });
+      }
+    }
+    return emp;
+  }).catch((e) => {
+    if (isDuplicatePerson(e)) return null;
+    throw e;
   });
+  if (!updated) return NextResponse.json({ error: DUPLICATE_PERSON_ERROR }, { status: 409 });
 
   const changes = Object.entries(parsed.data)
     .filter(([, v]) => v !== undefined)

@@ -17,7 +17,7 @@
 // =============================================================================
 
 export interface Holiday {
-  /** YYYY-MM-DD en zona local (sin TZ). */
+  /** YYYY-MM-DD, fecha de calendario (sin TZ). */
   date: string;
   name: string;
 }

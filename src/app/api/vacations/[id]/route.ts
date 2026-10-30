@@ -42,6 +42,11 @@ export async function GET(
         orderBy: { changedAt: "desc" },
         include: { changedBy: { select: { id: true, name: true } } },
       },
+      coverages: {
+        orderBy: { createdAt: "desc" },
+        include: { employee: { select: { id: true, firstName: true, lastName: true } } },
+      },
+      balanceMovements: { orderBy: { createdAt: "asc" } },
     },
   });
   if (!vacation) return NextResponse.json({ error: "No encontrada" }, { status: 404 });

@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { typeAllowsReasonDetail } from "@/lib/absences";
 import {
   Plus, UserMinus, AlertTriangle, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, RotateCcw, Users, Info, LogOut, CalendarDays,
@@ -35,6 +36,7 @@ const ABSENCE_TYPES = [
   { value: "LATE_NOTICE",     label: "Aviso tarde" },
   { value: "LATE_ARRIVAL",    label: "Llegó tarde" },
   { value: "MEDICAL_LEAVE",   label: "Licencia medica" },
+  { value: "MATERNITY_LEAVE", label: "Licencia por maternidad" },
   { value: "SPECIAL_LEAVE",   label: "Licencia especial" },
   { value: "SUSPENSION",      label: "Suspension disciplinaria" },
   { value: "OTHER",           label: "Otro" },
@@ -445,7 +447,7 @@ export default function AusenciasPage() {
           {/* FLUJO FIJO */}
           {formMode === "fixed" && (
             <form
-              onSubmit={fixedForm.handleSubmit(d => createMut.mutate(d))}
+              onSubmit={fixedForm.handleSubmit(d => createMut.mutate(withoutHiddenReason(d)))}
               className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 
@@ -563,10 +565,12 @@ export default function AusenciasPage() {
                   </div>
                 )}
 
-                <div>
-                  <label className="label">Motivo / detalle</label>
-                  <input {...fixedForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
-                </div>
+                {typeAllowsReasonDetail(fixedForm.watch("absenceType")) && (
+                  <div>
+                    <label className="label">Observaciones</label>
+                    <input {...fixedForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
+                  </div>
+                )}
 
                 <div>
                   <label className="label">Hora de aviso</label>
@@ -574,7 +578,7 @@ export default function AusenciasPage() {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="label">Observaciones</label>
+                  <label className="label">Notas internas</label>
                   <textarea {...fixedForm.register("notes")} rows={2} className="input resize-none" />
                 </div>
 
@@ -614,7 +618,7 @@ export default function AusenciasPage() {
           {/* FLUJO ROTATIVO */}
           {formMode === "rotating" && (
             <form
-              onSubmit={rotForm.handleSubmit(d => createMut.mutate(d))}
+              onSubmit={rotForm.handleSubmit(d => createMut.mutate(withoutHiddenReason(d)))}
               className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
@@ -728,13 +732,15 @@ export default function AusenciasPage() {
                   </div>
                 )}
 
-                <div>
-                  <label className="label">Motivo</label>
-                  <input {...rotForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
-                </div>
+                {typeAllowsReasonDetail(rotForm.watch("absenceType")) && (
+                  <div>
+                    <label className="label">Observaciones</label>
+                    <input {...rotForm.register("reasonDetail")} className="input" placeholder="Opcional..." />
+                  </div>
+                )}
 
                 <div className="sm:col-span-2">
-                  <label className="label">Observaciones</label>
+                  <label className="label">Notas internas</label>
                   <textarea {...rotForm.register("notes")} rows={2} className="input resize-none" />
                 </div>
 
@@ -951,8 +957,10 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
               )}
             </div>
           )}
-          {a.reasonDetail && <p className="text-xs text-gray-600 mb-1">Motivo: {a.reasonDetail}</p>}
-          {a.notes && <p className="text-xs text-gray-600 italic mb-3">{a.notes}</p>}
+          {a.reasonDetail && typeAllowsReasonDetail(a.absenceType) && (
+            <p className="text-xs text-gray-600 mb-1">Observaciones: {a.reasonDetail}</p>
+          )}
+          {a.notes && <p className="text-xs text-gray-600 italic mb-3">Notas internas: {a.notes}</p>}
           {canJustify && a.status !== "CLOSED" && (
             <div className="flex flex-wrap gap-2">
               {a.status !== "JUSTIFIED" && (
@@ -979,4 +987,9 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
       )}
     </div>
   );
+}
+
+// reasonDetail no se envía para licencia médica / maternidad (campo oculto).
+function withoutHiddenReason<T extends { absenceType?: string; reasonDetail?: string }>(d: T): T {
+  return typeAllowsReasonDetail(d.absenceType) ? d : { ...d, reasonDetail: undefined };
 }

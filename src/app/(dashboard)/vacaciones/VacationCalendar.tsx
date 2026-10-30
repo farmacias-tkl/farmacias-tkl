@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertTriangle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   addMonths, formatMonthLong, getMonthGrid, isSameDay,
@@ -15,6 +15,8 @@ interface VacationEvent {
   positionNameSnapshot: string;
   status:               string;
   conflictLevel:        string;
+  withoutCoverage?:     boolean;
+  approvedWithWarnings?: boolean;
   startDate:            string;
   endDate:              string;
 }
@@ -176,9 +178,13 @@ export default function VacationCalendar({
                         "w-full text-left truncate text-[10px] px-1.5 py-0.5 rounded border leading-tight",
                         STATUS_CHIP[e.status] ?? "bg-gray-50 text-gray-700 border-gray-200",
                         e.conflictLevel === "BLOCKING" && "ring-1 ring-red-300",
+                        e.status === "APPROVED" && e.approvedWithWarnings && "ring-1 ring-amber-400",
                       )}
-                      title={`${e.employeeNameSnapshot} — ${e.branchNameSnapshot} — ${e.positionNameSnapshot}`}
+                      title={`${e.employeeNameSnapshot} — ${e.branchNameSnapshot} — ${e.positionNameSnapshot}${e.status === "APPROVED" && e.withoutCoverage ? " — sin cobertura" : ""}${e.status === "APPROVED" && e.approvedWithWarnings ? " — con advertencias" : ""}`}
                     >
+                      {e.status === "APPROVED" && e.withoutCoverage && (
+                        <Users className="inline w-2.5 h-2.5 mr-0.5 text-red-600" aria-label="Sin cobertura" />
+                      )}
                       <span className="font-semibold mr-1">{initials(e.employeeNameSnapshot)}</span>
                       <span className="opacity-90">{e.employeeNameSnapshot.split(/\s+/)[0]}</span>
                     </button>
@@ -209,6 +215,14 @@ export default function VacationCalendar({
         <span className="inline-flex items-center gap-1 ml-auto hidden sm:inline-flex">
           <AlertTriangle className="w-3 h-3 text-red-500" />
           Conflicto bloqueante
+        </span>
+        <span className="inline-flex items-center gap-1 hidden sm:inline-flex">
+          <Users className="w-3 h-3 text-red-600" />
+          Sin cobertura
+        </span>
+        <span className="inline-flex items-center gap-1 hidden sm:inline-flex">
+          <span className="w-3 h-2 rounded ring-1 ring-amber-400" />
+          Con advertencias
         </span>
       </div>
     </div>

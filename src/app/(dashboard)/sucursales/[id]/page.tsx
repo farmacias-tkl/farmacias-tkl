@@ -15,6 +15,7 @@ const ABSENCE_TYPE_META: Record<string, { label: string; color: string }> = {
   NO_SHOW:         { label: "Sin aviso",     color: "bg-gray-100 text-gray-700" },
   LATE_NOTICE:     { label: "Aviso tarde",   color: "bg-orange-50 text-orange-700" },
   MEDICAL_LEAVE:   { label: "Lic. médica",   color: "bg-blue-50 text-blue-700" },
+  MATERNITY_LEAVE: { label: "Lic. maternidad", color: "bg-blue-50 text-blue-700" },
   SPECIAL_LEAVE:   { label: "Lic. especial", color: "bg-violet-50 text-violet-700" },
   OTHER:           { label: "Otro",          color: "bg-gray-100 text-gray-600" },
 };

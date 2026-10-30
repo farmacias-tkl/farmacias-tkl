@@ -7,6 +7,7 @@ import ActionPlansTab from "./tabs/ActionPlansTab";
 import HorasExtrasTab from "./tabs/HorasExtrasTab";
 import HistorialSucursalesTab from "./tabs/HistorialSucursalesTab";
 import VacacionesTab from "./tabs/VacacionesTab";
+import HorarioTab from "./tabs/HorarioTab";
 import LegajoTab from "./tabs/LegajoTab";
 import type { SerializedEmployee } from "./EmployeeHeader";
 
@@ -16,6 +17,7 @@ const TABS = [
   { id: "planes",       label: "Planes de acción" },
   { id: "horas-extras", label: "Horas extras" },
   { id: "historial",    label: "Historial sucursales" },
+  { id: "horario",      label: "Horario" },
   { id: "vacaciones",   label: "Vacaciones" },
   { id: "legajo",       label: "Legajo" },
 ] as const;
@@ -85,7 +87,8 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
       {activeTab === "historial" && (
         <HistorialSucursalesTab employeeId={employee.id} />
       )}
-      {activeTab === "vacaciones" && <VacacionesTab />}
+      {activeTab === "horario"    && <HorarioTab employeeId={employee.id} />}
+      {activeTab === "vacaciones" && <VacacionesTab employeeId={employee.id} />}
       {activeTab === "legajo"     && <LegajoTab employee={employee} />}
 
     </div>

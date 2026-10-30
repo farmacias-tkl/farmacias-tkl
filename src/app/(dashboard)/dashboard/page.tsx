@@ -57,10 +57,10 @@ export default async function DashboardPage() {
 
   // Desglose: ausencias puntuales vs licencias
   const ausenciasPuntuales = absencesHoy.filter(
-    a => !["MEDICAL_LEAVE","SPECIAL_LEAVE"].includes((a as any).absenceType)
+    a => !["MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE"].includes((a as any).absenceType)
   );
   const licencias = absencesHoy.filter(
-    a => ["MEDICAL_LEAVE","SPECIAL_LEAVE"].includes((a as any).absenceType)
+    a => ["MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE"].includes((a as any).absenceType)
   );
   // Vacaciones — cuando exista VacationRequest se agrega aquí
   const vacaciones: any[] = [];
@@ -340,7 +340,7 @@ function AbsenceRow({ a, showBranch, isLeave }: { a: any; showBranch: boolean; i
   const TYPE_LABELS: Record<string, string> = {
     SICKNESS: "Enfermedad", PERSONAL_REASON: "Personal",
     NO_SHOW: "Sin aviso", LATE_NOTICE: "Aviso tarde",
-    MEDICAL_LEAVE: "Lic. medica", SPECIAL_LEAVE: "Lic. especial", OTHER: "Otro",
+    MEDICAL_LEAVE: "Lic. medica", MATERNITY_LEAVE: "Lic. maternidad", SPECIAL_LEAVE: "Lic. especial", OTHER: "Otro",
   };
   return (
     <tr className={cn("hover:bg-gray-50", a.employee.position.requiresCoverage && "bg-red-50/30")}>

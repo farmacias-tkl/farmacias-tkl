@@ -1,6 +1,6 @@
 "use client";
 import {
-  CheckCircle2, XCircle, Clock, AlertTriangle, Ban, ChevronRight,
+  CheckCircle2, XCircle, Clock, AlertTriangle, Ban, ChevronRight, Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,8 +17,9 @@ interface Props {
   onClick:  () => void;
 }
 
+// startDate/endDate son @db.Date (00:00 UTC): se formatean en UTC.
 function fmt(date: string | Date): string {
-  return new Date(date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
+  return new Date(date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
 }
 
 function initials(name: string): string {
@@ -79,6 +80,20 @@ export default function VacationCard({ vacation: v, onClick }: Props) {
                   title="Esta solicitud tiene avisos">
               <AlertTriangle className="w-2.5 h-2.5" />
               Aviso
+            </span>
+          )}
+          {v.status === "APPROVED" && v.withoutCoverage && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded"
+                  title="Aprobada sin rotativo que cubra">
+              <Users className="w-2.5 h-2.5" />
+              Sin cobertura
+            </span>
+          )}
+          {v.status === "APPROVED" && v.approvedWithWarnings && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded"
+                  title="Aprobada con &quot;Aprobar igual&quot;">
+              <AlertTriangle className="w-2.5 h-2.5" />
+              Con advertencias
             </span>
           )}
           {v.conflictLevel === "BLOCKING" && (

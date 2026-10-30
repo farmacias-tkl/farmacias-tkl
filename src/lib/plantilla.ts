@@ -142,7 +142,7 @@ export async function getPlantillaReal(
     : [];
 
   const absenceMap = new Map(ausencias.map(a => [a.employeeId, a]));
-  const LEAVE_TYPES = ["MEDICAL_LEAVE", "SPECIAL_LEAVE"];
+  const LEAVE_TYPES = ["MEDICAL_LEAVE", "MATERNITY_LEAVE", "SPECIAL_LEAVE"];
 
   function calcStatus(empId: string): PlantillaMember["statusHoy"] {
     const abs = absenceMap.get(empId);
@@ -287,7 +287,7 @@ export async function getDotacionMultiple(
     : [];
 
   const ausenciaMap = new Map(ausencias.map(a => [a.employeeId, a.absenceType]));
-  const LEAVE_TYPES = ["MEDICAL_LEAVE","SPECIAL_LEAVE"];
+  const LEAVE_TYPES = ["MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE"];
 
   const result = new Map<string, any>();
   for (const branchId of branchIds) {

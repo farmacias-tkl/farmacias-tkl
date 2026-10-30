@@ -4,7 +4,7 @@
  * 1. Crea la DB con el schema de b3af746 (antes de CoseguroDaily) y siembra Branch,
  *    SalesSnapshot y SyncLog.
  * 2. Aplica prisma/gates/2026-10-19-coseguro-daily.sql tal cual.
- * 3. `prisma migrate diff --from-url <DB> --to-schema-datamodel prisma/schema.prisma`
+ * 3. `prisma migrate diff --from-url <DB> --to-schema-datamodel <schema.prisma de 5c2ba5b>`
  *    tiene que dar vacío: el SQL deja la base igual al schema del repo.
  * 4. Las tablas existentes quedan idénticas.
  * 5. Store real (Prisma): insert, idempotencia, update, clave por sucursal, Decimal exacto.
@@ -27,6 +27,7 @@ import { syncCoseguros, EXPECTED_SIAF_BRANCHES } from "./sync-coseguros";
 
 const TEST_DB = "tkl_coseguros_smoke";
 const BASE_COMMIT = "b3af746";
+const GATE_COMMIT = "5c2ba5b"; // commit que agregó CoseguroDaily y prisma/gates/2026-10-19-coseguro-daily.sql
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 const m = fs.readFileSync(".env", "utf8").match(/^DATABASE_URL\s*=\s*"?([^"\n]+?)"?\s*$/m);
@@ -98,9 +99,12 @@ async function main() {
     });
     for (const s of stmts) await db.$executeRawUnsafe(s);
 
-    // 3. Igual al schema del repo
-    await check("migrate diff (DB con el SQL aplicado → schema.prisma) da vacío", async () => {
-      const out = run(`npx prisma migrate diff --from-url "${TEST_URL}" --to-schema-datamodel prisma/schema.prisma --script`);
+    // 3. Igual al schema del commit que trajo este gate (GATE_COMMIT). Contra el
+    //    schema.prisma actual no da vacío en cuanto un gate posterior agrega algo.
+    await check(`migrate diff (DB con el SQL aplicado → schema.prisma de ${GATE_COMMIT}) da vacío`, async () => {
+      const gateSchema = path.join(tmp, "gate-schema.prisma");
+      fs.writeFileSync(gateSchema, execSync(`git show ${GATE_COMMIT}:prisma/schema.prisma`, { encoding: "utf8" }));
+      const out = run(`npx prisma migrate diff --from-url "${TEST_URL}" --to-schema-datamodel "${gateSchema}" --script`);
       assert.match(out, /This is an empty migration/);
     });
 

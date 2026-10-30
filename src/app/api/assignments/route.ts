@@ -70,6 +70,10 @@ export async function GET(req: NextRequest) {
         },
         branch:   { select: { id: true, name: true } },
         position: { select: { id: true, name: true, requiresCoverage: true } },
+        // Cobertura vinculada a vacaciones (quién cubre a quién)
+        vacationRequest: {
+          select: { id: true, employeeNameSnapshot: true, startDate: true, endDate: true, status: true },
+        },
       },
       orderBy: { startDate: "asc" },
       skip: (page - 1) * limit,

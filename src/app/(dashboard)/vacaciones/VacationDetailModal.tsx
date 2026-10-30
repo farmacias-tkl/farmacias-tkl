@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle, Calendar, MapPin, User as UserIcon, Briefcase,
-  Loader2, ArrowLeft, CheckCircle2, XCircle, Ban,
+  Loader2, ArrowLeft, CheckCircle2, XCircle, Ban, Undo2, Users,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import { can } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
 import VacationTimeline from "./VacationTimeline";
 import { STATUS_META } from "./VacationCard";
+import { ApprovalPanel, ChangeCoveragePanel } from "./VacationApprovalPanel";
 
 interface Props {
   open:        boolean;
@@ -21,7 +22,8 @@ interface Props {
   onChanged:   () => void;   // se llama tras cualquier acción exitosa
 }
 
-type ActionKind = "supervisor-approve" | "supervisor-reject" | "rrhh-approve" | "rrhh-reject" | "cancel";
+// supervisor-approve no pasa por acá: lo maneja ApprovalPanel (saldo, advertencias, rotativos).
+type ActionKind = "supervisor-reject" | "rrhh-approve" | "rrhh-reject" | "cancel" | "undo-approval";
 
 interface ActionConfig {
   label:        string;
@@ -34,15 +36,6 @@ interface ActionConfig {
 }
 
 const ACTIONS: Record<ActionKind, ActionConfig> = {
-  "supervisor-approve": {
-    label: "Aprobar (supervisor)",
-    endpoint: "supervisor-approve",
-    noteRequired: false,
-    notePrompt: "Nota del supervisor (opcional)",
-    notePlaceholder: "Comentario o aclaración...",
-    confirmLabel: "Aprobar y enviar a RRHH",
-    variant: "approve",
-  },
   "supervisor-reject": {
     label: "Rechazar",
     endpoint: "supervisor-reject",
@@ -70,6 +63,15 @@ const ACTIONS: Record<ActionKind, ActionConfig> = {
     confirmLabel: "Rechazar solicitud",
     variant: "reject",
   },
+  "undo-approval": {
+    label: "Deshacer aprobación",
+    endpoint: "undo-approval",
+    noteRequired: true,
+    notePrompt: "Motivo (obligatorio)",
+    notePlaceholder: "Por qué se deshace la aprobación...",
+    confirmLabel: "Deshacer aprobación",
+    variant: "reject",
+  },
   "cancel": {
     label: "Cancelar solicitud",
     endpoint: "cancel",
@@ -81,16 +83,17 @@ const ACTIONS: Record<ActionKind, ActionConfig> = {
   },
 };
 
+// startDate/endDate son @db.Date (00:00 UTC): se formatean en UTC.
 function fmtDate(d: string | Date): string {
   return new Date(d).toLocaleDateString("es-AR", {
-    weekday: "short", day: "numeric", month: "short", year: "2-digit",
+    weekday: "short", day: "numeric", month: "short", year: "2-digit", timeZone: "UTC",
   });
 }
 
 export default function VacationDetailModal({
   open, vacationId, role, userId, onClose, onChanged,
 }: Props) {
-  const [view, setView]   = useState<"detail" | ActionKind>("detail");
+  const [view, setView]   = useState<"detail" | "coverage" | ActionKind>("detail");
   const [note, setNote]   = useState("");
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,9 +130,11 @@ export default function VacationDetailModal({
 
   // Acciones disponibles según estado
   const availableActions: ActionKind[] = [];
+  const showApprovalPanel = !!v && v.status === "PENDING_SUPERVISOR" && canSupervisorAct;
+  const canChangeCoverage = !!v && (v.status === "APPROVED" || v.status === "PENDING_RRHH") && canSupervisorAct;
   if (v) {
-    if (v.status === "PENDING_SUPERVISOR" && canSupervisorAct) {
-      availableActions.push("supervisor-approve", "supervisor-reject");
+    if (v.status === "APPROVED" && canSupervisorAct) {
+      availableActions.push("undo-approval");
     }
     if (v.status === "PENDING_RRHH" && canRrhhAct) {
       availableActions.push("rrhh-approve", "rrhh-reject");
@@ -143,7 +148,7 @@ export default function VacationDetailModal({
   }
 
   // Nota obligatoria para cancelación de APPROVED
-  const currentAction = view !== "detail" ? ACTIONS[view] : null;
+  const currentAction = view !== "detail" && view !== "coverage" ? ACTIONS[view] : null;
   const effectiveNoteRequired = currentAction
     ? (currentAction.endpoint === "cancel" && v?.status === "APPROVED"
         ? true
@@ -206,6 +211,18 @@ export default function VacationDetailModal({
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
         </div>
+      ) : view === "coverage" ? (
+        <div className="space-y-4">
+          <button type="button" onClick={cancelAction}
+            className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800">
+            <ArrowLeft className="w-3.5 h-3.5" />Volver al detalle
+          </button>
+          <ChangeCoveragePanel
+            vacation={v}
+            onBack={cancelAction}
+            onDone={async () => { await refetch(); onChanged(); setView("detail"); }}
+          />
+        </div>
       ) : view !== "detail" && currentAction ? (
         // ============================================================
         // PASO DE ACCIÓN INLINE (sin abrir un segundo modal)
@@ -231,6 +248,13 @@ export default function VacationDetailModal({
             {currentAction.endpoint === "cancel" && v.status === "APPROVED" && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-2">
                 ⚠ Esta solicitud ya está APROBADA. La cancelación es excepcional y queda auditada.
+                Devuelve los días al saldo y libera la cobertura.
+              </p>
+            )}
+            {currentAction.endpoint === "undo-approval" && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-2">
+                Vuelve a &quot;solicitada&quot;: devuelve los días a los mismos años y libera la cobertura.
+                Para rechazarla, después de deshacer usá Rechazar.
               </p>
             )}
           </div>
@@ -307,6 +331,16 @@ export default function VacationDetailModal({
                 <AlertTriangle className="w-3.5 h-3.5" />Conflicto
               </span>
             )}
+            {v.approvedWithWarnings && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-300">
+                <AlertTriangle className="w-3.5 h-3.5" />Aprobada con advertencias
+              </span>
+            )}
+            {v.withoutCoverage && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border bg-red-50 text-red-700 border-red-200">
+                <Users className="w-3.5 h-3.5" />Sin cobertura
+              </span>
+            )}
           </div>
 
           {/* Datos en grilla */}
@@ -326,6 +360,26 @@ export default function VacationDetailModal({
               {v.rrhhNote && (
                 <NoteBlock label="Nota de RRHH" value={v.rrhhNote} actor={v.rrhhActionBy?.name} />
               )}
+            </div>
+          )}
+
+          {/* Cobertura vinculada */}
+          {(() => {
+            const cov = v.coverages?.find((c: any) => c.status === "ACTIVE");
+            return cov ? (
+              <p className="text-xs text-gray-700 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-gray-400" />
+                Cubre: <b>{cov.employee.firstName} {cov.employee.lastName}</b>
+                {cov.notes && <span className="text-gray-500">({cov.notes})</span>}
+              </p>
+            ) : null;
+          })()}
+
+          {/* Advertencias confirmadas con "Aprobar igual" */}
+          {v.approvalWarnings?.warnings?.length > 0 && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs text-amber-800 space-y-1">
+              <p className="font-medium">Aprobada igual con estas advertencias:</p>
+              {v.approvalWarnings.warnings.map((w: string, i: number) => <p key={i}>• {w}</p>)}
             </div>
           )}
 
@@ -350,9 +404,24 @@ export default function VacationDetailModal({
             />
           </div>
 
+          {/* Panel de aprobación de supervisión */}
+          {showApprovalPanel && (
+            <ApprovalPanel
+              vacation={v}
+              onApproved={async () => { await refetch(); onChanged(); }}
+              onReject={() => startAction("supervisor-reject")}
+            />
+          )}
+
           {/* Acciones */}
-          {availableActions.length > 0 && (
+          {(availableActions.length > 0 || canChangeCoverage) && (
             <div className="border-t border-gray-100 pt-4 flex flex-wrap gap-2 justify-end">
+              {canChangeCoverage && (
+                <button onClick={() => { setView("coverage"); setError(null); }}
+                  className="btn-secondary text-xs py-1.5 px-3">
+                  <Users className="w-3.5 h-3.5" />Cambiar cobertura
+                </button>
+              )}
               {availableActions.map((kind) => {
                 const a = ACTIONS[kind];
                 return (
@@ -366,7 +435,9 @@ export default function VacationDetailModal({
                     )}
                   >
                     {a.variant === "approve" && <CheckCircle2 className="w-3.5 h-3.5" />}
-                    {a.variant === "reject"  && <XCircle      className="w-3.5 h-3.5" />}
+                    {a.variant === "reject"  && (kind === "undo-approval"
+                      ? <Undo2 className="w-3.5 h-3.5" />
+                      : <XCircle className="w-3.5 h-3.5" />)}
                     {a.variant === "cancel"  && <Ban          className="w-3.5 h-3.5" />}
                     {a.label}
                   </button>

@@ -1,4 +1,5 @@
 "use client";
+import { typeAllowsReasonDetail } from "@/lib/absences";
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,7 +24,7 @@ function ClockIcon(props: any) {
 const ABSENCE_TYPES: Record<string, string> = {
   SICKNESS: "Enfermedad", PERSONAL_REASON: "Razón personal",
   NO_SHOW: "No se presentó", LATE_NOTICE: "Aviso tarde",
-  MEDICAL_LEAVE: "Licencia médica", SPECIAL_LEAVE: "Licencia especial",
+  MEDICAL_LEAVE: "Licencia médica", MATERNITY_LEAVE: "Licencia por maternidad", SPECIAL_LEAVE: "Licencia especial",
   SUSPENSION: "Suspensión", OTHER: "Otro",
 };
 
@@ -145,8 +146,10 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
 
       {expanded && (
         <div className="px-4 pb-3 border-t border-gray-100 pt-3 bg-gray-50/50 space-y-2">
-          {a.reasonDetail && <p className="text-xs text-gray-600">Motivo: {a.reasonDetail}</p>}
-          {a.notes && <p className="text-xs text-gray-600 italic">{a.notes}</p>}
+          {a.reasonDetail && typeAllowsReasonDetail(a.absenceType) && (
+            <p className="text-xs text-gray-600">Observaciones: {a.reasonDetail}</p>
+          )}
+          {a.notes && <p className="text-xs text-gray-600 italic">Notas internas: {a.notes}</p>}
           {a.hasCertificate && <p className="text-xs text-blue-600 font-medium">Con certificado</p>}
           {canJustify && a.status !== "CLOSED" && (
             <div className="flex flex-wrap gap-2 pt-1">

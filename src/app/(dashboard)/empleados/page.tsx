@@ -1,10 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   Plus, Search, Users, CheckCircle2, XCircle,
@@ -13,6 +10,9 @@ import {
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
+import EmployeeForm from "./EmployeeForm";
+
+const PAGE_SIZE = 50;
 
 function ClockIcon(props: any) {
   return (
@@ -30,18 +30,6 @@ const STATUS_HOY: Record<string, { label: string; color: string; icon: any }> = 
   ON_LEAVE: { label: "Licencia",  color: "text-blue-700 bg-blue-50",    icon: ClockIcon    },
   // Vacaciones se agregará cuando exista VacationRequest
 };
-
-const createSchema = z.object({
-  firstName:         z.string().min(1, "Nombre obligatorio"),
-  lastName:          z.string().min(1, "Apellido obligatorio"),
-  positionId:        z.string().min(1, "Puesto obligatorio"),
-  currentBranchId:   z.string().optional().nullable(),
-  hireDate:          z.string().optional(),
-  workScheduleNotes: z.string().optional(),
-  notes:             z.string().optional(),
-  isRotating:        z.boolean().default(false),
-});
-type CreateForm = z.infer<typeof createSchema>;
 
 async function fetchBranches() {
   const res = await fetch("/api/branches");
@@ -65,10 +53,16 @@ export default function EmpleadosPage() {
 
   const [showForm,     setShowForm]     = useState(false);
   const [search,       setSearch]       = useState("");
-  const [branchFilter, setBranchFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");   // sucursal donde trabaja
+  const [contractFilter, setContractFilter] = useState(""); // sucursal de contrato
   const [posFilter,    setPosFilter]    = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [scopeWarn,    setScopeWarn]    = useState<string | null>(null);
+  const [page,         setPage]         = useState(1);
+  // Cualquier cambio de filtro vuelve a la página 1.
+  const filterKey = JSON.stringify([search, branchFilter, contractFilter, posFilter, showInactive]);
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (filterKey !== lastFilterKey) { setLastFilterKey(filterKey); setPage(1); }
 
   const sessionReady    = status === "authenticated";
   const isOwner         = role === "OWNER";
@@ -76,10 +70,11 @@ export default function EmpleadosPage() {
   const canCreate       = role ? can.manageEmployees(role) : false;
 
   const { data: empData, isLoading: empLoading, error: empError } = useQuery({
-    queryKey: ["employees", { search, branchFilter, posFilter, showInactive, role, userBranchId }],
+    queryKey: ["employees", { search, branchFilter, contractFilter, posFilter, showInactive, role, userBranchId, page }],
     queryFn: async () => {
       const p = new URLSearchParams({
-        limit: "50",
+        limit: String(PAGE_SIZE),
+        page:  String(page),
         withStatus: "true",
         ...(search       && { search }),
         ...(showInactive ? { active: "any" } : {}),
@@ -89,6 +84,7 @@ export default function EmpleadosPage() {
           : branchFilter
           ? { branchId: branchFilter }
           : {}),
+        ...(contractFilter && !isBranchManager && { contractBranchId: contractFilter }),
         ...(posFilter && { positionId: posFilter }),
       });
       const res = await fetch(`/api/employees?${p}`);
@@ -98,6 +94,7 @@ export default function EmpleadosPage() {
     },
     enabled: sessionReady,
     staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 
   const { data: branchRes, isLoading: branchLoading, error: branchError } = useQuery({
@@ -125,28 +122,6 @@ export default function EmpleadosPage() {
     licencia: employees.filter((e: any) => e.statusHoy === "ON_LEAVE").length,
   };
   const totalFuera = fueraHoy.ausente + fueraHoy.licencia;
-
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateForm>({
-    resolver: zodResolver(createSchema),
-  });
-
-  const createMut = useMutation({
-    mutationFn: async (data: CreateForm) => {
-      const res = await fetch("/api/employees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Error al crear empleado");
-      return json;
-    },
-    onSuccess: (json) => {
-      qc.invalidateQueries({ queryKey: ["employees"] });
-      if (json.warning) setScopeWarn(json.warning);
-      reset(); setShowForm(false);
-    },
-  });
 
   if (status === "loading") {
     return <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="card p-4 h-16 animate-pulse bg-gray-50" />)}</div>;
@@ -226,72 +201,20 @@ export default function EmpleadosPage() {
               <p className="text-xs text-amber-800">
                 {positions.length === 0 && "No hay puestos. "}
                 {branches.length === 0 && "No hay sucursales. "}
-                Ejecuta npm run db:seed.
               </p>
             </div>
           )}
-          <form onSubmit={handleSubmit(d => createMut.mutate(d))} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="label">Nombre *</label>
-                <input {...register("firstName")} className={cn("input", errors.firstName && "input-error")} placeholder="Nombre" />
-                {errors.firstName && <p className="error-msg">{errors.firstName.message}</p>}
-              </div>
-              <div>
-                <label className="label">Apellido *</label>
-                <input {...register("lastName")} className={cn("input", errors.lastName && "input-error")} placeholder="Apellido" />
-                {errors.lastName && <p className="error-msg">{errors.lastName.message}</p>}
-              </div>
-              <div>
-                <label className="label">Puesto *{posLoading && <span className="ml-1 text-xs text-gray-400">(cargando...)</span>}</label>
-                <select {...register("positionId")} className={cn("input", errors.positionId && "input-error")} disabled={posLoading}>
-                  <option value="">{posLoading ? "Cargando..." : "Selecciona un puesto"}</option>
-                  {positions.map((p: any) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}{p.requiresCoverage ? " (req. cobertura)" : ""}{p.isRotatingRole ? " ★" : ""}
-                    </option>
-                  ))}
-                </select>
-                {errors.positionId && <p className="error-msg">{errors.positionId.message}</p>}
-              </div>
-              {!isBranchManager && (
-                <div>
-                  <label className="label">Sucursal{branchLoading && <span className="ml-1 text-xs text-gray-400">(cargando...)</span>}</label>
-                  <select {...register("currentBranchId")} className="input" disabled={branchLoading}>
-                    <option value="">{branchLoading ? "Cargando..." : "Sin sucursal fija (rotativo)"}</option>
-                    {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-              )}
-              <div>
-                <label className="label">Fecha de ingreso</label>
-                <input type="date" {...register("hireDate")} className="input" />
-              </div>
-              <div>
-                <label className="label">Horario habitual</label>
-                <input {...register("workScheduleNotes")} className="input" placeholder="Ej: Lunes a viernes, turno manana" />
-              </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" {...register("isRotating")} id="isRot" className="rounded" />
-                <label htmlFor="isRot" className="text-sm text-gray-600 cursor-pointer">Personal rotativo</label>
-              </div>
-              <div className="sm:col-span-2">
-                <label className="label">Observaciones</label>
-                <textarea {...register("notes")} rows={2} className="input resize-none" />
-              </div>
-            </div>
-            {createMut.isError && (
-              <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
-                {(createMut.error as Error).message}
-              </p>
-            )}
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => { setShowForm(false); reset(); }} className="btn-secondary">Cancelar</button>
-              <button type="submit" disabled={createMut.isPending} className="btn-primary">
-                {createMut.isPending ? "Guardando..." : "Crear empleado"}
-              </button>
-            </div>
-          </form>
+          <EmployeeForm
+            branches={branches}
+            positions={positions}
+            lockBranchId={isBranchManager ? userBranchId : null}
+            onDone={(json) => {
+              qc.invalidateQueries({ queryKey: ["employees"] });
+              if (json.warning) setScopeWarn(json.warning);
+              setShowForm(false);
+            }}
+            onCancel={() => setShowForm(false)}
+          />
         </div>
       )}
 
@@ -304,7 +227,13 @@ export default function EmpleadosPage() {
         </div>
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
-            <option value="">Todas las sucursales</option>
+            <option value="">Trabaja en: todas</option>
+            {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+        {!isBranchManager && (
+          <select value={contractFilter} onChange={e => setContractFilter(e.target.value)} className="input w-auto">
+            <option value="">Contrato: todas</option>
             {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
@@ -336,7 +265,7 @@ export default function EmpleadosPage() {
           <Users className="w-8 h-8 text-gray-300 mx-auto mb-3" />
           <p className="text-sm text-gray-500 font-medium">No hay empleados</p>
           <p className="text-xs text-gray-400 mt-1">
-            {search || branchFilter || posFilter ? "Proba cambiando los filtros." : "Corre npm run db:seed."}
+            {search || branchFilter || contractFilter || posFilter ? "Proba cambiando los filtros." : "Corre npm run db:seed."}
           </p>
         </div>
       ) : (
@@ -348,6 +277,8 @@ export default function EmpleadosPage() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Empleado</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Puesto</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden sm:table-cell">Sucursal</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">DT</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Saldo vac.</th>
                   {/* Estado hoy — separado del estado laboral */}
                   <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Hoy</th>
                   {/* Estado laboral — activo/inactivo en nómina */}
@@ -364,8 +295,22 @@ export default function EmpleadosPage() {
             </table>
           </div>
           {empData?.meta && (
-            <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-400">
-              {empData.meta.total} empleados · Página {empData.meta.page} de {empData.meta.pages}
+            <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-500 flex items-center justify-between gap-2">
+              <span>
+                {empData.meta.total} empleados · Página {empData.meta.page} de {Math.max(1, empData.meta.pages)}
+              </span>
+              {empData.meta.pages > 1 && (
+                <span className="flex items-center gap-1">
+                  <button onClick={() => setPage(1)} disabled={page <= 1}
+                    className="btn-secondary text-xs py-1 px-2 disabled:opacity-40">«</button>
+                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+                    className="btn-secondary text-xs py-1 px-2 disabled:opacity-40">Anterior</button>
+                  <button onClick={() => setPage((p) => Math.min(empData.meta.pages, p + 1))} disabled={page >= empData.meta.pages}
+                    className="btn-secondary text-xs py-1 px-2 disabled:opacity-40">Siguiente</button>
+                  <button onClick={() => setPage(empData.meta.pages)} disabled={page >= empData.meta.pages}
+                    className="btn-secondary text-xs py-1 px-2 disabled:opacity-40">»</button>
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -418,10 +363,26 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
           {emp.position?.requiresCoverage && (
             <span className="ml-1.5 text-[10px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">cob</span>
           )}
+          {emp.secondaryPosition && (
+            <p className="text-xs text-gray-400">+ {emp.secondaryPosition.name}</p>
+          )}
         </td>
         <td className="px-4 py-3 text-sm text-gray-600 hidden sm:table-cell">
           {emp.currentBranch?.name ?? <span className="text-gray-400 italic text-xs">Sin sucursal fija</span>}
           {emp.zone && <span className="ml-1 text-xs text-gray-400">· {emp.zone}</span>}
+          {emp.contractBranch && emp.contractBranch.id !== emp.currentBranch?.id && (
+            <p className="text-xs text-gray-400">Contrato: {emp.contractBranch.name}</p>
+          )}
+        </td>
+        <td className="px-4 py-3 text-center hidden md:table-cell">
+          {emp.isTechnicalDirector
+            ? <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-medium">DT</span>
+            : <span className="text-gray-300">—</span>}
+        </td>
+        <td className="px-4 py-3 text-right hidden md:table-cell tabular-nums">
+          {emp.vacationBalanceTotal === null
+            ? <span className="text-gray-300">—</span>
+            : <span className={cn(emp.vacationBalanceTotal < 0 ? "text-red-700" : "text-gray-800")}>{emp.vacationBalanceTotal} d</span>}
         </td>
 
         {/* Estado hoy — qué está haciendo */}
@@ -444,7 +405,7 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
       </tr>
       {expanded && (
         <tr className="bg-gray-50/70">
-          <td colSpan={6} className="px-4 py-3">
+          <td colSpan={8} className="px-4 py-3">
             <div className="flex flex-wrap gap-2 items-center">
               {emp.notes && <p className="text-xs text-gray-500 italic w-full">{emp.notes}</p>}
               {emp.workScheduleNotes && <p className="text-xs text-gray-400 w-full">Horario: {emp.workScheduleNotes}</p>}

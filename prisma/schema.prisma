@@ -74,6 +74,7 @@ enum AbsenceType {
   LATE_ARRIVAL
   MEDICAL_LEAVE
   SPECIAL_LEAVE
+  MATERNITY_LEAVE
   SUSPENSION
   OTHER
 }
@@ -128,12 +129,17 @@ model Branch {
   active    Boolean  @default(true)
   showInExecutive Boolean @default(true)
   showInOperative Boolean @default(true)
+  // Zona operativa ("CABA" | "San Miguel") para proponer rotativos de
+  // cobertura. Null = sin definir (los rotativos se muestran igual).
+  zone      String?
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   users                User[]
-  employees            Employee[]
+  employees            Employee[] @relation("EmployeeCurrentBranch")
+  contractEmployees    Employee[] @relation("EmployeeContractBranch")
+  scheduleSlots        WorkScheduleSlot[]
   branchAssignments    EmployeeBranchAssignment[]
   positionScopes       PositionBranchScope[]
   absenceRecords       AbsenceRecord[]
@@ -170,7 +176,8 @@ model Position {
   updatedAt        DateTime      @updatedAt
 
   branchScopes        PositionBranchScope[]
-  employees           Employee[]
+  employees           Employee[] @relation("EmployeePosition")
+  secondaryEmployees  Employee[] @relation("EmployeeSecondaryPosition")
   branchAssignments   EmployeeBranchAssignment[]  // posición cubierta en asignaciones de rotativos
   permissions         PositionPermission[]
   vacationRequests    VacationRequest[]
@@ -193,20 +200,39 @@ model PositionBranchScope {
 
 // ---------------------------------------------------------------------------
 // EMPLOYEE
+//
+// currentBranchId  = sucursal DONDE TRABAJA (horarios, coberturas, aprobación
+//                    de vacaciones, alcance de encargados).
+// contractBranchId = sucursal de CONTRATO (planillas de RRHH). Puede diferir.
+// nameKey          = "apellido, nombre" normalizado (minúsculas, sin tildes
+//                    ni espacios dobles). Con contractBranchId identifica a la
+//                    persona en la carga (scripts/load-personal.ts). Null en
+//                    los empleados anteriores a la carga.
+// isTechnicalDirector es una marca, no un puesto (un DT puede ser encargado/a).
+// weeklyHours: horas semanales declaradas. Para rotativos sin horario fijo es
+//              el único dato; para el resto las horas salen de WorkSchedule.
 // ---------------------------------------------------------------------------
 model Employee {
   id              String    @id @default(cuid())
   firstName       String
   lastName        String
+  nameKey         String?
   positionId      String
-  position        Position  @relation(fields: [positionId], references: [id])
+  position        Position  @relation("EmployeePosition", fields: [positionId], references: [id])
+  secondaryPositionId String?
+  secondaryPosition   Position? @relation("EmployeeSecondaryPosition", fields: [secondaryPositionId], references: [id])
+  isTechnicalDirector Boolean   @default(false)
   currentBranchId String?
-  currentBranch   Branch?   @relation(fields: [currentBranchId], references: [id])
+  currentBranch   Branch?   @relation("EmployeeCurrentBranch", fields: [currentBranchId], references: [id])
+  contractBranchId String?
+  contractBranch   Branch?  @relation("EmployeeContractBranch", fields: [contractBranchId], references: [id])
   active          Boolean   @default(true)
   hireDate        DateTime?
   isRotating               Boolean @default(false)
   zone                     String?
   maxConcurrentAssignments Int     @default(1)
+  weeklyHours       Decimal? @db.Decimal(4, 1)
+  extraTasks        String?
   workScheduleNotes String?
   notes             String?
   userId            String? @unique
@@ -219,12 +245,116 @@ model Employee {
   overtimeRecords   OvertimeRecord[]
   vacationRequests  VacationRequest[]
   timeEvents        TimeEvent[]
+  workSchedules     WorkSchedule[]
+  vacationBalances  VacationBalance[]
+  vacationBalanceMovements VacationBalanceMovement[]
 
+  @@unique([nameKey, contractBranchId])
   @@index([currentBranchId])
+  @@index([contractBranchId])
   @@index([positionId])
+  @@index([secondaryPositionId])
   @@index([active])
   @@index([isRotating])
   @@index([lastName, firstName])
+}
+
+// ---------------------------------------------------------------------------
+// WORK SCHEDULE — horario semanal con vigencia.
+//
+// Un horario rige desde validFrom hasta el validFrom del siguiente de la misma
+// persona. Si cambia se crea uno nuevo: el anterior no se pisa.
+//
+// Semanas alternadas: con abReferenceDate cargada, la semana (lunes a domingo)
+// que la contiene es "A", la siguiente "B", y así. Los tramos week=ALL valen
+// todas las semanas; los A/B solo en la suya.
+//
+// Tramos: hasta 2 por día (horario cortado). Día sin tramos = franco. Cada
+// tramo es en una sucursal (branchId) o en otro lugar (otherPlace, texto).
+// Horas en minutos desde las 00:00. Los rotativos sin horario fijo no tienen
+// WorkSchedule: solo Employee.weeklyHours.
+// ---------------------------------------------------------------------------
+enum ScheduleWeek {
+  ALL
+  A
+  B
+}
+
+model WorkSchedule {
+  id              String    @id @default(cuid())
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id])
+  validFrom       DateTime  @db.Date
+  abReferenceDate DateTime? @db.Date
+  createdAt       DateTime  @default(now())
+
+  slots WorkScheduleSlot[]
+
+  @@unique([employeeId, validFrom])
+}
+
+model WorkScheduleSlot {
+  id          String       @id @default(cuid())
+  scheduleId  String
+  schedule    WorkSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  week        ScheduleWeek @default(ALL)
+  dayOfWeek   Int // 1 = lunes … 7 = domingo
+  slot        Int // 1 | 2
+  startMinute Int
+  endMinute   Int
+  branchId    String?
+  branch      Branch?      @relation(fields: [branchId], references: [id])
+  otherPlace  String?
+
+  @@unique([scheduleId, week, dayOfWeek, slot])
+  @@index([branchId])
+}
+
+// ---------------------------------------------------------------------------
+// VACATION BALANCE — saldo de vacaciones por persona y año, en días corridos.
+//
+// days = días que QUEDAN sin tomar de ese período. Sin tope. Se consume del
+// año más viejo primero; si la solicitud supera el saldo, el excedente queda
+// en negativo en el último año (ver src/lib/personal/balance.ts).
+//
+// Cada cambio queda en VacationBalanceMovement (days con signo: negativo =
+// consumo). Lo que devuelve una cancelación/deshacer sale de los movimientos
+// de esa solicitud, así los días vuelven a los mismos años.
+// ---------------------------------------------------------------------------
+enum VacationBalanceMovementType {
+  LOAD        // carga inicial desde planilla
+  LOAD_ADJUST // la planilla cambió el saldo de un año ya cargado
+  CONSUME     // aprobación final de una solicitud
+  REFUND      // cancelación, rechazo o deshacer de una solicitud aprobada
+}
+
+model VacationBalance {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  year       Int
+  days       Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, year])
+}
+
+model VacationBalanceMovement {
+  id                String                      @id @default(cuid())
+  employeeId        String
+  employee          Employee                    @relation(fields: [employeeId], references: [id])
+  year              Int
+  days              Int
+  type              VacationBalanceMovementType
+  vacationRequestId String?
+  vacationRequest   VacationRequest?            @relation(fields: [vacationRequestId], references: [id])
+  userId            String? // snapshot sin FK; null = carga por script
+  note              String?
+  createdAt         DateTime                    @default(now())
+
+  @@index([employeeId, year])
+  @@index([vacationRequestId])
 }
 
 // ---------------------------------------------------------------------------
@@ -259,9 +389,19 @@ model EmployeeBranchAssignment {
   assignedByUserId String?
   notes            String?
 
+  // Cobertura vinculada a una solicitud de vacaciones (adenda D). Una sola
+  // ACTIVE por solicitud; al deshacer/cancelar/rechazar pasa a CANCELLED.
+  // coverageSlots: tramos a cubrir (los de quien se va, ya resueltos por fecha
+  // con sus semanas A/B), JSON [{ date: "YYYY-MM-DD", startMinute, endMinute,
+  // branchId }]. Null = todo el día (coberturas creadas desde rotativas).
+  vacationRequestId String?
+  vacationRequest   VacationRequest? @relation(fields: [vacationRequestId], references: [id])
+  coverageSlots     Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([vacationRequestId])
   @@index([employeeId, status])
   @@index([branchId, status])
   @@index([type, status, endDate])
@@ -856,7 +996,10 @@ model UserPermission {
 // ============================================================================
 // VACACIONES
 //
-// Flujo: Encargado solicita → Supervisor aprueba → RRHH confirma → APPROVED.
+// Flujo: Encargado solicita → Supervisor aprueba → APPROVED (descuenta saldo).
+// El paso de RRHH (PENDING_RRHH, rrhh-approve/reject) queda desactivado salvo
+// VACATIONS_RRHH_STEP=true (src/lib/vacations/config.ts); con él activo el
+// circuito vuelve a ser Supervisor → RRHH → APPROVED.
 // Rechazos (de supervisor o RRHH) caen a REJECTED — el motivo y el actor
 // quedan en VacationStateHistory + AuditLog.
 //
@@ -929,10 +1072,18 @@ model VacationRequest {
   conflictLevel   VacationConflictLevel @default(NONE)
   conflictReasons Json?
 
+  // Aprobación con advertencias ("Aprobar igual"): qué se confirmó.
+  approvedWithWarnings Boolean @default(false)
+  approvalWarnings     Json?
+  // Aprobada sin rotativo en un puesto que se cubre con rotativos.
+  withoutCoverage      Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stateHistory VacationStateHistory[]
+  stateHistory     VacationStateHistory[]
+  coverages        EmployeeBranchAssignment[]
+  balanceMovements VacationBalanceMovement[]
 
   @@index([employeeId])
   @@index([branchId])

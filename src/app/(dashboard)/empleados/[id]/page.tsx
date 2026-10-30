@@ -34,7 +34,9 @@ export default async function EmpleadoDetailPage({
       where: { id: params.id },
       include: {
         position:      { select: { id: true, name: true, requiresCoverage: true } },
+        secondaryPosition: { select: { id: true, name: true } },
         currentBranch: { select: { id: true, name: true } },
+        contractBranch: { select: { id: true, name: true } },
       },
     }),
     prisma.absenceRecord.findMany({
@@ -91,7 +93,12 @@ export default async function EmpleadoDetailPage({
     notes:             employee.notes ?? null,
     currentBranchId:   employee.currentBranchId ?? null,
     currentBranch:     employee.currentBranch ?? null,
+    contractBranch:    employee.contractBranch ?? null,
     position:          employee.position ?? null,
+    secondaryPosition: employee.secondaryPosition ?? null,
+    isTechnicalDirector: employee.isTechnicalDirector,
+    weeklyHours:       employee.weeklyHours === null ? null : Number(employee.weeklyHours),
+    extraTasks:        employee.extraTasks ?? null,
   };
 
   const activeAbsencesData = activeAbsences.map(a => ({

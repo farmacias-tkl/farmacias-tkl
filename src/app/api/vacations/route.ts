@@ -1,6 +1,10 @@
 /**
  * GET  /api/vacations — listado con filtros
- * POST /api/vacations — crear solicitud (valida reglas, rechaza si BLOCKING)
+ * POST /api/vacations — crear solicitud (valida reglas, rechaza si BLOCKING;
+ *                        las advertencias no bloquean)
+ *
+ * GET filtros extra: withoutCoverage=true (aprobadas sin rotativo),
+ *                    withWarnings=true (aprobadas con "Aprobar igual").
  *
  * BRANCH_MANAGER: forzado a su sucursal en backend.
  */
@@ -33,6 +37,8 @@ export async function GET(req: NextRequest) {
   const to          = sp.get("to");    // YYYY-MM-DD (inclusive)
   const q           = sp.get("q");     // búsqueda por nombre snapshot
   const pendingOnly = sp.get("pendingOnly") === "true";
+  const withoutCoverage = sp.get("withoutCoverage") === "true"; // aprobadas sin rotativo
+  const withWarnings    = sp.get("withWarnings") === "true";    // aprobadas con "Aprobar igual"
   const page        = Math.max(1, parseInt(sp.get("page") ?? "1"));
   const limit       = Math.min(200, parseInt(sp.get("limit") ?? "50"));
 
@@ -54,6 +60,8 @@ export async function GET(req: NextRequest) {
   if (pendingOnly) {
     where.status = { in: ["PENDING_SUPERVISOR", "PENDING_RRHH"] };
   }
+  if (withoutCoverage) where.withoutCoverage = true;
+  if (withWarnings)    where.approvedWithWarnings = true;
 
   if (month) {
     const [y, m] = month.split("-").map(Number);
@@ -91,6 +99,10 @@ export async function GET(req: NextRequest) {
         requestedBy:        { select: { id: true, name: true } },
         supervisorActionBy: { select: { id: true, name: true } },
         rrhhActionBy:       { select: { id: true, name: true } },
+        coverages: {
+          where:  { status: "ACTIVE" },
+          select: { id: true, employee: { select: { id: true, firstName: true, lastName: true } } },
+        },
       },
       orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
       skip: (page - 1) * limit,

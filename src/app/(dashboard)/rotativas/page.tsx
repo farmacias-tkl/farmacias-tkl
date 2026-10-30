@@ -360,6 +360,12 @@ function AssignmentCard({ assignment: a, canManage, onCancel, onComplete }: {
                 Ausente hoy
               </span>
             )}
+            {a.vacationRequest && (
+              <span className="text-xs font-medium text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded"
+                    title="Cobertura vinculada a una solicitud de vacaciones">
+                Cubre vacaciones de {a.vacationRequest.employeeNameSnapshot}
+              </span>
+            )}
             {a.isActiveToday && !a.employeeAbsentToday && a.status === "ACTIVE" && (
               <span className="text-xs font-medium text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded">
                 En sucursal hoy

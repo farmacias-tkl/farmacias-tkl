@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const ABSENCE_TYPE_LABELS: Record<string, string> = {
   SICKNESS: "Enfermedad", PERSONAL_REASON: "Razón personal",
   NO_SHOW: "No se presentó", LATE_NOTICE: "Aviso tarde",
-  MEDICAL_LEAVE: "Licencia médica", SPECIAL_LEAVE: "Licencia especial",
+  MEDICAL_LEAVE: "Licencia médica", MATERNITY_LEAVE: "Licencia por maternidad", SPECIAL_LEAVE: "Licencia especial",
   SUSPENSION: "Suspensión", OTHER: "Otro",
 };
 

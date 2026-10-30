@@ -8,6 +8,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireCan } from "@/lib/permissions";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
+import { releaseOnExit } from "@/lib/vacations/actions";
 
 const schema = z.object({ note: z.string().min(1, "Motivo obligatorio") });
 
@@ -36,8 +38,8 @@ export async function POST(
   const note = parsed.data.note;
 
   const updated = await prisma.$transaction(async (tx) => {
-    const u = await tx.vacationRequest.update({
-      where: { id: params.id },
+    const cas = await tx.vacationRequest.updateMany({
+      where: { id: params.id, status: "PENDING_RRHH" },
       data: {
         status: "REJECTED",
         rrhhActionByUserId: session!.user.id,
@@ -45,6 +47,8 @@ export async function POST(
         rrhhNote: note,
       },
     });
+    if (cas.count !== 1) throw new StaleStatusError();
+    const u = await tx.vacationRequest.findUniqueOrThrow({ where: { id: params.id } });
     await tx.vacationStateHistory.create({
       data: {
         vacationId:      params.id,
@@ -54,17 +58,29 @@ export async function POST(
         note,
       },
     });
+    // Libera la cobertura elegida por supervisión (el saldo todavía no se descontó).
+    const exit = await releaseOnExit(tx, vacation, session!.user.id, note);
     await tx.auditLog.create({
       data: {
         userId:   session!.user.id,
         action:   "VACATION_RRHH_REJECTED",
         entity:   "VacationRequest",
         entityId: params.id,
-        detail: { note },
+        detail: { note, refunds: exit.refunds, coveragesReleased: exit.released } as unknown as Prisma.InputJsonValue,
       },
     });
     return u;
+  }).catch((e) => {
+    if (e instanceof StaleStatusError) return null;
+    throw e;
   });
 
+  if (!updated) {
+    return NextResponse.json({ error: "La solicitud cambió de estado; recargá y volvé a intentar" }, { status: 409 });
+  }
   return NextResponse.json({ data: updated });
 }
+
+// La solicitud cambió de estado entre la lectura y la escritura (otra acción ganó).
+class StaleStatusError extends Error {}
+

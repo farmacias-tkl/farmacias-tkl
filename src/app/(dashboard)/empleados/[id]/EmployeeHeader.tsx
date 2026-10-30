@@ -25,7 +25,12 @@ export interface SerializedEmployee {
   notes: string | null;
   currentBranchId: string | null;
   currentBranch: { id: string; name: string } | null;
+  contractBranch: { id: string; name: string } | null;
   position: { id: string; name: string; requiresCoverage: boolean } | null;
+  secondaryPosition: { id: string; name: string } | null;
+  isTechnicalDirector: boolean;
+  weeklyHours: number | null;
+  extraTasks: string | null;
 }
 
 interface Props {
@@ -47,10 +52,10 @@ function seniority(iso: string): string {
 export default function EmployeeHeader({ employee: e, activeAbsences, overdueCount }: Props) {
   const hasSuspension = activeAbsences.some(a => a.absenceType === "SUSPENSION");
   const hasLicense    = activeAbsences.some(a =>
-    ["MEDICAL_LEAVE", "SPECIAL_LEAVE"].includes(a.absenceType)
+    ["MEDICAL_LEAVE", "MATERNITY_LEAVE", "SPECIAL_LEAVE"].includes(a.absenceType)
   );
   const hasAbsence    = activeAbsences.some(a =>
-    !["SUSPENSION", "MEDICAL_LEAVE", "SPECIAL_LEAVE"].includes(a.absenceType)
+    !["SUSPENSION", "MEDICAL_LEAVE", "MATERNITY_LEAVE", "SPECIAL_LEAVE"].includes(a.absenceType)
   );
 
   return (
@@ -99,9 +104,18 @@ export default function EmployeeHeader({ employee: e, activeAbsences, overdueCou
                 )}
               </span>
             )}
+            {e.secondaryPosition && (
+              <span className="text-gray-500">+ {e.secondaryPosition.name}</span>
+            )}
+            {e.isTechnicalDirector && (
+              <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-medium">DT</span>
+            )}
             {e.currentBranch && (
               <span className="flex items-center gap-1">
                 <Building2 className="w-3 h-3" />{e.currentBranch.name}
+                {e.contractBranch && e.contractBranch.id !== e.currentBranch.id && (
+                  <span className="text-gray-400">· contrato {e.contractBranch.name}</span>
+                )}
               </span>
             )}
             {e.hireDate ? (

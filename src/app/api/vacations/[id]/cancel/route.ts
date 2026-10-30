@@ -16,6 +16,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
+import { releaseOnExit } from "@/lib/vacations/actions";
 
 const requiredNoteSchema = z.object({ note: z.string().min(1, "Motivo obligatorio") });
 const optionalNoteSchema = z.object({ note: z.string().optional() });
@@ -72,10 +74,12 @@ export async function POST(
 
   const fromStatus = vacation.status;
   const updated = await prisma.$transaction(async (tx) => {
-    const u = await tx.vacationRequest.update({
-      where: { id: params.id },
+    const cas = await tx.vacationRequest.updateMany({
+      where: { id: params.id, status: fromStatus },
       data: { status: "CANCELLED" },
     });
+    if (cas.count !== 1) throw new StaleStatusError();
+    const u = await tx.vacationRequest.findUniqueOrThrow({ where: { id: params.id } });
     await tx.vacationStateHistory.create({
       data: {
         vacationId:      params.id,
@@ -85,17 +89,29 @@ export async function POST(
         note,
       },
     });
+    // Devuelve el saldo (si estaba aprobada) a los mismos años y libera la cobertura.
+    const exit = await releaseOnExit(tx, vacation, session!.user.id, note ?? null);
     await tx.auditLog.create({
       data: {
         userId:   session!.user.id,
         action:   "VACATION_CANCELLED",
         entity:   "VacationRequest",
         entityId: params.id,
-        detail: { fromStatus, note: note ?? null },
+        detail: { fromStatus, note: note ?? null, refunds: exit.refunds, coveragesReleased: exit.released } as unknown as Prisma.InputJsonValue,
       },
     });
     return u;
+  }).catch((e) => {
+    if (e instanceof StaleStatusError) return null;
+    throw e;
   });
 
+  if (!updated) {
+    return NextResponse.json({ error: "La solicitud cambió de estado; recargá y volvé a intentar" }, { status: 409 });
+  }
   return NextResponse.json({ data: updated });
 }
+
+// La solicitud cambió de estado entre la lectura y la escritura (otra acción ganó).
+class StaleStatusError extends Error {}
+

@@ -9,9 +9,10 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
+import { typeAllowsReasonDetail } from "@/lib/absences";
 
 const ABSENCE_TYPES = ["SICKNESS","PERSONAL_REASON","NO_SHOW","LATE_NOTICE",
-  "LATE_ARRIVAL","MEDICAL_LEAVE","SPECIAL_LEAVE","SUSPENSION","OTHER"] as const;
+  "LATE_ARRIVAL","MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE","SUSPENSION","OTHER"] as const;
 
 const createSchema = z.object({
   employeeId:                   z.string().min(1),
@@ -163,6 +164,10 @@ export async function POST(req: NextRequest) {
   if (!branchRow) {
     return NextResponse.json({ error: "Sucursal no encontrada" }, { status: 404 });
   }
+
+  // Licencia médica / maternidad: nunca se guarda texto en reasonDetail
+  // (no hay lugar para diagnóstico ni motivo médico).
+  if (!typeAllowsReasonDetail(data.absenceType)) data.reasonDetail = null;
 
   const absence = await prisma.absenceRecord.create({
     data: {

@@ -82,14 +82,30 @@ export async function PATCH(
   if (parsed.data.endDate !== undefined) updates.endDate = parsed.data.endDate;
   if (parsed.data.reason !== undefined) updates.reason = parsed.data.reason;
 
-  const updated = await prisma.employeeBranchAssignment.update({
-    where: { id: params.id },
-    data:  updates,
-    include: {
-      employee: { select: { id: true, firstName: true, lastName: true } },
-      branch:   { select: { id: true, name: true } },
-      position: { select: { id: true, name: true } },
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.employeeBranchAssignment.update({
+      where: { id: params.id },
+      data:  updates,
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true } },
+        branch:   { select: { id: true, name: true } },
+        position: { select: { id: true, name: true } },
+      },
+    });
+    // Cobertura vinculada a vacaciones cancelada desde acá: la solicitud
+    // aprobada queda marcada "sin cobertura" (se puede volver a asignar
+    // desde el detalle de la solicitud).
+    if (
+      assignment.vacationRequestId &&
+      assignment.status === "ACTIVE" &&
+      updates.status === "CANCELLED"
+    ) {
+      await tx.vacationRequest.updateMany({
+        where: { id: assignment.vacationRequestId, status: { in: ["APPROVED", "PENDING_RRHH"] } },
+        data:  { withoutCoverage: true },
+      });
+    }
+    return u;
   });
 
   await prisma.auditLog.create({

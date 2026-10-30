@@ -30,6 +30,8 @@ export default function VacacionesPage() {
   const [statusFilter,setStatusFilter]= useState("");
   const [empFilter,   setEmpFilter]   = useState<{ id: string; label: string } | null>(null);
   const [pendingOnly, setPendingOnly] = useState(false);
+  // Marcas de aprobadas: sin cobertura / aprobadas con advertencias ("Aprobar igual")
+  const [flagFilter,  setFlagFilter]  = useState<"" | "withoutCoverage" | "withWarnings">("");
   // Mes visible del calendario; default hoy
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   // Modal de detalle
@@ -61,13 +63,14 @@ export default function VacacionesPage() {
 
   // Lista: filtros de la pestaña Lista
   const { data: listRes, isLoading: listLoading } = useQuery({
-    queryKey: ["vacations-list", { branch: effectiveBranchId, statusFilter, emp: empFilter?.id, pendingOnly }],
+    queryKey: ["vacations-list", { branch: effectiveBranchId, statusFilter, emp: empFilter?.id, pendingOnly, flagFilter }],
     queryFn: async () => {
       const p = new URLSearchParams({ limit: "100" });
       if (effectiveBranchId) p.set("branchId", effectiveBranchId);
       if (statusFilter)      p.set("status", statusFilter);
       if (empFilter?.id)     p.set("employeeId", empFilter.id);
       if (pendingOnly)       p.set("pendingOnly", "true");
+      if (flagFilter)        p.set(flagFilter, "true");
       const res = await fetch(`/api/vacations?${p}`);
       if (!res.ok) throw new Error("Error al cargar vacaciones");
       return res.json();
@@ -77,7 +80,7 @@ export default function VacacionesPage() {
 
   // Calendario: trae todo el rango de la grilla visible
   const { data: calRes, isLoading: calLoading } = useQuery({
-    queryKey: ["vacations-cal", { branch: effectiveBranchId, statusFilter, emp: empFilter?.id, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
+    queryKey: ["vacations-cal", { branch: effectiveBranchId, statusFilter, flagFilter, emp: empFilter?.id, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
     queryFn: async () => {
       const p = new URLSearchParams({
         limit: "200",
@@ -87,6 +90,7 @@ export default function VacacionesPage() {
       if (effectiveBranchId) p.set("branchId", effectiveBranchId);
       if (statusFilter)      p.set("status", statusFilter);
       if (empFilter?.id)     p.set("employeeId", empFilter.id);
+      if (flagFilter)        p.set(flagFilter, "true");
       const res = await fetch(`/api/vacations?${p}`);
       if (!res.ok) throw new Error("Error al cargar vacaciones");
       return res.json();
@@ -167,6 +171,11 @@ export default function VacacionesPage() {
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-auto">
           <option value="">Todos los estados</option>
           {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={flagFilter} onChange={e => setFlagFilter(e.target.value as typeof flagFilter)} className="input w-auto">
+          <option value="">Todas las marcas</option>
+          <option value="withoutCoverage">Aprobadas sin cobertura</option>
+          <option value="withWarnings">Aprobadas con advertencias</option>
         </select>
         {viewMode === "list" && (
           <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">

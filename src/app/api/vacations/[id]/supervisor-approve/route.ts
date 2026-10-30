@@ -1,16 +1,34 @@
 /**
  * POST /api/vacations/[id]/supervisor-approve
  *
- * PENDING_SUPERVISOR → PENDING_RRHH.
- * Permite que el supervisor agregue una nota (supervisorNote).
+ * Aprobación de supervisión = aprobación final (adenda B):
+ *   PENDING_SUPERVISOR → APPROVED y descuenta el saldo (año más viejo primero).
+ *   Con VACATIONS_RRHH_STEP=true: PENDING_SUPERVISOR → PENDING_RRHH (el saldo
+ *   se descuenta en rrhh-approve).
+ *
+ * Body:
+ *   note?               nota del supervisor
+ *   confirmWarnings?    "Aprobar igual": obligatorio si la validación tiene
+ *                       advertencias (si falta → 409 WARNINGS_REQUIRE_CONFIRMATION
+ *                       con la validación para mostrarla). Se registra.
+ *   rotativeEmployeeId? rotativo que cubre (null/ausente = ninguno → si el
+ *                       puesto se cubre con rotativos y la sucursal es de zona
+ *                       CABA, queda "sin cobertura"; en PROVINCIA no aplica).
+ *
+ * Lógica en src/lib/vacations/actions.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireCan } from "@/lib/permissions";
 import { z } from "zod";
+import { approveVacation } from "@/lib/vacations/actions";
 
-const schema = z.object({ note: z.string().optional() });
+const schema = z.object({
+  note:               z.string().optional(),
+  confirmWarnings:    z.boolean().optional(),
+  rotativeEmployeeId: z.string().min(1).nullable().optional(),
+});
 
 export async function POST(
   req: NextRequest,
@@ -20,49 +38,24 @@ export async function POST(
   const permErr = requireCan(can.approveVacation, session);
   if (permErr) return NextResponse.json({ error: permErr.error }, { status: permErr.status });
 
-  const vacation = await prisma.vacationRequest.findUnique({ where: { id: params.id } });
-  if (!vacation) return NextResponse.json({ error: "No encontrada" }, { status: 404 });
-  if (vacation.status !== "PENDING_SUPERVISOR") {
-    return NextResponse.json(
-      { error: `Solo se puede aprobar desde PENDING_SUPERVISOR (estado actual: ${vacation.status})` },
-      { status: 409 },
-    );
-  }
-
   const body = await req.json().catch(() => ({}));
   const parsed = schema.safeParse(body);
-  const note = parsed.success ? parsed.data.note : undefined;
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Datos invalidos", details: parsed.error.flatten() }, { status: 400 });
+  }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const u = await tx.vacationRequest.update({
-      where: { id: params.id },
-      data: {
-        status: "PENDING_RRHH",
-        supervisorActionByUserId: session!.user.id,
-        supervisorActionAt: new Date(),
-        ...(note !== undefined && { supervisorNote: note }),
-      },
-    });
-    await tx.vacationStateHistory.create({
-      data: {
-        vacationId:      params.id,
-        fromStatus:      "PENDING_SUPERVISOR",
-        toStatus:        "PENDING_RRHH",
-        changedByUserId: session!.user.id,
-        note,
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId:   session!.user.id,
-        action:   "VACATION_SUPERVISOR_APPROVED",
-        entity:   "VacationRequest",
-        entityId: params.id,
-        detail: { note: note ?? null },
-      },
-    });
-    return u;
+  const result = await approveVacation(prisma, {
+    id: params.id,
+    userId: session!.user.id,
+    note: parsed.data.note,
+    confirmWarnings: parsed.data.confirmWarnings,
+    rotativeEmployeeId: parsed.data.rotativeEmployeeId ?? null,
   });
-
-  return NextResponse.json({ data: updated });
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: result.error, code: result.code, validation: result.validation },
+      { status: result.status },
+    );
+  }
+  return NextResponse.json({ data: result.data });
 }

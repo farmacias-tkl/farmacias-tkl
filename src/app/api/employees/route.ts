@@ -17,6 +17,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { getPlantillaReal } from "@/lib/plantilla";
+import {
+  DUPLICATE_PERSON_ERROR, checkPersonalRefs, isDuplicatePerson, nameKeyFor, personalFieldsSchema,
+} from "@/lib/personal/employee-fields";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -33,6 +36,7 @@ const createSchema = z.object({
   assignmentStartDate:      z.string().optional().transform(d => d ? new Date(d) : new Date()),
   assignmentType:           z.enum(["PERMANENT","TEMPORARY_COVERAGE","ROTATION"]).default("PERMANENT"),
   assignmentReason:         z.string().optional(),
+  ...personalFieldsSchema,
 });
 
 export async function GET(req: NextRequest) {
@@ -75,7 +79,8 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Modo normal: lista con filtros ────────────────────────────────────────
-  const branchId   = sp.get("branchId");
+  const branchId   = sp.get("branchId");          // sucursal donde trabaja
+  const contractId = sp.get("contractBranchId");  // sucursal de contrato
   const posId      = sp.get("positionId");
   const activeP    = sp.get("active");
   const rotating   = sp.get("isRotating");
@@ -92,6 +97,7 @@ export async function GET(req: NextRequest) {
   else if (activeP !== "any") where.active = true;
   if (forcedBranch)  where.currentBranchId = forcedBranch;
   else if (branchId) where.currentBranchId = branchId;
+  if (contractId)        where.contractBranchId = contractId;
   if (posId)             where.positionId  = posId;
   if (rotating === "true") where.isRotating = true;
   if (search) {
@@ -106,7 +112,10 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         position:      { select: { id: true, name: true, requiresCoverage: true, isRotatingRole: true } },
+        secondaryPosition: { select: { id: true, name: true } },
         currentBranch: { select: { id: true, name: true } },
+        contractBranch: { select: { id: true, name: true } },
+        vacationBalances: { select: { days: true } },
       },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       skip: (page - 1) * limit,
@@ -115,7 +124,12 @@ export async function GET(req: NextRequest) {
     prisma.employee.count({ where }),
   ]);
 
-  let data: any[] = employees;
+  let data: any[] = employees.map(({ vacationBalances, ...e }) => ({
+    ...e,
+    vacationBalanceTotal: vacationBalances.length
+      ? vacationBalances.reduce((acc, b) => acc + b.days, 0)
+      : null,
+  }));
 
   if (withStatus && employees.length > 0) {
     const today    = new Date(); today.setHours(0,0,0,0);
@@ -128,10 +142,10 @@ export async function GET(req: NextRequest) {
     });
 
     const absMap = new Map(absences.map(a => [a.employeeId, a.absenceType]));
-    data = employees.map(emp => {
+    data = data.map(emp => {
       const aType    = absMap.get(emp.id);
       const statusHoy = !aType ? "ACTIVE"
-        : ["MEDICAL_LEAVE","SPECIAL_LEAVE"].includes(aType) ? "ON_LEAVE"
+        : ["MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE"].includes(aType) ? "ON_LEAVE"
         : "ABSENT";
       return { ...emp, statusHoy };
     });
@@ -168,6 +182,8 @@ export async function POST(req: NextRequest) {
 
   const position = await prisma.position.findUnique({ where: { id: empData.positionId } });
   if (!position) return NextResponse.json({ error: "Puesto no encontrado" }, { status: 404 });
+  const refErr = await checkPersonalRefs(prisma, empData);
+  if (refErr) return NextResponse.json({ error: refErr }, { status: 400 });
 
   let scopeWarning: string | null = null;
   if (position.scope === "SPECIFIC" && empData.currentBranchId) {
@@ -179,7 +195,11 @@ export async function POST(req: NextRequest) {
 
   const employee = await prisma.$transaction(async (tx) => {
     const emp = await tx.employee.create({
-      data: { ...empData, active: true },
+      data: {
+        ...empData,
+        nameKey: nameKeyFor(empData.lastName, empData.firstName, empData.contractBranchId),
+        active: true,
+      },
       include: {
         position:      { select: { id: true, name: true } },
         currentBranch: { select: { id: true, name: true } },
@@ -196,7 +216,11 @@ export async function POST(req: NextRequest) {
       });
     }
     return emp;
+  }).catch((e) => {
+    if (isDuplicatePerson(e)) return null;
+    throw e;
   });
+  if (!employee) return NextResponse.json({ error: DUPLICATE_PERSON_ERROR }, { status: 409 });
 
   await prisma.auditLog.create({
     data: {

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, XCircle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BalanceBox, type BalancePreviewView } from "./VacationApprovalPanel";
 
 interface Props {
   branches: Array<{ id: string; name: string }>;
@@ -18,7 +19,8 @@ interface Validation {
   conflictLevel: "NONE" | "WARNING" | "BLOCKING";
   ruleResults: Array<{ rule: string; status: "OK" | "WARNING" | "BLOCKING"; message: string }>;
   blockingConflicts: Array<{ message: string }>;
-  warnings: Array<{ message: string }>;
+  warnings: Array<{ type?: string; message: string }>;
+  balance?: BalancePreviewView | null;
 }
 
 function todayISO(): string {
@@ -137,9 +139,13 @@ export default function VacationFormPanel({
         {selectedEmployee && (
           <div className="sm:col-span-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-600 space-y-0.5">
             <div><span className="font-medium text-gray-800">Puesto:</span> {selectedEmployee.position?.name ?? "No configurado"}</div>
-            <div><span className="font-medium text-gray-800">Sucursal:</span> {selectedEmployee.currentBranch?.name ?? "No configurada"}</div>
-            <div><span className="font-medium text-gray-800">Turno:</span> No configurado</div>
-            <div><span className="font-medium text-gray-800">Días disponibles:</span> No configurado</div>
+            <div><span className="font-medium text-gray-800">Trabaja en:</span> {selectedEmployee.currentBranch?.name ?? "No configurada"}</div>
+            <div>
+              <span className="font-medium text-gray-800">Saldo de vacaciones:</span>{" "}
+              {selectedEmployee.vacationBalanceTotal === null || selectedEmployee.vacationBalanceTotal === undefined
+                ? "sin saldo cargado"
+                : `${selectedEmployee.vacationBalanceTotal} días`}
+            </div>
           </div>
         )}
 
@@ -147,12 +153,12 @@ export default function VacationFormPanel({
         <div>
           <label className="label">Fecha inicio *</label>
           <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input" />
-          <p className="text-xs text-gray-400 mt-0.5">Debe ser lunes (o martes post-feriado).</p>
+          <p className="text-xs text-gray-400 mt-0.5">Lo habitual: lunes (o martes post-feriado).</p>
         </div>
         <div>
           <label className="label">Fecha fin *</label>
           <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="input" />
-          <p className="text-xs text-gray-400 mt-0.5">Duración múltiplo de 7 días.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Lo habitual: múltiplo de 7 días corridos.</p>
         </div>
 
         {/* Días calculados */}
@@ -179,7 +185,10 @@ export default function VacationFormPanel({
         <p className="text-xs text-gray-400">Validando...</p>
       )}
       {validation && !validating && (
-        <ValidationPanel v={validation} />
+        <>
+          <BalanceBox b={validation.balance} />
+          <ValidationPanel v={validation} />
+        </>
       )}
 
       {submitError && (
@@ -205,7 +214,7 @@ export default function VacationFormPanel({
 function ValidationPanel({ v }: { v: Validation }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-1.5">
-      {v.ruleResults.map((r, i) => (
+      {v.ruleResults.filter(r => r.rule !== "saldo").map((r, i) => (
         <div key={i} className="flex items-start gap-2 text-xs">
           {r.status === "OK" && <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />}
           {r.status === "WARNING" && <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />}
@@ -223,7 +232,8 @@ function ValidationPanel({ v }: { v: Validation }) {
           <span className="text-red-700">Conflicto: {c.message}</span>
         </div>
       ))}
-      {v.warnings.map((c, i) => (
+      {/* El saldo ya se muestra en BalanceBox; acá solo el resto de los avisos. */}
+      {v.warnings.filter(c => c.type !== "BALANCE").map((c, i) => (
         <div key={`w${i}`} className="flex items-start gap-2 text-xs">
           <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
           <span className="text-amber-700">Aviso: {c.message}</span>

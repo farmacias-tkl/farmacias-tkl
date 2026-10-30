@@ -12,6 +12,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
+import { typeAllowsReasonDetail } from "@/lib/absences";
 import type { AbsenceStatus, AbsenceType } from "@prisma/client";
 
 const ABSENCE_STATUSES = [
@@ -163,7 +164,10 @@ export async function PATCH(
         ...(data.notes !== undefined          && { notes: data.notes }),
         ...(data.hasCertificate !== undefined && { hasCertificate: data.hasCertificate }),
         ...(data.certificateUntil !== undefined && { certificateUntil: data.certificateUntil }),
-        ...(data.reasonDetail !== undefined   && { reasonDetail: data.reasonDetail }),
+        // Licencia médica / maternidad: reasonDetail queda vacío (sin motivo médico).
+        ...(!typeAllowsReasonDetail(targetType)
+          ? { reasonDetail: null }
+          : data.reasonDetail !== undefined && { reasonDetail: data.reasonDetail }),
         ...(data.absenceType !== undefined    && { absenceType: data.absenceType as AbsenceType }),
         ...(data.expectedArrivalTime !== undefined && { expectedArrivalTime: data.expectedArrivalTime }),
         ...(data.actualArrivalTime !== undefined   && { actualArrivalTime: data.actualArrivalTime }),
