@@ -16,6 +16,8 @@
  *    recarga de saldos frenada con consumos salvo --force-saldos.
  * 7. Limpieza: frena con User → Employee ficticio y con PositionPermission; sin
  *    frenos borra los ficticios y deja idénticas las tablas excluidas.
+ * 8. Volumen: ~200 personas y ~1.200 tramos; cuenta las consultas de la carga
+ *    (por lotes) y mide el tiempo; segunda corrida y actualizaciones agrupadas.
  * Teardown garantizado (DROP al final).
  *
  *   npx tsx src/lib/personal/personal.smoke.ts
@@ -547,6 +549,89 @@ async function main() {
       assert.equal(await db.timeEvent.count(), 0);
       assert.equal(await db.actionPlan.count(), 0);
     });
+
+    // ---------------------------------------------------------------- 8
+    // Volumen: ~200 personas y ~1.200 tramos (sintéticos). La carga va por
+    // lotes: se cuentan las consultas que hace applyLoadPlan y cuánto tarda.
+    const VOL = 200;
+    const codes = ["AME", "AYA", "CSM", "ETC", "GAL", "LAR", "MUN", "NAV", "QUI", "SAG", "TEK"];
+    const puestos = ["Cajero/a", "Farmacéutico/a", "Perfumería", "Reposición / Cadetería", "Maestranza / Limpieza", "Administrativo/a"];
+    const pad = (i: number) => String(i).padStart(3, "0");
+    const volEmp = (horas: (i: number) => string, trabaja: (i: number) => string) => [
+      EMP.split("\n")[0],
+      ...Array.from({ length: VOL }, (_, i) =>
+        `"Volumen, Persona${pad(i)}",${codes[i % 11]},${trabaja(i)},${puestos[i % puestos.length]},,N,N,${horas(i)},2020-01-01,${i % 20 === 0 ? `Licencia médica,2026-10-01,2026-10-31` : "Activo/a,,"},`),
+    ].join("\n");
+    const volHor = [
+      HOR.split("\n")[0],
+      ...Array.from({ length: VOL }, (_, i) => [1, 2, 3, 4, 5, 6].map((dia) =>
+        `"Volumen, Persona${pad(i)}",${codes[i % 11]},2026-01-01,TODAS,,${dia},1,08:00,14:00,${codes[i % 11]},`)).flat(),
+    ].join("\n");
+    const volSal = (dias: (i: number) => number) => [
+      SAL.split("\n")[0],
+      ...Array.from({ length: VOL }, (_, i) => `"Volumen, Persona${pad(i)}",${codes[i % 11]},2025,${dias(i)}`),
+    ].join("\n");
+
+    const counted = new PrismaClient({ datasources: { db: { url: TEST_URL } }, log: [{ emit: "event", level: "query" }] });
+    let queries = 0;
+    counted.$on("query", () => { queries++; });
+    const measure = async (files: Record<"empleados.csv" | "horarios.csv" | "saldos.csv", string>) => {
+      const plan = buildLoadPlan(files, await loadSnapshot(counted));
+      assert.equal(plan.errors.length, 0, JSON.stringify(plan.errors.slice(0, 3)));
+      const steps: string[] = [];
+      queries = 0;
+      const t0 = Date.now();
+      const r = await applyLoadPlan(counted, plan, { userId: "u1" }, { today: D("2026-11-01"), onProgress: (m) => steps.push(m) });
+      return { r, q: queries, ms: Date.now() - t0, steps };
+    };
+    try {
+      const base = { "empleados.csv": volEmp(() => "45", (i) => codes[i % 11]), "horarios.csv": volHor, "saldos.csv": volSal(() => 14) };
+      await check(`volumen: ${VOL} personas y ${VOL * 6} tramos en pocas consultas`, async () => {
+        const { r, q, ms, steps } = await measure(base);
+        console.log(`      carga inicial: ${q} consultas, ${ms} ms`);
+        for (const s of steps) console.log(`        · ${s}`);
+        assert.deepEqual(r, {
+          positionsCreated: 0, employeesCreated: VOL, employeesUpdated: 0, schedulesCreated: VOL,
+          balancesCreated: VOL, balancesUpdated: 0, balancesBlocked: 0, leavesCreated: VOL / 20,
+        });
+        assert.ok(q <= 30, `hizo ${q} consultas`);
+        assert.equal(await db.workScheduleSlot.count({ where: { schedule: { employee: { nameKey: { startsWith: "volumen" } } } } }), VOL * 6);
+        assert.equal(await db.employeeBranchAssignment.count({ where: { type: "PERMANENT", employee: { nameKey: { startsWith: "volumen" } } } }), VOL);
+        assert.equal(await db.vacationBalanceMovement.count({ where: { type: "LOAD", employee: { nameKey: { startsWith: "volumen" } } } }), VOL);
+        assert.ok(steps.some((s) => s.startsWith("empleados")) && steps.some((s) => s.startsWith("horarios")) && steps.some((s) => s.startsWith("saldos")));
+      });
+      await check("volumen: la segunda corrida no escribe nada", async () => {
+        const { r, q, ms } = await measure(base);
+        console.log(`      segunda corrida: ${q} consultas, ${ms} ms`);
+        assert.ok(Object.values(r).every((n) => n === 0), JSON.stringify(r));
+        assert.ok(q <= 15, `hizo ${q} consultas`);
+      });
+      await check("volumen: actualizaciones agrupadas (horas de 40 personas, 10 cambian de sucursal, 30 saldos)", async () => {
+        const changed = {
+          "empleados.csv": volEmp((i) => (i < 40 ? "36" : "45"), (i) => (i < 10 ? codes[(i + 1) % 11] : codes[i % 11])),
+          "horarios.csv": volHor,
+          "saldos.csv": volSal((i) => (i < 30 ? 21 : 14)),
+        };
+        const { r, q, ms } = await measure(changed);
+        console.log(`      actualización: ${q} consultas, ${ms} ms`);
+        assert.equal(r.employeesUpdated, 40);
+        assert.equal(r.balancesUpdated, 30);
+        assert.ok(q <= 30, `hizo ${q} consultas`);
+        const p0 = await db.employee.findFirstOrThrow({ where: { nameKey: "volumen, persona000" }, include: { currentBranch: true } });
+        assert.equal(Number(p0.weeklyHours), 36);
+        assert.equal(p0.currentBranch?.code, "AYA");
+        assert.equal(p0.hireDate?.toISOString(), "2020-01-01T00:00:00.000Z");
+        const perm = await db.employeeBranchAssignment.findMany({ where: { employeeId: p0.id, type: "PERMANENT" }, orderBy: { startDate: "asc" } });
+        assert.deepEqual(perm.map((a) => [a.endDate?.toISOString().slice(0, 10) ?? null, a.branchId === p0.currentBranchId]), [["2026-10-31", false], [null, true]]);
+        const b0 = await db.vacationBalance.findFirstOrThrow({ where: { employeeId: p0.id, year: 2025 } });
+        assert.equal(b0.days, 21);
+        assert.equal(await db.vacationBalanceMovement.count({ where: { type: "LOAD_ADJUST", days: 7, employee: { nameKey: { startsWith: "volumen" } } } }), 30);
+        const again = await measure(changed);
+        assert.ok(Object.values(again.r).every((n) => n === 0), JSON.stringify(again.r));
+      });
+    } finally {
+      await counted.$disconnect();
+    }
   } finally {
     await db.$disconnect();
     await adminExec(`DROP DATABASE IF EXISTS "${TEST_DB}" WITH (FORCE)`);

@@ -93,7 +93,13 @@ async function main() {
     }
     const actor = await db.user.findUnique({ where: { email: args.actor! }, select: { id: true, active: true } });
     if (!actor || !actor.active) usage(`--actor ${args.actor}: no hay un usuario activo con ese email`);
-    const result = await applyLoadPlan(db, plan, { userId: actor.id });
+    const t0 = Date.now();
+    const secs = () => `${((Date.now() - t0) / 1000).toFixed(1)} s`;
+    console.log("\nAplicando (una transacción, por lotes)...");
+    const result = await applyLoadPlan(db, plan, { userId: actor.id }, {
+      onProgress: (msg) => console.log(`  [${secs()}] ${msg}`),
+    });
+    console.log(`  [${secs()}] transacción confirmada.`);
     console.log("\nAplicado:", JSON.stringify(result));
   } finally {
     await db.$disconnect();

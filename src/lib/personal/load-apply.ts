@@ -4,9 +4,13 @@
 // applyLoadPlan corre TODO en una transacción, no borra nada y solo escribe lo
 // que el plan marca como create/update: con los mismos archivos, la segunda
 // corrida no cambia nada. Se niega a escribir si el plan tiene errores.
+//
+// Escribe por lotes (createMany, UPDATE ... FROM VALUES): la carga entera son
+// pocas decenas de consultas, para que la transacción no dependa de la
+// latencia a la base (cada ida y vuelta a Neon desde Argentina ~0,7 s).
 // =============================================================================
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { toISODate, utcDay, addDays } from "./dates";
 import { LEAVE_ABSENCE_TYPES } from "@/lib/vacations/people";
 import type { ScheduleWeekValue } from "./schedule";
@@ -83,166 +87,261 @@ export interface ApplyResult {
   leavesCreated: number;
 }
 
+/** Filas por sentencia en createMany / UPDATE ... FROM (VALUES ...): lejos del límite de parámetros de Postgres. */
+const CHUNK = 1000;
+
+function chunks<T>(xs: T[], size = CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+}
+
+/** Fecha de calendario como timestamp sin zona (columnas DateTime de Prisma = timestamp(3)). */
+const ts = (iso: string | null) => (iso ? `${iso} 00:00:00` : null);
 
 export async function applyLoadPlan(
   db: PrismaClient,
   plan: LoadPlan,
   actor: { userId: string },
-  opts: { today?: Date; timeoutMs?: number } = {},
+  opts: { today?: Date; timeoutMs?: number; onProgress?: (msg: string) => void } = {},
 ): Promise<ApplyResult> {
   if (plan.errors.length > 0) {
     throw new Error(`El plan tiene ${plan.errors.length} error(es): no se escribe nada.`);
   }
   const today = utcDay(opts.today ?? new Date());
+  const progress = opts.onProgress ?? (() => {});
   const result: ApplyResult = {
     positionsCreated: 0, employeesCreated: 0, employeesUpdated: 0,
     schedulesCreated: 0, balancesCreated: 0, balancesUpdated: 0, leavesCreated: 0,
     balancesBlocked: plan.balances.filter((b) => b.action === "blocked").length,
   };
 
+  // Todo por lotes: cada etapa son unas pocas consultas, sin importar cuántas
+  // personas haya (desde Argentina cada ida y vuelta a Neon cuesta ~0,7 s).
   await db.$transaction(async (tx: Prisma.TransactionClient) => {
     // 1. Puestos del catálogo que falten
-    for (const name of plan.positionsToCreate) {
-      await tx.position.create({ data: { name } });
-      result.positionsCreated++;
+    if (plan.positionsToCreate.length > 0) {
+      await tx.position.createMany({ data: plan.positionsToCreate.map((name) => ({ name })) });
+      result.positionsCreated = plan.positionsToCreate.length;
     }
     const positions = await tx.position.findMany({ select: { id: true, name: true } });
-    const posId = (name: string) => positions.find((p) => p.name === name)!.id;
+    const posByName = new Map(positions.map((p) => [p.name, p.id]));
+    const posId = (name: string) => {
+      const id = posByName.get(name);
+      if (!id) throw new Error(`Puesto inexistente: ${name}`);
+      return id;
+    };
 
     // 2. Empleados
-    const idByKey = new Map<string, string>();
+    const toCreate = plan.employees.filter((e) => e.action === "create");
+    const toUpdate = plan.employees.filter((e) => e.action === "update");
+    progress(`empleados: ${toCreate.length} a crear, ${toUpdate.length} a actualizar...`);
+    const dataOf = (e: (typeof plan.employees)[number]) => ({
+      firstName: e.data.firstName,
+      lastName: e.data.lastName,
+      nameKey: e.data.nameKey,
+      contractBranchId: e.data.contractBranchId,
+      currentBranchId: e.data.currentBranchId,
+      positionId: posId(e.data.positionName),
+      secondaryPositionId: e.data.secondaryPositionName ? posId(e.data.secondaryPositionName) : null,
+      isTechnicalDirector: e.data.isTechnicalDirector,
+      isRotating: e.data.isRotating,
+      weeklyHours: e.data.weeklyHours,
+      hireDate: e.data.hireDate ? d(e.data.hireDate) : null,
+      extraTasks: e.data.extraTasks,
+      active: true,
+    });
+
     const existing = await tx.employee.findMany({
       where: { nameKey: { not: null } },
       select: { id: true, nameKey: true, contractBranchId: true, currentBranchId: true },
     });
-    for (const e of existing) idByKey.set(`${e.nameKey}|${e.contractBranchId}`, e.id);
+    const beforeById = new Map(existing.map((e) => [e.id, e]));
 
-    for (const e of plan.employees) {
-      const data = {
-        firstName: e.data.firstName,
-        lastName: e.data.lastName,
-        nameKey: e.data.nameKey,
-        contractBranchId: e.data.contractBranchId,
-        currentBranchId: e.data.currentBranchId,
-        positionId: posId(e.data.positionName),
-        secondaryPositionId: e.data.secondaryPositionName ? posId(e.data.secondaryPositionName) : null,
-        isTechnicalDirector: e.data.isTechnicalDirector,
-        isRotating: e.data.isRotating,
-        weeklyHours: e.data.weeklyHours,
-        hireDate: e.data.hireDate ? d(e.data.hireDate) : null,
-        extraTasks: e.data.extraTasks,
-        active: true,
-      };
-      if (e.action === "create") {
-        const created = await tx.employee.create({ data });
-        idByKey.set(e.personKey, created.id);
-        if (data.currentBranchId) {
-          await tx.employeeBranchAssignment.create({
-            data: {
-              employeeId: created.id, branchId: data.currentBranchId, type: "PERMANENT", status: "ACTIVE",
-              startDate: data.hireDate ?? today, endDate: null, reason: "Carga de personal real",
-              assignedByUserId: actor.userId,
-            },
-          });
-        }
-        result.employeesCreated++;
-      } else if (e.action === "update") {
-        const id = e.existingId!;
-        const before = existing.find((x) => x.id === id);
-        await tx.employee.update({ where: { id }, data });
-        // Cambió la sucursal donde trabaja: se cierra la PERMANENT abierta y se abre otra (como createAssignment).
-        if (before && before.currentBranchId !== data.currentBranchId) {
-          await tx.employeeBranchAssignment.updateMany({
-            where: { employeeId: id, type: "PERMANENT", endDate: null },
-            data: { endDate: addDays(today, -1) },
-          });
-          if (data.currentBranchId) {
-            await tx.employeeBranchAssignment.create({
-              data: {
-                employeeId: id, branchId: data.currentBranchId, type: "PERMANENT", status: "ACTIVE",
-                startDate: today, endDate: null, reason: "Carga de personal real (cambio de sucursal)",
-                assignedByUserId: actor.userId,
-              },
-            });
-          }
-        }
-        result.employeesUpdated++;
-      }
+    for (const part of chunks(toCreate)) {
+      await tx.employee.createMany({ data: part.map(dataOf) });
     }
+    result.employeesCreated = toCreate.length;
+
+    // Ids por la clave de identidad (nameKey + sucursal de contrato): una lectura.
+    const idByKey = new Map<string, string>();
+    const withKey = await tx.employee.findMany({
+      where: { nameKey: { not: null }, contractBranchId: { not: null } },
+      select: { id: true, nameKey: true, contractBranchId: true },
+    });
+    for (const e of withKey) idByKey.set(`${e.nameKey}|${e.contractBranchId}`, e.id);
     const idOf = (key: string) => {
       const id = idByKey.get(key);
       if (!id) throw new Error(`Persona sin id: ${key}`);
       return id;
     };
 
-    // 3. Horarios (solo nuevos; el anterior no se pisa)
-    for (const s of plan.schedules.filter((x) => x.action === "create")) {
-      await tx.workSchedule.create({
-        data: {
-          employeeId: idOf(s.personKey),
-          validFrom: d(s.validFrom),
-          abReferenceDate: s.abReferenceDate ? d(s.abReferenceDate) : null,
-          slots: { create: s.slots.map((x) => ({
-            week: x.week, dayOfWeek: x.dayOfWeek, slot: x.slot,
-            startMinute: x.startMinute, endMinute: x.endMinute,
-            branchId: x.branchId, otherPlace: x.otherPlace,
-          })) },
-        },
+    // Asignación PERMANENT de las altas con sucursal donde trabaja.
+    const newAssignments = toCreate
+      .filter((e) => e.data.currentBranchId)
+      .map((e) => ({
+        employeeId: idOf(e.personKey), branchId: e.data.currentBranchId!, type: "PERMANENT" as const, status: "ACTIVE" as const,
+        startDate: e.data.hireDate ? d(e.data.hireDate) : today, endDate: null, reason: "Carga de personal real",
+        assignedByUserId: actor.userId,
+      }));
+
+    // Actualizaciones: un UPDATE ... FROM (VALUES ...) por lote.
+    if (toUpdate.length > 0) {
+      for (const part of chunks(toUpdate, 500)) {
+        const rows = part.map((e) => {
+          const x = dataOf(e);
+          return Prisma.sql`(${e.existingId!}, ${x.firstName}, ${x.lastName}, ${x.currentBranchId}, ${x.positionId},
+            ${x.secondaryPositionId}, ${x.isTechnicalDirector}, ${x.isRotating}, ${x.weeklyHours === null ? null : String(x.weeklyHours)},
+            ${ts(e.data.hireDate)}, ${x.extraTasks})`;
+        });
+        await tx.$executeRaw`
+          UPDATE "Employee" AS e SET
+            "firstName" = v.first_name, "lastName" = v.last_name, "currentBranchId" = v.current_branch_id,
+            "positionId" = v.position_id, "secondaryPositionId" = v.secondary_position_id,
+            "isTechnicalDirector" = v.is_dt::boolean, "isRotating" = v.is_rotating::boolean,
+            "weeklyHours" = v.weekly_hours::numeric(4,1), "hireDate" = v.hire_date::timestamp(3),
+            "extraTasks" = v.extra_tasks, active = true, "updatedAt" = now()
+          FROM (VALUES ${Prisma.join(rows)}) AS v(id, first_name, last_name, current_branch_id, position_id,
+            secondary_position_id, is_dt, is_rotating, weekly_hours, hire_date, extra_tasks)
+          WHERE e.id = v.id`;
+      }
+      result.employeesUpdated = toUpdate.length;
+
+      // Cambió la sucursal donde trabaja: se cierra la PERMANENT abierta y se abre otra (como createAssignment).
+      const moved = toUpdate.filter((e) => {
+        const before = beforeById.get(e.existingId!);
+        return before && before.currentBranchId !== e.data.currentBranchId;
       });
-      result.schedulesCreated++;
+      if (moved.length > 0) {
+        await tx.employeeBranchAssignment.updateMany({
+          where: { employeeId: { in: moved.map((e) => e.existingId!) }, type: "PERMANENT", endDate: null },
+          data: { endDate: addDays(today, -1) },
+        });
+        for (const e of moved.filter((x) => x.data.currentBranchId)) {
+          newAssignments.push({
+            employeeId: e.existingId!, branchId: e.data.currentBranchId!, type: "PERMANENT", status: "ACTIVE",
+            startDate: today, endDate: null, reason: "Carga de personal real (cambio de sucursal)",
+            assignedByUserId: actor.userId,
+          });
+        }
+      }
+    }
+    for (const part of chunks(newAssignments)) {
+      await tx.employeeBranchAssignment.createMany({ data: part });
+    }
+    progress(`empleados: listo (${result.employeesCreated} creados, ${result.employeesUpdated} actualizados, ${newAssignments.length} asignaciones).`);
+
+    // 3. Horarios (solo nuevos; el anterior no se pisa) y sus tramos
+    const newSchedules = plan.schedules.filter((x) => x.action === "create");
+    progress(`horarios: ${newSchedules.length} a crear...`);
+    if (newSchedules.length > 0) {
+      for (const part of chunks(newSchedules)) {
+        await tx.workSchedule.createMany({
+          data: part.map((s) => ({
+            employeeId: idOf(s.personKey),
+            validFrom: d(s.validFrom),
+            abReferenceDate: s.abReferenceDate ? d(s.abReferenceDate) : null,
+          })),
+        });
+      }
+      // Ids por (empleado, vigente desde), que es único.
+      const scheduleRows = await tx.workSchedule.findMany({
+        where: { employeeId: { in: [...new Set(newSchedules.map((s) => idOf(s.personKey)))] } },
+        select: { id: true, employeeId: true, validFrom: true },
+      });
+      const scheduleId = new Map(scheduleRows.map((r) => [`${r.employeeId}|${toISODate(r.validFrom)}`, r.id]));
+      const slots = newSchedules.flatMap((s) => {
+        const id = scheduleId.get(`${idOf(s.personKey)}|${s.validFrom}`);
+        if (!id) throw new Error(`Horario sin id: ${s.personKey} ${s.validFrom}`);
+        return s.slots.map((x) => ({
+          scheduleId: id, week: x.week, dayOfWeek: x.dayOfWeek, slot: x.slot,
+          startMinute: x.startMinute, endMinute: x.endMinute,
+          branchId: x.branchId, otherPlace: x.otherPlace,
+        }));
+      });
+      for (const part of chunks(slots)) {
+        await tx.workScheduleSlot.createMany({ data: part });
+      }
+      result.schedulesCreated = newSchedules.length;
+      progress(`horarios: listo (${newSchedules.length} horarios, ${slots.length} tramos).`);
     }
 
     // 4. Saldos + movimientos. "blocked" (persona con consumos/devoluciones,
     // sin --force-saldos) no se toca; se vuelve a chequear dentro de la
     // transacción por si hubo un consumo entre el dry-run y el apply.
-    for (const b of plan.balances.filter((x) => x.action === "create" || x.action === "update")) {
-      const employeeId = idOf(b.personKey);
-      if (!plan.forceBalances) {
-        const consumed = await tx.vacationBalanceMovement.count({
-          where: { employeeId, type: { in: ["CONSUME", "REFUND"] } },
-        });
-        if (consumed > 0) { result.balancesBlocked++; continue; }
-      }
-      const current = await tx.vacationBalance.findUnique({ where: { employeeId_year: { employeeId, year: b.year } } });
-      const delta = b.days - (current?.days ?? 0);
-      if (delta === 0 && current) continue;
-      await tx.vacationBalance.upsert({
-        where: { employeeId_year: { employeeId, year: b.year } },
-        create: { employeeId, year: b.year, days: b.days },
-        update: { days: b.days },
+    const pending = plan.balances
+      .filter((x) => x.action === "create" || x.action === "update")
+      .map((b) => ({ ...b, employeeId: idOf(b.personKey) }));
+    progress(`saldos: ${pending.length} a revisar...`);
+    if (pending.length > 0) {
+      const ids = [...new Set(pending.map((b) => b.employeeId))];
+      const consumed = plan.forceBalances ? new Set<string>() : new Set((await tx.vacationBalanceMovement.findMany({
+        where: { employeeId: { in: ids }, type: { in: ["CONSUME", "REFUND"] } },
+        select: { employeeId: true },
+        distinct: ["employeeId"],
+      })).map((m) => m.employeeId));
+      const currentRows = await tx.vacationBalance.findMany({
+        where: { employeeId: { in: ids } },
+        select: { employeeId: true, year: true, days: true },
       });
-      await tx.vacationBalanceMovement.create({
-        data: {
-          employeeId, year: b.year, days: delta,
-          type: current ? "LOAD_ADJUST" : "LOAD",
+      const current = new Map(currentRows.map((r) => [`${r.employeeId}|${r.year}`, r.days]));
+
+      const creates: Array<{ employeeId: string; year: number; days: number }> = [];
+      const updates: Array<{ employeeId: string; year: number; days: number }> = [];
+      const movements: Prisma.VacationBalanceMovementCreateManyInput[] = [];
+      for (const b of pending) {
+        if (consumed.has(b.employeeId)) { result.balancesBlocked++; continue; }
+        const now = current.get(`${b.employeeId}|${b.year}`);
+        const delta = b.days - (now ?? 0);
+        if (now !== undefined && delta === 0) continue;
+        (now === undefined ? creates : updates).push({ employeeId: b.employeeId, year: b.year, days: b.days });
+        movements.push({
+          employeeId: b.employeeId, year: b.year, days: delta,
+          type: now === undefined ? "LOAD" : "LOAD_ADJUST",
           userId: actor.userId,
-          note: current ? `Planilla: ${current.days} → ${b.days}` : "Carga inicial desde planilla",
-        },
-      });
-      if (current) result.balancesUpdated++; else result.balancesCreated++;
+          note: now === undefined ? "Carga inicial desde planilla" : `Planilla: ${now} → ${b.days}`,
+        });
+      }
+      for (const part of chunks(creates)) await tx.vacationBalance.createMany({ data: part });
+      for (const part of chunks(updates, 500)) {
+        const rows = part.map((u) => Prisma.sql`(${u.employeeId}, ${u.year}, ${u.days})`);
+        await tx.$executeRaw`
+          UPDATE "VacationBalance" AS b SET days = v.days::integer, "updatedAt" = now()
+          FROM (VALUES ${Prisma.join(rows)}) AS v(employee_id, year, days)
+          WHERE b."employeeId" = v.employee_id AND b.year = v.year::integer`;
+      }
+      for (const part of chunks(movements)) await tx.vacationBalanceMovement.createMany({ data: part });
+      result.balancesCreated = creates.length;
+      result.balancesUpdated = updates.length;
     }
+    progress(`saldos: listo (${result.balancesCreated} creados, ${result.balancesUpdated} actualizados, ${result.balancesBlocked} frenados).`);
 
     // 5. Licencias (sin reasonDetail: no hay lugar para motivo médico)
-    for (const l of plan.leaves.filter((x) => x.action === "create")) {
-      const employeeId = idOf(l.personKey);
-      const emp = await tx.employee.findUniqueOrThrow({
-        where: { id: employeeId },
+    const newLeaves = plan.leaves.filter((x) => x.action === "create");
+    if (newLeaves.length > 0) {
+      const people = await tx.employee.findMany({
+        where: { id: { in: [...new Set(newLeaves.map((l) => idOf(l.personKey)))] } },
         include: { position: { select: { name: true } }, currentBranch: { select: { id: true, name: true } }, contractBranch: { select: { id: true, name: true } } },
       });
-      const branch = emp.currentBranch ?? emp.contractBranch!;
-      await tx.absenceRecord.create({
-        data: {
-          employeeId, branchId: branch.id,
-          employeeNameSnapshot: `${emp.firstName} ${emp.lastName}`,
-          branchNameSnapshot: branch.name,
-          positionNameSnapshot: emp.position.name,
-          reportedByUserId: actor.userId,
-          startDate: d(l.startDate), endDate: d(l.endDate),
-          absenceType: l.absenceType,
-          notes: "Carga de personal real",
-        },
+      const byId = new Map(people.map((p) => [p.id, p]));
+      await tx.absenceRecord.createMany({
+        data: newLeaves.map((l) => {
+          const emp = byId.get(idOf(l.personKey))!;
+          const branch = emp.currentBranch ?? emp.contractBranch!;
+          return {
+            employeeId: emp.id, branchId: branch.id,
+            employeeNameSnapshot: `${emp.firstName} ${emp.lastName}`,
+            branchNameSnapshot: branch.name,
+            positionNameSnapshot: emp.position.name,
+            reportedByUserId: actor.userId,
+            startDate: d(l.startDate), endDate: d(l.endDate),
+            absenceType: l.absenceType,
+            notes: "Carga de personal real",
+          };
+        }),
       });
-      result.leavesCreated++;
+      result.leavesCreated = newLeaves.length;
+      progress(`licencias: listo (${newLeaves.length}).`);
     }
 
     const wrote = Object.entries(result).some(([k, n]) => k !== "balancesBlocked" && n > 0);
