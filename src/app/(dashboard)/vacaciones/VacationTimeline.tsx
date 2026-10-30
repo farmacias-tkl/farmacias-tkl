@@ -1,6 +1,7 @@
 "use client";
 import { Plus, CheckCircle2, XCircle, Ban, Clock, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { vacationStatusLabel } from "@/lib/vacations/status-labels";
 
 interface HistoryEntry {
   id:         string;
@@ -21,13 +22,14 @@ interface Props {
 }
 
 function statusVisual(s: string): { icon: any; color: string; label: string } {
+  const label = vacationStatusLabel(s);
   switch (s) {
-    case "PENDING_SUPERVISOR": return { icon: Clock,        color: "text-yellow-600 bg-yellow-50 border-yellow-200", label: "Pend. supervisor" };
-    case "PENDING_RRHH":       return { icon: Clock,        color: "text-blue-600 bg-blue-50 border-blue-200",       label: "Pend. RRHH" };
-    case "APPROVED":           return { icon: CheckCircle2, color: "text-green-600 bg-green-50 border-green-200",    label: "Aprobada" };
-    case "REJECTED":           return { icon: XCircle,      color: "text-red-600 bg-red-50 border-red-200",          label: "Rechazada" };
-    case "CANCELLED":          return { icon: Ban,          color: "text-gray-500 bg-gray-50 border-gray-200",       label: "Cancelada" };
-    default:                   return { icon: Clock,        color: "text-gray-500 bg-gray-50 border-gray-200",       label: s };
+    case "PENDING_SUPERVISOR": return { icon: Clock,        color: "text-yellow-600 bg-yellow-50 border-yellow-200", label };
+    case "PENDING_RRHH":       return { icon: Clock,        color: "text-blue-600 bg-blue-50 border-blue-200",       label };
+    case "APPROVED":           return { icon: CheckCircle2, color: "text-green-600 bg-green-50 border-green-200",    label };
+    case "REJECTED":           return { icon: XCircle,      color: "text-red-600 bg-red-50 border-red-200",          label };
+    case "CANCELLED":          return { icon: Ban,          color: "text-gray-500 bg-gray-50 border-gray-200",       label };
+    default:                   return { icon: Clock,        color: "text-gray-500 bg-gray-50 border-gray-200",       label };
   }
 }
 

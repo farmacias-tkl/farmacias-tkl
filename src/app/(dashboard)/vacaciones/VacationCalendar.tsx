@@ -6,7 +6,7 @@ import {
   addMonths, formatMonthLong, getMonthGrid, isSameDay,
   startOfDay, WEEKDAY_LABELS_SHORT,
 } from "@/lib/dates/calendar";
-import { STATUS_META } from "./VacationCard";
+import { VACATION_STATUS_LABEL, visibleVacationStatuses } from "@/lib/vacations/status-labels";
 
 interface VacationEvent {
   id:                   string;
@@ -27,6 +27,8 @@ interface Props {
   initialDate?:     Date;
   onMonthChange?:   (newDate: Date) => void;
   onEventClick:     (eventId: string) => void;
+  /** Paso de RRHH activo: solo entonces la leyenda muestra PENDING_RRHH. */
+  rrhhStep?:        boolean;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -50,7 +52,7 @@ function initials(name: string): string {
 }
 
 export default function VacationCalendar({
-  events, initialDate, onMonthChange, onEventClick,
+  events, initialDate, onMonthChange, onEventClick, rrhhStep = false,
 }: Props) {
   const [current, setCurrent] = useState<Date>(initialDate ?? new Date());
 
@@ -206,10 +208,10 @@ export default function VacationCalendar({
 
       {/* Leyenda */}
       <div className="px-3 sm:px-4 py-2 border-t border-gray-100 bg-gray-50/60 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600">
-        {Object.entries(STATUS_META).map(([k, v]) => (
+        {visibleVacationStatuses(rrhhStep).map((k) => (
           <span key={k} className="inline-flex items-center gap-1">
             <span className={cn("w-2 h-2 rounded-full", STATUS_DOT[k])} />
-            {v.label}
+            {VACATION_STATUS_LABEL[k]}
           </span>
         ))}
         <span className="inline-flex items-center gap-1 ml-auto hidden sm:inline-flex">

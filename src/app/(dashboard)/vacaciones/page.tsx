@@ -10,7 +10,8 @@ import {
   startOfMonth, endOfMonth, addDays, getMonthGrid, toLocalISODate,
 } from "@/lib/dates/calendar";
 import VacationFormPanel from "./VacationFormPanel";
-import VacationCard, { STATUS_META } from "./VacationCard";
+import VacationCard from "./VacationCard";
+import { VACATION_STATUS_LABEL, visibleVacationStatuses } from "@/lib/vacations/status-labels";
 import VacationCalendar from "./VacationCalendar";
 import VacationMetrics, { useVacationMetrics } from "./VacationMetrics";
 import type { VacationKpi } from "@/lib/vacations/kpis";
@@ -58,7 +59,7 @@ export default function VacacionesPage() {
   // PENDING_RRHH solo aparece en el filtro si el paso de RRHH está activo.
   const { data: metricsRes } = useVacationMetrics(effectiveBranchId || null);
   const rrhhStep = metricsRes?.data?.rrhhStep === true;
-  const statusOptions = Object.entries(STATUS_META).filter(([k]) => rrhhStep || k !== "PENDING_RRHH");
+  const statusOptions = visibleVacationStatuses(rrhhStep);
 
   const selectKpi = (kpi: VacationKpi | null) => {
     setKpiFilter(kpi);
@@ -185,7 +186,7 @@ export default function VacacionesPage() {
         )}
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setKpiFilter(null); }} className="input w-auto">
           <option value="">Todos los estados</option>
-          {statusOptions.map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          {statusOptions.map((k) => <option key={k} value={k}>{VACATION_STATUS_LABEL[k]}</option>)}
         </select>
         <select value={flagFilter} onChange={e => setFlagFilter(e.target.value as typeof flagFilter)} className="input w-auto">
           <option value="">Todas las marcas</option>
@@ -236,6 +237,7 @@ export default function VacacionesPage() {
             initialDate={calendarMonth}
             onMonthChange={setCalendarMonth}
             onEventClick={(id) => setDetailId(id)}
+            rrhhStep={rrhhStep}
           />
         </div>
       )}

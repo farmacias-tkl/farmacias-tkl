@@ -3,13 +3,15 @@ import {
   CheckCircle2, XCircle, Clock, AlertTriangle, Ban, ChevronRight, Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { VACATION_STATUS_LABEL as L } from "@/lib/vacations/status-labels";
 
+// Colores e íconos por estado; los nombres salen de la tabla compartida.
 export const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
-  PENDING_SUPERVISOR: { label: "Pend. supervisor", color: "bg-yellow-50 text-yellow-800 border-yellow-200", icon: Clock },
-  PENDING_RRHH:       { label: "Pend. RRHH",       color: "bg-blue-50 text-blue-800 border-blue-200",       icon: Clock },
-  APPROVED:           { label: "Aprobada",          color: "bg-green-50 text-green-800 border-green-200",   icon: CheckCircle2 },
-  REJECTED:           { label: "Rechazada",         color: "bg-red-50 text-red-800 border-red-200",         icon: XCircle },
-  CANCELLED:          { label: "Cancelada",         color: "bg-gray-50 text-gray-600 border-gray-200",      icon: Ban },
+  PENDING_SUPERVISOR: { label: L.PENDING_SUPERVISOR, color: "bg-yellow-50 text-yellow-800 border-yellow-200", icon: Clock },
+  PENDING_RRHH:       { label: L.PENDING_RRHH,       color: "bg-blue-50 text-blue-800 border-blue-200",       icon: Clock },
+  APPROVED:           { label: L.APPROVED,           color: "bg-green-50 text-green-800 border-green-200",   icon: CheckCircle2 },
+  REJECTED:           { label: L.REJECTED,           color: "bg-red-50 text-red-800 border-red-200",         icon: XCircle },
+  CANCELLED:          { label: L.CANCELLED,          color: "bg-gray-50 text-gray-600 border-gray-200",      icon: Ban },
 };
 
 interface Props {
