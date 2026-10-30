@@ -161,6 +161,23 @@ const REQUIRED_HEADERS: Record<FileName, string[]> = {
 
 export const personKeyOf = (nameKey: string, contractBranchId: string) => `${nameKey}|${contractBranchId}`;
 
+/** Código de sucursal de los CSV → id (por Branch.code o, si falta, por el nombre real). CALLCENTER solo si se permite. */
+export function branchIdByCode(
+  branches: Array<{ id: string; name: string; code: string | null }>,
+  code: string,
+  allowCallCenter: boolean,
+): string | null {
+  const c = code.trim().toUpperCase();
+  if (c === CALL_CENTER_TOKEN) {
+    if (!allowCallCenter) return null;
+    return branches.find((b) => b.name === CALL_CENTER_BRANCH_NAME)?.id ?? null;
+  }
+  if (!BRANCH_CODES[c]) return null;
+  return branches.find((b) => b.code === c)?.id
+    ?? branches.find((b) => b.name === BRANCH_CODES[c])?.id
+    ?? null;
+}
+
 /** "2026-03-01" o "01/03/2026" → "2026-03-01". */
 export function parseFlexibleDate(s: string): string | null {
   const t = s.trim();
@@ -198,17 +215,7 @@ export function buildLoadPlan(files: Record<FileName, string>, db: DbSnapshot, o
   const branchNames = Object.fromEntries(db.branches.map((b) => [b.id, b.name]));
 
   // --- Resolución de sucursales y puestos ---
-  const branchByCode = (code: string, allowCallCenter: boolean): string | null => {
-    const c = code.trim().toUpperCase();
-    if (c === CALL_CENTER_TOKEN) {
-      if (!allowCallCenter) return null;
-      return db.branches.find((b) => b.name === CALL_CENTER_BRANCH_NAME)?.id ?? null;
-    }
-    if (!BRANCH_CODES[c]) return null;
-    return db.branches.find((b) => b.code === c)?.id
-      ?? db.branches.find((b) => b.name === BRANCH_CODES[c])?.id
-      ?? null;
-  };
+  const branchByCode = (code: string, allowCallCenter: boolean) => branchIdByCode(db.branches, code, allowCallCenter);
   const catalogName = (s: string) => {
     const key = positionKeyOf(s);
     return key ? POSITION_CATALOG.find((p) => p.key === key)!.name : null;

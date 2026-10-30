@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
 import { validateVacationRequest } from "@/lib/vacations/validation";
+import { vacationCreatedAuditDetail, vacationRequestCreateData } from "@/lib/vacations/create";
 import { isVacationKpi, kpiWhere } from "@/lib/vacations/kpis";
 import { Prisma } from "@prisma/client";
 
@@ -178,27 +179,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const creatable = {
+    ...employee,
+    positionId: employee.positionId,
+    position: employee.position!,
+    currentBranchId: employee.currentBranchId!,
+    currentBranch: employee.currentBranch!,
+  };
   const created = await prisma.$transaction(async (tx) => {
     const request = await tx.vacationRequest.create({
-      data: {
-        employeeId: data.employeeId,
-        branchId:   employee.currentBranchId!,
-        positionId: employee.positionId,
-        employeeNameSnapshot: `${employee.firstName} ${employee.lastName}`,
-        branchNameSnapshot:   employee.currentBranch!.name,
-        positionNameSnapshot: employee.position!.name,
-        shiftLabel: null,
-        startDate:  data.startDate,
-        endDate:    data.endDate,
-        daysCount:  validation.calculatedDays,
-        status:     "PENDING_SUPERVISOR",
-        requestedByUserId: session!.user.id,
+      data: vacationRequestCreateData({
+        employee: creatable,
+        startDate: data.startDate,
+        endDate: data.endDate,
         requesterNote: data.requesterNote ?? null,
-        conflictLevel:   validation.conflictLevel,
-        conflictReasons: (validation.warnings.length
-          ? { warnings: validation.warnings, ruleResults: validation.ruleResults }
-          : { ruleResults: validation.ruleResults }) as unknown as Prisma.InputJsonValue,
-      },
+        validation,
+        requestedByUserId: session!.user.id,
+      }),
     });
 
     await tx.auditLog.create({
@@ -207,15 +204,7 @@ export async function POST(req: NextRequest) {
         action:   "VACATION_REQUEST_CREATED",
         entity:   "VacationRequest",
         entityId: request.id,
-        detail: {
-          employee:   `${employee.firstName} ${employee.lastName}`,
-          branch:     employee.currentBranch!.name,
-          position:   employee.position!.name,
-          startDate:  data.startDate.toISOString().slice(0, 10),
-          endDate:    data.endDate.toISOString().slice(0, 10),
-          days:       validation.calculatedDays,
-          conflictLevel: validation.conflictLevel,
-        },
+        detail:   vacationCreatedAuditDetail(creatable, data.startDate, data.endDate, validation),
       },
     });
 
