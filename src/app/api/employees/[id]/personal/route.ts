@@ -6,6 +6,7 @@
  * movimientos. Mismo alcance que GET /api/employees/[id] (encargado: solo su
  * sucursal).
  */
+import { todayAR } from "@/lib/dates/today";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -44,7 +45,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const current = scheduleAt(employee.workSchedules, new Date());
+  const current = scheduleAt(employee.workSchedules, todayAR());
   const schedules = employee.workSchedules.map((s) => {
     const sch = toSchedule(s);
     return {

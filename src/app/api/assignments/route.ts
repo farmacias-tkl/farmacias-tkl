@@ -5,12 +5,13 @@
  * Solo maneja ROTATION y TEMPORARY_COVERAGE.
  * Las asignaciones PERMANENT se crean desde /api/employees (alta de empleado).
  */
+import { todayRangeAR } from "@/lib/dates/today";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
-import { endOfUtcDay, utcDay } from "@/lib/personal/dates";
+import { addDays, endOfUtcDay, utcDay } from "@/lib/personal/dates";
 
 const createSchema = z.object({
   employeeId:  z.string().min(1, "Rotativa obligatoria"),
@@ -48,14 +49,13 @@ export async function GET(req: NextRequest) {
   if (employeeId)     where.employeeId = employeeId;
   if (status !== "all") where.status = status;
 
-  const today = new Date(); today.setHours(0,0,0,0);
-  const todayEnd = new Date(today); todayEnd.setHours(23,59,59,999);
+  const { today, todayEnd } = todayRangeAR();
 
   if (view === "today") {
     where.startDate = { lte: todayEnd };
     where.OR = [{ endDate: null }, { endDate: { gte: today } }];
   } else if (view === "upcoming") {
-    const in7Days = new Date(today); in7Days.setDate(in7Days.getDate() + 7);
+    const in7Days = addDays(today, 7);
     where.startDate = { gt: today, lte: in7Days };
   }
 

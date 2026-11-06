@@ -1,3 +1,4 @@
+import { todayRangeAR } from "@/lib/dates/today";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -19,10 +20,7 @@ export default async function SucursalesPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(today);
-  todayEnd.setHours(23, 59, 59, 999);
+  const { today, todayEnd } = todayRangeAR();
 
   const branches = await prisma.branch.findMany({
     where: { showInOperative: true },

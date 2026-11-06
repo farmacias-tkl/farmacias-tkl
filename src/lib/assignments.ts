@@ -24,6 +24,7 @@
  *   - PERMANENT coexiste con TEMPORARY_COVERAGE y ROTATION sin restricción.
  */
 
+import { addDays, utcDay } from "@/lib/personal/dates";
 import { prisma } from "@/lib/prisma";
 import type { AssignmentType } from "@prisma/client";
 
@@ -38,7 +39,7 @@ export function rangesOverlap(
 ): boolean {
   // Normalizar a medianoche para comparar solo fechas, no horas
   const norm = (d: Date) => {
-    const n = new Date(d); n.setHours(0,0,0,0); return n.getTime();
+    return utcDay(d).getTime();
   };
 
   const aS = norm(aStart);
@@ -55,10 +56,7 @@ export function rangesOverlap(
 // ---------------------------------------------------------------------------
 
 export function dayBefore(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0,0,0,0);
-  d.setDate(d.getDate() - 1);
-  return d;
+  return addDays(utcDay(date), -1);
 }
 
 // ---------------------------------------------------------------------------

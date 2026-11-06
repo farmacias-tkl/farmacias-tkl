@@ -14,6 +14,7 @@
 // Una sola definición para contar (metrics) y para filtrar la lista (kpi=…).
 // =============================================================================
 
+import { arParts, todayAR } from "@/lib/dates/today";
 import type { Prisma } from "@prisma/client";
 import type { Db } from "./people";
 
@@ -24,23 +25,7 @@ export function isVacationKpi(x: unknown): x is VacationKpi {
   return typeof x === "string" && (VACATION_KPIS as readonly string[]).includes(x);
 }
 
-const TZ_AR = "America/Argentina/Buenos_Aires";
-
-function arParts(instant: Date): { y: number; m: number; d: number; h: number; min: number; s: number } {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: TZ_AR, year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-    }).formatToParts(instant).map((p) => [p.type, p.value]),
-  );
-  return { y: +parts.year, m: +parts.month, d: +parts.day, h: +parts.hour, min: +parts.minute, s: +parts.second };
-}
-
-/** Hoy (fecha de calendario en Argentina) como 00:00 UTC, para comparar con @db.Date. */
-export function todayAR(now: Date = new Date()): Date {
-  const p = arParts(now);
-  return new Date(Date.UTC(p.y, p.m - 1, p.d));
-}
+export { todayAR };
 
 /** Instante en que empieza el día y/m/d en Argentina (sin fijar el offset a mano). */
 function startOfDayAR(y: number, m: number, d: number): Date {

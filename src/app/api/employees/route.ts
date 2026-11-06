@@ -12,6 +12,8 @@
  *
  * Sin plantilla=true: comportamiento original.
  */
+import { todayAR, todayRangeAR } from "@/lib/dates/today";
+import { utcDay } from "@/lib/personal/dates";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -33,7 +35,7 @@ const createSchema = z.object({
   isRotating:               z.boolean().default(false),
   zone:                     z.string().optional().nullable(),
   maxConcurrentAssignments: z.number().int().min(1).default(1),
-  assignmentStartDate:      z.string().optional().transform(d => d ? new Date(d) : new Date()),
+  assignmentStartDate:      z.string().optional().transform(d => d ? new Date(d) : todayAR()),
   assignmentType:           z.enum(["PERMANENT","TEMPORARY_COVERAGE","ROTATION"]).default("PERMANENT"),
   assignmentReason:         z.string().optional(),
   ...personalFieldsSchema,
@@ -67,7 +69,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
     }
 
-    const date = dateParam ? new Date(dateParam) : new Date();
+    const date = dateParam ? utcDay(new Date(dateParam)) : todayAR();
     const plantilla = await getPlantillaReal(branchId, date);
 
     return NextResponse.json({
@@ -132,8 +134,7 @@ export async function GET(req: NextRequest) {
   }));
 
   if (withStatus && employees.length > 0) {
-    const today    = new Date(); today.setHours(0,0,0,0);
-    const todayEnd = new Date(today); todayEnd.setHours(23,59,59,999);
+    const { today, todayEnd } = todayRangeAR();
     const ids      = employees.map(e => e.id);
 
     const absences = await prisma.absenceRecord.findMany({

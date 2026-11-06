@@ -14,6 +14,8 @@
  *   2. PlantillaMember incluye positionCovered (puesto cubierto por el rotativo)
  */
 
+import { todayAR } from "@/lib/dates/today";
+import { endOfUtcDay, utcDay } from "@/lib/personal/dates";
 import { prisma } from "@/lib/prisma";
 
 export type PlantillaMember = {
@@ -66,18 +68,13 @@ export type PlantillaResult = {
   };
 };
 
-function normalizeToDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
+/** `date` es una fecha de calendario (00:00 UTC); por defecto, hoy en Argentina. */
 export async function getPlantillaReal(
   branchId: string,
-  date: Date = new Date()
+  date: Date = todayAR()
 ): Promise<PlantillaResult> {
-  const dayStart = normalizeToDay(date);
-  const dayEnd   = new Date(dayStart); dayEnd.setHours(23, 59, 59, 999);
+  const dayStart = utcDay(date);
+  const dayEnd   = endOfUtcDay(date);
 
   // ── 1. Fijos ──────────────────────────────────────────────────────────────
   const fijosRaw = await prisma.employee.findMany({
@@ -208,7 +205,7 @@ export async function getPlantillaReal(
  */
 export async function getDotacionMultiple(
   branchIds: string[],
-  date: Date = new Date()
+  date: Date = todayAR()
 ): Promise<Map<string, {
   totalPlantel:  number;
   disponibles:   number;
@@ -217,8 +214,8 @@ export async function getDotacionMultiple(
   criticos:      number;
   estado:        "OK" | "JUSTA" | "CRITICA";
 }>> {
-  const dayStart = normalizeToDay(date);
-  const dayEnd   = new Date(dayStart); dayEnd.setHours(23,59,59,999);
+  const dayStart = utcDay(date);
+  const dayEnd   = endOfUtcDay(date);
 
   const fijos = await prisma.employee.findMany({
     where: { currentBranchId: { in: branchIds }, active: true, isRotating: false },

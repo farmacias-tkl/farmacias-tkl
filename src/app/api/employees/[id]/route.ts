@@ -7,12 +7,13 @@
  * tareas adicionales). Si cambia la sucursal donde trabaja se cierra la
  * asignación PERMANENT abierta y se abre otra desde hoy (como createAssignment).
  */
+import { todayAR } from "@/lib/dates/today";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
-import { addDays, utcDay } from "@/lib/personal/dates";
+import { addDays } from "@/lib/personal/dates";
 import {
   DUPLICATE_PERSON_ERROR, checkPersonalRefs, isDuplicatePerson, nameKeyFor, personalFieldsSchema,
 } from "@/lib/personal/employee-fields";
@@ -115,7 +116,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       },
     });
     if (branchChanged) {
-      const today = utcDay(new Date());
+      const today = todayAR();
       await tx.employeeBranchAssignment.updateMany({
         where: { employeeId: emp.id, type: "PERMANENT", endDate: null },
         data:  { endDate: addDays(today, -1) },
