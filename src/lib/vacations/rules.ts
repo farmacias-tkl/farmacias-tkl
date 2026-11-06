@@ -8,7 +8,8 @@
 //   - empleado inexistente o inactivo;
 //   - la misma persona con otra solicitud activa superpuesta.
 // ADVIERTEN (WARNING, se puede "Aprobar igual"):
-//   - inicio que no es lunes (o martes después de lunes feriado);
+//   - inicio que no es el primer día hábil de la semana (el lunes, o el primero
+//     después de los feriados seguidos desde el lunes);
 //   - duración que no es múltiplo de 7;
 //   - A: otro/a Encargado/a de la misma sucursal con vacaciones superpuestas;
 //   - cruce por horario real (reemplaza a C): mismo puesto, ausente en fechas
@@ -19,7 +20,8 @@
 // =============================================================================
 
 import { isHoliday } from "@/lib/holidays";
-import { addDays, diffDays, isoWeekday } from "@/lib/personal/dates";
+import { addDays, diffDays, isoWeekday, mondayOf } from "@/lib/personal/dates";
+import { DAY_NAMES } from "@/lib/personal/schedule";
 import { coveredByRotatives, type PositionKey } from "@/lib/personal/catalog";
 import { previewBalance, type BalancePreview, type BalanceYear } from "@/lib/personal/balance";
 import {
@@ -112,9 +114,17 @@ export function isMonday(date: Date): boolean {
   return isoWeekday(date) === 1;
 }
 
-/** Martes después de un lunes feriado. */
-export function isTuesdayAfterHoliday(date: Date): boolean {
-  return isoWeekday(date) === 2 && isHoliday(addDays(date, -1));
+/**
+ * Primer día hábil de la semana de `date`: el lunes, salteando los feriados
+ * seguidos desde el lunes. Un feriado más adelante en la semana no lo cambia.
+ */
+export function firstWorkingDayOfWeek(date: Date): Date {
+  const monday = mondayOf(date);
+  for (let i = 0; i < 5; i++) {
+    const day = addDays(monday, i);
+    if (!isHoliday(day)) return day;
+  }
+  return monday;
 }
 
 function fmtDate(d: Date): string {
@@ -142,12 +152,14 @@ export function evaluateVacationRules(ctx: RuleContext): ValidationResult {
     ? { rule: "duracion", status: "OK", message: `Duración: ${days} días corridos.` }
     : { rule: "duracion", status: "WARNING", message: `Duración de ${days} días: no es múltiplo de 7.` });
 
-  if (isMonday(ctx.startDate)) {
+  const firstDay = firstWorkingDayOfWeek(ctx.startDate);
+  const firstDayLabel = `${DAY_NAMES[isoWeekday(firstDay)].toLowerCase()} ${fmtDate(firstDay)}`;
+  if (fmtDate(firstDay) !== fmtDate(ctx.startDate)) {
+    ruleResults.push({ rule: "inicio", status: "WARNING", message: `No empieza el primer día hábil de la semana (${firstDayLabel}).` });
+  } else if (isMonday(ctx.startDate)) {
     ruleResults.push({ rule: "inicio", status: "OK", message: "Inicio: lunes." });
-  } else if (isTuesdayAfterHoliday(ctx.startDate)) {
-    ruleResults.push({ rule: "inicio", status: "OK", message: "Inicio: martes después de lunes feriado." });
   } else {
-    ruleResults.push({ rule: "inicio", status: "WARNING", message: "No empieza un lunes (ni un martes después de lunes feriado)." });
+    ruleResults.push({ rule: "inicio", status: "OK", message: `Inicio: ${firstDayLabel}, primer día hábil de la semana (feriados desde el lunes).` });
   }
 
   const emp = ctx.employee;

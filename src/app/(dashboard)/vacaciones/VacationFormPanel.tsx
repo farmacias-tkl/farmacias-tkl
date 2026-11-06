@@ -153,7 +153,7 @@ export default function VacationFormPanel({
         <div>
           <label className="label">Fecha inicio *</label>
           <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input" />
-          <p className="text-xs text-gray-400 mt-0.5">Lo habitual: lunes (o martes post-feriado).</p>
+          <p className="text-xs text-gray-400 mt-0.5">Lo habitual: primer día hábil de la semana.</p>
         </div>
         <div>
           <label className="label">Fecha fin *</label>

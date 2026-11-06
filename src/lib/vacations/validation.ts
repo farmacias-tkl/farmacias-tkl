@@ -20,7 +20,7 @@ import {
 } from "./people";
 
 export {
-  calculateVacationDays, isMultipleOfSeven, isMonday, isTuesdayAfterHoliday,
+  calculateVacationDays, isMultipleOfSeven, isMonday, firstWorkingDayOfWeek,
   type RuleStatus, type RuleResult, type ConflictDetail, type ValidationResult,
 } from "./rules";
 export { ACTIVE_VACATION_STATUSES, BUSY_ABSENCE_TYPES, LEAVE_ABSENCE_TYPES, type Db } from "./people";

@@ -8,7 +8,7 @@
  */
 import { buildLoadPlan, formatPlanReport, type DbSnapshot, type LoadPlan } from "./load-plan";
 import { parseCsv } from "./csv";
-import { POSITION_CATALOG } from "./catalog";
+import { POSITION_CATALOG, coveredByRotatives, positionKeyOf, usesRotativeCoverage } from "./catalog";
 
 let passed = 0;
 let failed = 0;
@@ -89,6 +89,19 @@ const plan = buildLoadPlan(files(BASE_EMP, BASE_HOR, BASE_SAL), emptyDb());
   assert("3 saldos a crear", plan.balances.length === 3 && plan.balances.every((b) => b.action === "create"));
   assert("licencia por maternidad → AbsenceRecord MATERNITY_LEAVE", plan.leaves.length === 1 && plan.leaves[0].absenceType === "MATERNITY_LEAVE");
   assert("situación Vacaciones: solo se lista (sin solicitud)", plan.vacationSituations.length === 1 && plan.vacationSituations[0].startDate === "2026-11-02");
+}
+
+console.log("\nPuesto Seguridad");
+{
+  assert("está en el catálogo con la clave SEGURIDAD", positionKeyOf("Seguridad") === "SEGURIDAD");
+  assert("no lleva cobertura con rotativos", !usesRotativeCoverage("SEGURIDAD") && !coveredByRotatives("SEGURIDAD", "CABA"));
+  const db = emptyDb();
+  const sinSeguridad: DbSnapshot = { ...db, positions: db.positions.filter((p) => p.name !== "Seguridad") };
+  const emp = [`"Guardia, Uno",TEK,TEK,Seguridad,,N,N,,,Activo/a,,,`];
+  const p = buildLoadPlan(files(emp), sinSeguridad);
+  assert("la carga lo crea si falta, como cualquier puesto del catálogo", p.errors.length === 0 && p.positionsToCreate.join() === "Seguridad");
+  assert("la persona queda con ese puesto", p.employees[0]?.data.positionName === "Seguridad");
+  assert("si ya existe no lo vuelve a crear", buildLoadPlan(files(emp), db).positionsToCreate.length === 0);
 }
 
 console.log("\nIdempotencia: la base ya tiene lo mismo → todo igual");

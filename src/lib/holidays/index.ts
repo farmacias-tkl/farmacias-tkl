@@ -2,14 +2,16 @@
 // Helpers de feriados.
 //
 // API estable que el resto del código consume. La implementación interna usa
-// la lista hardcodeada de AR 2026; cuando se agreguen más años, importarlos
-// acá y unirlos en HOLIDAYS_BY_DATE.
+// las listas hardcodeadas de AR por año; cuando se agreguen más años,
+// importarlos acá y unirlos en HOLIDAYS_BY_DATE.
 // =============================================================================
 
 import { AR_HOLIDAYS_2026, type Holiday } from "./ar-2026";
+import { AR_HOLIDAYS_2027 } from "./ar-2027";
 
 const ALL_HOLIDAYS: readonly Holiday[] = [
   ...AR_HOLIDAYS_2026,
+  ...AR_HOLIDAYS_2027,
 ];
 
 const HOLIDAYS_BY_DATE = new Map<string, Holiday>(

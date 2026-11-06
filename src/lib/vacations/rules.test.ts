@@ -9,9 +9,9 @@
 // Hora local argentina: "inicio en lunes" no tiene que depender de ella.
 process.env.TZ = "America/Argentina/Buenos_Aires";
 
-import { evaluateVacationRules, warningMessages, type RuleContext } from "./rules";
+import { evaluateVacationRules, firstWorkingDayOfWeek, warningMessages, type RuleContext } from "./rules";
 import { findScheduleOverlaps, rotativeAvailability, workedSlots, type OtherPerson, type RotativeCandidate } from "@/lib/personal/coverage";
-import { parseISODate } from "@/lib/personal/dates";
+import { parseISODate, toISODate } from "@/lib/personal/dates";
 import { coveredByRotatives } from "@/lib/personal/catalog";
 import type { Schedule, ScheduleSlot } from "@/lib/personal/schedule";
 
@@ -85,6 +85,27 @@ console.log("\nReglas de negocio advierten, no bloquean");
     && r.rotativos === null && !r.ruleResults.some((x) => x.rule === "rotativos"));
   const r2 = evaluateVacationRules(base({ employee: { ...base().employee!, branchZone: null }, rotativos: null }));
   assert("sucursal sin zona: tampoco aplica", r2.rotativos === null && !r2.warnings.some((w) => w.type === "NO_FREE_ROTATIVE"));
+}
+
+console.log("\nInicio: primer día hábil de la semana (feriados 2027)");
+{
+  const inicio = (s: string) => {
+    const r = evaluateVacationRules(base({ startDate: D(s), endDate: D(s) }));
+    return { status: ruleStatus(r, "inicio"), valid: r.isValid };
+  };
+  assert("carnaval (lun 8 y mar 9/2): el miércoles 10 es válido", inicio("2027-02-10").status === "OK");
+  assert("carnaval: el lunes 8 y el martes 9 advierten", inicio("2027-02-08").status === "WARNING" && inicio("2027-02-09").status === "WARNING");
+  assert("carnaval: el jueves 11 advierte", inicio("2027-02-11").status === "WARNING");
+  assert("es advertencia, no bloqueo", inicio("2027-02-08").valid);
+  assert("lunes común: válido; martes común: advierte", inicio("2027-03-01").status === "OK" && inicio("2027-03-02").status === "WARNING");
+  assert("lunes feriado (16/8): el martes 17 es válido", inicio("2027-08-17").status === "OK");
+  assert("lunes feriado: el lunes y el miércoles advierten", inicio("2027-08-16").status === "WARNING" && inicio("2027-08-18").status === "WARNING");
+  assert("feriado el miércoles (24/3): el lunes 22 sigue siendo el inicio", inicio("2027-03-22").status === "OK");
+  assert("feriado el miércoles: el jueves 25 no pasa a ser válido", inicio("2027-03-25").status === "WARNING");
+  assert("feriado el martes (25/5): el lunes 24 sigue siendo el inicio", inicio("2027-05-24").status === "OK" && inicio("2027-05-26").status === "WARNING");
+  const msg = evaluateVacationRules(base({ startDate: D("2027-02-08"), endDate: D("2027-02-08") })).ruleResults.find((x) => x.rule === "inicio")?.message ?? "";
+  assert("el aviso dice cuál es el día válido", msg.includes("miércoles 2027-02-10"));
+  assert("primer día hábil desde cualquier día de la semana", toISODate(firstWorkingDayOfWeek(D("2027-02-14"))) === "2027-02-10");
 }
 
 console.log("\nBloqueos que se mantienen");

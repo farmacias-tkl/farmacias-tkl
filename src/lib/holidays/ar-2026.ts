@@ -20,6 +20,12 @@ export interface Holiday {
   /** YYYY-MM-DD, fecha de calendario (sin TZ). */
   date: string;
   name: string;
+  /** Trasladable: fecha original, cuando `date` es la fecha ya movida. */
+  originalDate?: string;
+  /** Norma de la que sale la fecha. */
+  source?: string;
+  /** Falta el acto oficial que fija la fecha. */
+  unconfirmed?: boolean;
 }
 
 export const AR_HOLIDAYS_2026: readonly Holiday[] = [

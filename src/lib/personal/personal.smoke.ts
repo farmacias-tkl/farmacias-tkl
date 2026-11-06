@@ -188,12 +188,12 @@ async function main() {
     });
 
     let firstResult: Awaited<ReturnType<typeof applyLoadPlan>> | null = null;
-    await check("apply: crea 11 puestos, 6 empleados, 3 horarios, 3 saldos, 1 licencia", async () => {
+    await check("apply: crea 12 puestos, 6 empleados, 3 horarios, 3 saldos, 1 licencia", async () => {
       const plan = buildLoadPlan(files, await loadSnapshot(db));
       assert.equal(plan.errors.length, 0, JSON.stringify(plan.errors));
       firstResult = await applyLoadPlan(db, plan, { userId: "u1" }, { today: D("2026-10-29") });
       assert.deepEqual(firstResult, {
-        positionsCreated: 11, employeesCreated: 6, employeesUpdated: 0, schedulesCreated: 3,
+        positionsCreated: 12, employeesCreated: 6, employeesUpdated: 0, schedulesCreated: 3,
         balancesCreated: 3, balancesUpdated: 0, balancesBlocked: 0, leavesCreated: 1,
       });
       assert.equal(await db.vacationBalanceMovement.count({ where: { type: "LOAD" } }), 3);
@@ -545,7 +545,7 @@ async function main() {
       assert.equal(await db.employee.count({ where: { nameKey: null } }), 0);
       assert.equal(await db.employee.count({ where: { nameKey: { not: null } } }), realBefore);
       assert.equal(await db.vacationBalance.count(), realBalances);
-      assert.equal(await db.position.count(), 11);
+      assert.equal(await db.position.count(), 12);
       assert.equal(await db.timeEvent.count(), 0);
       assert.equal(await db.actionPlan.count(), 0);
     });

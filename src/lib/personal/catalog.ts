@@ -18,6 +18,7 @@ export const POSITION_CATALOG = [
   { key: "MAESTRANZA",     name: "Maestranza / Limpieza" },
   { key: "CALL_CENTER",    name: "Call Center" },
   { key: "SUPERVISOR",     name: "Supervisor/a" },
+  { key: "SEGURIDAD",      name: "Seguridad" },
 ] as const;
 
 export type PositionKey = (typeof POSITION_CATALOG)[number]["key"];

@@ -158,7 +158,7 @@ async function main() {
       assert.equal(uno.balanceNow, 30); assert.equal(uno.balanceAfter, 16);
       const tres = plan.rows.find((r) => r.line === 3)!;
       assert.equal(tres.startDate, "2026-11-03");
-      assert.ok(tres.warnings.some((w) => /No empieza un lunes/.test(w)));
+      assert.ok(tres.warnings.some((w) => /No empieza el primer día hábil/.test(w)));
       assert.ok(tres.warnings.some((w) => /no es múltiplo de 7/.test(w)));
       assert.ok(tres.warnings.some((w) => /Saldo insuficiente/.test(w)));
       assert.equal(tres.balanceAfter, -5);
