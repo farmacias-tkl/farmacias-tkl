@@ -83,7 +83,7 @@ function WarningsBox({ validation }: { validation: any }) {
       {overlaps.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
           <p className="text-xs font-medium text-amber-900 px-3 py-1.5 border-b border-amber-200">
-            Cruces con el mismo puesto en franjas que se pisan
+            Cruces con el mismo puesto: se pisan en más de la mitad del turno
           </p>
           <table className="w-full text-xs text-amber-900">
             <thead>
@@ -99,7 +99,7 @@ function WarningsBox({ validation }: { validation: any }) {
                   <td className="px-3 py-1.5">{o.stateLabel}</td>
                   <td className="px-3 py-1.5">{o.branchName}</td>
                   <td className="px-3 py-1.5">
-                    {o.dates.length <= 4 ? o.dates.map(fmtDay).join(", ") : `${o.dates.length} días (${fmtDay(o.dates[0])} → ${fmtDay(o.dates[o.dates.length - 1])})`}
+                    {o.days.map((d: any) => `${fmtDay(d.date)} (${d.percent} %)`).join(", ")}
                     <br />{o.ranges.join(", ")}
                   </td>
                 </tr>

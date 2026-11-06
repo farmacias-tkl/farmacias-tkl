@@ -76,7 +76,7 @@ const EMP = [
 const HOR = [
   "apellido_nombre,contrato,vigente_desde,semana,referencia_ab,dia,tramo,entrada,salida,sucursal,otro_lugar",
   ...[1, 2, 3, 4, 5].map((d) => `"Cajera, Uno",TEK,2026-01-01,TODAS,,${d},1,08:00,14:00,,`),
-  ...[1, 2, 3, 4, 5].map((d) => `"Cajera, Dos",TEK,2026-01-01,TODAS,,${d},1,12:00,18:00,,`),
+  ...[1, 2, 3, 4, 5].map((d) => `"Cajera, Dos",TEK,2026-01-01,TODAS,,${d},1,10:00,16:00,,`),
   `"Homonimo, Igual",TEK,2026-01-01,TODAS,,1,1,08:00,12:00,,`,
   `"Homonimo, Igual",TEK,2026-01-01,TODAS,,1,2,15:00,19:00,GAL,`,
 ].join("\n");
@@ -296,7 +296,7 @@ async function main() {
       assert.ok(v.isValid);
       assert.equal(v.overlaps.length, 1);
       assert.equal(v.overlaps[0].employeeName, "Uno Cajera");
-      assert.deepEqual(v.overlaps[0].ranges, ["12:00–14:00"]);
+      assert.deepEqual(v.overlaps[0].ranges, ["10:00–14:00"]);
       assert.equal(v.overlaps[0].stateLabel, "vacaciones aprobadas");
       assert.ok(v.warnings.some((w) => w.type === "NO_FREE_ROTATIVE"));
     });

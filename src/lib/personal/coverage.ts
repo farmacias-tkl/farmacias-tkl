@@ -59,6 +59,22 @@ export interface OtherPerson {
   schedules: Schedule[];
 }
 
+/**
+ * Hay cruce si, al menos un día, el solapamiento supera esta fracción del turno
+ * de quien pide las vacaciones. Exactamente el umbral no advierte.
+ */
+export const VACATION_OVERLAP_THRESHOLD = 0.5;
+
+export interface OverlapDay {
+  date: string;
+  /** Minutos del turno de quien pide que también trabaja la otra persona. */
+  overlapMinutes: number;
+  /** Turno de quien pide ese día en esa sucursal (suma de sus tramos). */
+  shiftMinutes: number;
+  /** Porcentaje del turno, con un decimal. */
+  percent: number;
+}
+
 export interface OverlapDetail {
   employeeId: string;
   employeeName: string;
@@ -66,13 +82,17 @@ export interface OverlapDetail {
   kind: AbsenceKind;
   absenceId: string;
   branchId: string;
+  /** Solo los días que superan el umbral. */
+  days: OverlapDay[];
   dates: string[];
-  ranges: string[]; // franjas que se pisan, "08:00–12:00"
+  ranges: string[]; // franjas que se pisan esos días, "08:00–12:00"
 }
 
 /**
  * Otras personas con el mismo puesto, ausentes en fechas que se superponen, que
- * trabajan en la misma sucursal en franjas que se pisan al menos un día.
+ * trabajan en la misma sucursal y, al menos un día, se pisan en más del umbral
+ * del turno de quien pide (turno = sus tramos de ese día en esa sucursal; los
+ * turnos cortados suman los dos). Las semanas A/B salen de workedSlots.
  */
 export function findScheduleOverlaps(params: {
   positionKey: PositionKey | null;
@@ -94,19 +114,27 @@ export function findScheduleOverlaps(params: {
       const from = utcDay(startDate) > utcDay(abs.startDate) ? startDate : abs.startDate;
       const to = utcDay(endDate) < utcDay(abs.endDate) ? endDate : abs.endDate;
       const theirs = workedSlots(other.schedules, from, to);
-      const byBranch = new Map<string, { dates: Set<string>; ranges: Set<string> }>();
+      // Por sucursal y día: turno de quien pide, minutos que se pisan y franjas.
+      const byBranch = new Map<string, Map<string, { shift: number; overlap: number; ranges: Set<string> }>>();
       for (const a of mine) {
         if (!a.branchId) continue;
+        const days = byBranch.get(a.branchId) ?? new Map<string, { shift: number; overlap: number; ranges: Set<string> }>();
+        const day = days.get(a.date) ?? { shift: 0, overlap: 0, ranges: new Set<string>() };
+        day.shift += a.endMinute - a.startMinute;
         for (const b of theirs) {
           if (b.date !== a.date || b.branchId !== a.branchId || !timesOverlap(a, b)) continue;
-          const acc = byBranch.get(a.branchId) ?? { dates: new Set<string>(), ranges: new Set<string>() };
-          acc.dates.add(a.date);
           const s = Math.max(a.startMinute, b.startMinute), e = Math.min(a.endMinute, b.endMinute);
-          acc.ranges.add(`${fmtMinutes(s)}–${fmtMinutes(e)}`);
-          byBranch.set(a.branchId, acc);
+          day.overlap += e - s;
+          day.ranges.add(`${fmtMinutes(s)}–${fmtMinutes(e)}`);
         }
+        days.set(a.date, day);
+        byBranch.set(a.branchId, days);
       }
-      for (const [branchId, acc] of byBranch) {
+      for (const [branchId, days] of byBranch) {
+        const over = [...days.entries()]
+          .filter(([, d]) => d.overlap > d.shift * VACATION_OVERLAP_THRESHOLD)
+          .sort(([x], [y]) => x.localeCompare(y));
+        if (over.length === 0) continue;
         out.push({
           employeeId: other.employeeId,
           employeeName: other.name,
@@ -114,8 +142,14 @@ export function findScheduleOverlaps(params: {
           kind: abs.kind,
           absenceId: abs.id,
           branchId,
-          dates: [...acc.dates].sort(),
-          ranges: [...acc.ranges].sort(),
+          days: over.map(([date, d]) => ({
+            date,
+            overlapMinutes: d.overlap,
+            shiftMinutes: d.shift,
+            percent: Math.round((d.overlap / d.shift) * 1000) / 10,
+          })),
+          dates: over.map(([date]) => date),
+          ranges: [...new Set(over.flatMap(([, d]) => [...d.ranges]))].sort(),
         });
       }
     }

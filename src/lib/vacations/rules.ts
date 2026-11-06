@@ -13,7 +13,8 @@
 //   - duración que no es múltiplo de 7;
 //   - A: otro/a Encargado/a de la misma sucursal con vacaciones superpuestas;
 //   - cruce por horario real (reemplaza a C): mismo puesto, ausente en fechas
-//     superpuestas, misma sucursal y franjas que se pisan al menos un día;
+//     superpuestas, misma sucursal y, al menos un día, solapamiento mayor a la
+//     mitad del turno de quien pide (VACATION_OVERLAP_THRESHOLD);
 //   - puestos con rotativos en sucursal de zona CABA (reemplaza a B): ningún
 //     rotativo libre todo el período;
 //   - saldo insuficiente.
@@ -240,13 +241,13 @@ export function evaluateVacationRules(ctx: RuleContext): ValidationResult {
     for (const o of overlaps) {
       warnings.push({
         type: "SCHEDULE_OVERLAP",
-        message: `${o.employeeName} (${o.positionName}, ${o.stateLabel}) trabaja en ${o.branchName} en la misma franja: ${o.dates.length} día(s) desde ${o.dates[0]}, ${o.ranges.join(", ")}.`,
+        message: `${o.employeeName} (${o.positionName}, ${o.stateLabel}) trabaja en ${o.branchName} en la misma franja: ${o.dates.length} día(s) desde ${o.dates[0]}, ${o.ranges.join(", ")}, hasta ${Math.max(...o.days.map((d) => d.percent))} % del turno.`,
         conflictingEmployeeName: o.employeeName,
         conflictingBranchName: o.branchName,
       });
     }
     if (overlaps.length === 0) {
-      ruleResults.push({ rule: "horario", status: "OK", message: "Sin cruces de horario con el mismo puesto." });
+      ruleResults.push({ rule: "horario", status: "OK", message: "Sin cruces de horario sobre la mitad del turno con el mismo puesto." });
     }
   }
 

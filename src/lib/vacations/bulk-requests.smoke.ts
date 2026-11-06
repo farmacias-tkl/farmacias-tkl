@@ -87,7 +87,7 @@ async function main() {
       employeeId, validFrom: D("2026-01-01"),
       slots: { create: [1, 2, 3, 4, 5].map((d) => ({ dayOfWeek: d, slot: 1, startMinute: from * 60, endMinute: to * 60, branchId: "bT" })) },
     } });
-    await schedule("e1", 8, 14); await schedule("e2", 12, 18); await schedule("e3", 18, 22);
+    await schedule("e1", 8, 14); await schedule("e2", 10, 16); await schedule("e3", 18, 22);
     await db.vacationBalance.createMany({ data: [
       { employeeId: "e1", year: 2025, days: 30 }, { employeeId: "e2", year: 2025, days: 30 },
       { employeeId: "e3", year: 2025, days: 5 }, { employeeId: "e5", year: 2025, days: 21 },
