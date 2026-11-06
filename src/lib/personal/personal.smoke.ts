@@ -31,6 +31,7 @@ import assert from "node:assert/strict";
 const TEST_DB = "tkl_personal_smoke";
 const BASE_COMMIT = "5c2ba5b";
 const GATE = "prisma/gates/2026-10-29-personal-real.sql";
+const GATE_PASSWORD_EVENT = "prisma/gates/2026-11-06-password-changed-event.sql";
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 const m = fs.readFileSync(".env", "utf8").match(/^DATABASE_URL\s*=\s*"?([^"\n]+?)"?\s*$/m);
@@ -136,6 +137,8 @@ async function main() {
       for (const s of gate.data.slice(11)) assert.match(s, /^UPDATE "Branch" SET "zone" = '(CABA|PROVINCIA)'\s+WHERE "name" IN \([^)]+\)\s+AND "zone" IS NULL$/);
     });
     for (const s of [...gate.schema, ...gate.data]) await db.$executeRawUnsafe(s);
+    // Gates posteriores: solo agregan.
+    await db.$executeRawUnsafe(fs.readFileSync(GATE_PASSWORD_EVENT, "utf8").split(/\r?\n/).filter((l) => !l.trim().startsWith("--")).join("\n").trim().replace(/;$/, ""));
 
     // ---------------------------------------------------------------- 3
     await check("migrate diff (DB con el SQL aplicado → schema.prisma) da vacío", async () => {
@@ -146,6 +149,17 @@ async function main() {
     // ---------------------------------------------------------------- 4
     await check("filas existentes idénticas en sus columnas (Branch, Employee, Position, User)", async () => {
       assert.equal(await oldFingerprint(), before);
+    });
+    await check("SecurityEvent de cambio de contraseña: se graba con el tipo nuevo y la fecha", async () => {
+      const { passwordChangedEvent } = await import("@/lib/users/password-change-event");
+      const headers = new Headers({ "x-forwarded-for": "203.0.113.5", "user-agent": "smoke" });
+      const ev = await db.securityEvent.create({ data: passwordChangedEvent({ id: "u1", email: "sup@example.test" }, headers) });
+      assert.equal(ev.type, "USER_PASSWORD_CHANGED");
+      assert.equal(ev.userId, "u1");
+      assert.equal(ev.actorId, "u1");
+      assert.equal(ev.ip, "203.0.113.5");
+      assert.ok(Date.now() - ev.createdAt.getTime() < 60_000);
+      assert.equal(JSON.stringify(ev.detail).includes("password"), false);
     });
     await check("Branch.code: 11 operativas con código; Call Center null; Patricios sigue PAT", async () => {
       const rows = await db.branch.findMany({ select: { name: true, code: true } });
