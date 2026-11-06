@@ -1,10 +1,11 @@
 /**
- * Tests PUROS de los feriados 2027.
+ * Tests PUROS de los feriados 2026 y 2027.
  *
  *   npx tsx src/lib/holidays/ar-2027.test.ts
  *
  * exit 0 si todos pasan, exit 1 si alguno falla.
  */
+import { AR_HOLIDAYS_2026 } from "./ar-2026";
 import { AR_HOLIDAYS_2027 } from "./ar-2027";
 import { getHoliday, isHoliday } from "./index";
 
@@ -52,7 +53,13 @@ const pending = AR_HOLIDAYS_2027.filter((h) => h.unconfirmed);
 assert("sin confirmar: solo el 20/11 (cae sábado)", pending.length === 1 && pending[0].date === "2027-11-20" && weekday("2027-11-20") === 6);
 assert("Jueves Santo no es feriado (día no laborable)", !isHoliday(D("2027-03-25")));
 assert("getHoliday devuelve el nombre", getHoliday(D("2027-07-09"))?.name === "Día de la Independencia");
-assert("2026 sigue cargado", isHoliday(D("2026-12-25")));
+
+const y26 = AR_HOLIDAYS_2026.map((h) => h.date);
+const e26 = easter(2026);
+assert("2026: 19 fechas (16 feriados y 3 puentes), en orden y con fuente", y26.length === 19 && new Set(y26).size === 19 && [...y26].sort().join() === y26.join() && AR_HOLIDAYS_2026.every((h) => !!h.source));
+assert("2026: Carnaval y Viernes Santo salen de Pascua (05/04)", iso(e26) === "2026-04-05" && y26.includes(offset(e26, -2)) && y26.includes(offset(e26, -48)) && y26.includes(offset(e26, -47)));
+assert("2026: trasladables efectivos 15/06 y 23/11; 17/06 y 20/11 no son feriado", isHoliday(D("2026-06-15")) && isHoliday(D("2026-11-23")) && !isHoliday(D("2026-06-17")) && !isHoliday(D("2026-11-20")));
+assert("2026: los puentes de la Resolución 164/2025", ["2026-03-23", "2026-07-10", "2026-12-07"].every((d) => isHoliday(D(d))));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

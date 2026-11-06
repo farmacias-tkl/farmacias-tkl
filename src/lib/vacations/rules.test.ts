@@ -108,6 +108,14 @@ console.log("\nInicio: primer día hábil de la semana (feriados 2027)");
   assert("primer día hábil desde cualquier día de la semana", toISODate(firstWorkingDayOfWeek(D("2027-02-14"))) === "2027-02-10");
 }
 
+console.log("\nInicio: feriados 2026");
+{
+  const inicio = (s: string) => ruleStatus(evaluateVacationRules(base({ startDate: D(s), endDate: D(s) })), "inicio");
+  assert("puente lun 7/12 y feriado mar 8/12: el miércoles 9 es válido", inicio("2026-12-09") === "OK");
+  assert("semana del 7/12: el lunes y el martes advierten", inicio("2026-12-07") === "WARNING" && inicio("2026-12-08") === "WARNING");
+  assert("Soberanía movida al lun 23/11: el martes 24 es válido y el lunes advierte", inicio("2026-11-24") === "OK" && inicio("2026-11-23") === "WARNING");
+}
+
 console.log("\nBloqueos que se mantienen");
 {
   const r = evaluateVacationRules(base({ startDate: D("2026-11-15"), endDate: D("2026-11-02") }));
