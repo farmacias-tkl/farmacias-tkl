@@ -1,3 +1,4 @@
+import { todayRangeAR } from "@/lib/dates/today";
 import { parseCalendarDate } from "@/lib/dates/calendar";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -37,8 +38,7 @@ export default async function SucursalDetailPage({
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(today); todayEnd.setHours(23, 59, 59, 999);
+  const { today, todayEnd } = todayRangeAR();
 
   const branch = await prisma.branch.findUnique({
     where: { id: params.id },

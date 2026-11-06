@@ -1,3 +1,4 @@
+import { todayRangeAR } from "@/lib/dates/today";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
@@ -17,8 +18,7 @@ export default async function EmpleadoDetailPage({
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const today    = new Date(); today.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+  const { today, todayEnd } = todayRangeAR();
   const now      = new Date();
 
   const [

@@ -4,12 +4,13 @@
  *
  * BRANCH_MANAGER: branchId forzado en backend, no puede ver otras sucursales.
  */
+import { todayRangeAR } from "@/lib/dates/today";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
-import { typeAllowsReasonDetail } from "@/lib/absences";
+import { enrichAbsence, typeAllowsReasonDetail } from "@/lib/absences";
 
 const ABSENCE_TYPES = ["SICKNESS","PERSONAL_REASON","NO_SHOW","LATE_NOTICE",
   "LATE_ARRIVAL","MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE","SUSPENSION","OTHER"] as const;
@@ -31,17 +32,6 @@ const createSchema = z.object({
   actualArrivalTime:            z.string().optional().nullable().transform(d => d ? new Date(d) : null),
   lateMinutes:                  z.number().int().optional().nullable(),
 });
-
-function enrichAbsence(a: any) {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const start = new Date(a.startDate); start.setHours(0,0,0,0);
-  const end   = new Date(a.endDate);   end.setHours(0,0,0,0);
-  return {
-    ...a,
-    totalDays:     Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
-    isActiveToday: start <= today && today <= end,
-  };
-}
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -76,8 +66,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (activeOnly) {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const end   = new Date(today); end.setHours(23,59,59,999);
+    const { today, todayEnd: end } = todayRangeAR();
     where.startDate = { lte: end };
     where.endDate   = { gte: today };
   }
@@ -103,7 +92,7 @@ export async function GET(req: NextRequest) {
   ]);
 
   return NextResponse.json({
-    data: absences.map(enrichAbsence),
+    data: absences.map((a) => enrichAbsence(a)),
     meta: { total, page, limit, pages: Math.ceil(total / limit) },
   });
 }

@@ -1,3 +1,4 @@
+import { todayRangeAR } from "@/lib/dates/today";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -30,8 +31,7 @@ export default async function DashboardPage() {
   const firstName       = name.split(" ")[0];
   const isBranchManager = role === "BRANCH_MANAGER" && !!branchId;
 
-  const today    = new Date(); today.setHours(0,0,0,0);
-  const todayEnd = new Date(today); todayEnd.setHours(23,59,59,999);
+  const { today, todayEnd } = todayRangeAR();
 
   // Filtros según rol
   const absWhere: any = { startDate: { lte: todayEnd }, endDate: { gte: today } };
@@ -97,7 +97,7 @@ export default async function DashboardPage() {
     .filter(m => m.roles.includes(role as UserRole) || m.roles.includes("ALL" as UserRole));
 
   const todayFormatted = today.toLocaleDateString("es-AR", {
-    weekday: "long", day: "numeric", month: "long",
+    weekday: "long", day: "numeric", month: "long", timeZone: "UTC",
   });
 
   const hasAlerts = totalFuera > 0 || criticalUncov.length > 0 || sinRevisar > 0;
