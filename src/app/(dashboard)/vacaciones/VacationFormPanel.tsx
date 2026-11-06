@@ -1,4 +1,5 @@
 "use client";
+import { toLocalISODate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, XCircle, Info } from "lucide-react";
@@ -24,7 +25,7 @@ interface Validation {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
+  return toLocalISODate(new Date());
 }
 
 export default function VacationFormPanel({

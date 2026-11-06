@@ -1,3 +1,4 @@
+import { emailEquals } from "@/lib/users/email";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
@@ -16,8 +17,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
+        const user = await prisma.user.findFirst({
+          where: { email: emailEquals(credentials.email as string) },
           select: { id: true, name: true, email: true, role: true, branchId: true, mustChangePassword: true, active: true, passwordHash: true, executiveAccess: true, callCenterAccess: true },
         });
         if (!user || !user.active) return null;

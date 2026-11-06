@@ -3,6 +3,7 @@
 // advertencias con el detalle de los cruces, rotativos libres y botones
 // Aprobar / Aprobar igual / Rechazar. Más el cambio de cobertura de una
 // solicitud aprobada.
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2, XCircle, Users } from "lucide-react";
@@ -20,8 +21,8 @@ export interface BalancePreviewView {
 
 // Fechas "YYYY-MM-DD" o @db.Date: siempre en UTC.
 const fmtDay = (d: string) =>
-  new Date(d.length === 10 ? `${d}T00:00:00Z` : d)
-    .toLocaleDateString("es-AR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  parseCalendarDate(d)
+    .toLocaleDateString("es-AR", { weekday: "short", day: "numeric", month: "short" });
 
 export function BalanceBox({ b }: { b: BalancePreviewView | null | undefined }) {
   if (!b) return null;

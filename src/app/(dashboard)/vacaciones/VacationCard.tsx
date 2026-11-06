@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import {
   CheckCircle2, XCircle, Clock, AlertTriangle, Ban, ChevronRight, Users,
 } from "lucide-react";
@@ -19,9 +20,9 @@ interface Props {
   onClick:  () => void;
 }
 
-// startDate/endDate son @db.Date (00:00 UTC): se formatean en UTC.
+// startDate/endDate son fechas de solo día.
 function fmt(date: string | Date): string {
-  return new Date(date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+  return parseCalendarDate(date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 function initials(name: string): string {

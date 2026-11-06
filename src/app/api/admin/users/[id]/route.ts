@@ -4,6 +4,7 @@
  *
  * Solo ADMIN. No se permite borrar usuarios.
  */
+import { emailEquals, emailField } from "@/lib/users/email";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -14,7 +15,7 @@ import { z } from "zod";
 // La edicion de OWNER y otros ADMIN esta reservada al panel /owner (solo OWNER).
 const patchSchema = z.object({
   name:       z.string().min(2).optional(),
-  email:      z.string().email().optional(),
+  email:      emailField().optional(),
   role:       z.enum(["SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]).optional(),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
@@ -113,7 +114,7 @@ export async function PATCH(
 
   // Email único si cambia
   if (parsed.data.email && parsed.data.email !== user.email) {
-    const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+    const existing = await prisma.user.findFirst({ where: { email: emailEquals(parsed.data.email), id: { not: user.id } } });
     if (existing) {
       return NextResponse.json({ error: "Ya existe un usuario con ese email" }, { status: 409 });
     }

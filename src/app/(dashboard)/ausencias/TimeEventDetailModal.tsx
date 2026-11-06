@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -101,7 +102,7 @@ interface Props {
 }
 
 function fmtDate(d: string | Date): string {
-  return new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
+  return parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
 }
 function fmtDateTime(d: string | Date): string {
   return new Date(d).toLocaleString("es-AR", {
@@ -118,7 +119,7 @@ export default function TimeEventDetailModal({
   const [view,  setView]  = useState<"detail" | ActionKind>("detail");
   const [note,  setNote]  = useState("");
   const [amount, setAmount] = useState(""); // solo "compensate"
-  const [compDate, setCompDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [compDate, setCompDate] = useState<string>(() => toLocalISODate(new Date()));
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -169,7 +170,7 @@ export default function TimeEventDetailModal({
     setView(kind);
     setNote("");
     setAmount(kind === "compensate" && e ? String(e.minutesRemaining) : "");
-    setCompDate(new Date().toISOString().split("T")[0]);
+    setCompDate(toLocalISODate(new Date()));
     setError(null);
   };
   const cancelAction = () => {

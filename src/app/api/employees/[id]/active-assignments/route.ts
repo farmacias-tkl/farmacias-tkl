@@ -7,6 +7,7 @@
  *
  * Solo devuelve asignaciones con status = ACTIVE.
  */
+import { endOfUtcDay, utcDay } from "@/lib/personal/dates";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -31,8 +32,8 @@ export async function GET(
     );
   }
 
-  const startDate = new Date(startStr); startDate.setHours(0,0,0,0);
-  const endDate   = new Date(endStr);   endDate.setHours(23,59,59,999);
+  const startDate = utcDay(new Date(startStr));
+  const endDate   = endOfUtcDay(new Date(endStr));
 
   const assignments = await prisma.employeeBranchAssignment.findMany({
     where: {

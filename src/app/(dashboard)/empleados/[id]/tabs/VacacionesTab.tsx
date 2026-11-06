@@ -1,11 +1,12 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useQuery } from "@tanstack/react-query";
 import { Umbrella } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Fechas @db.Date (00:00 UTC): se muestran en UTC para no correr un día.
+// Fechas de solo día.
 const fmtDay = (d: string) =>
-  new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+  parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
 const fmtWhen = (d: string) =>
   new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
 

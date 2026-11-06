@@ -10,6 +10,7 @@
  * SecurityEvent emitido cuando cambia rol (USER_ROLE_CHANGED) o active
  * (USER_ACTIVATED / USER_DEACTIVATED).
  */
+import { emailEquals, emailField } from "@/lib/users/email";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -18,7 +19,7 @@ import { z } from "zod";
 
 const patchSchema = z.object({
   name:       z.string().min(2).optional(),
-  email:      z.string().email().optional(),
+  email:      emailField().optional(),
   role:       z.enum(["OWNER","ADMIN","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]).optional(),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
@@ -114,7 +115,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   // Email unico si cambia
   if (data.email && data.email !== user.email) {
-    const existing = await prisma.user.findUnique({ where: { email: data.email } });
+    const existing = await prisma.user.findFirst({ where: { email: emailEquals(data.email), id: { not: user.id } } });
     if (existing) {
       return NextResponse.json({ error: "Ya existe un usuario con ese email" }, { status: 409 });
     }

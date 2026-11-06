@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -354,7 +355,7 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
             </div>
             <div>
               <p className="font-medium text-gray-900">{emp.firstName} {emp.lastName}</p>
-              {emp.hireDate && <p className="text-xs text-gray-400">Desde {new Date(emp.hireDate).getFullYear()}</p>}
+              {emp.hireDate && <p className="text-xs text-gray-400">Desde {parseCalendarDate(emp.hireDate).getFullYear()}</p>}
             </div>
           </div>
         </td>

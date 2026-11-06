@@ -1,4 +1,5 @@
 "use client";
+import { toLocalISODate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -40,7 +41,7 @@ function buildInitialFormData(): FormData {
 export default function NuevoPlanForm({ employeeId, branchId }: Props) {
   const router = useRouter();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalISODate(new Date());
 
   const [date,            setDate]            = useState(today);
   const [deadline,        setDeadline]        = useState("");

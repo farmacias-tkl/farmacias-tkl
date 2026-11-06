@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
 };
 
 const fmt = (d: string) =>
-  new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+  parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 
 export default function HistorialSucursalesTab({ employeeId }: { employeeId: string }) {
   const { data, isLoading } = useQuery({

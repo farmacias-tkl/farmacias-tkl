@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -56,7 +57,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   CLOSED:       { label: "Cerrada",       color: "bg-gray-50 text-gray-600 border-gray-200",      icon: CheckCircle2 },
 };
 
-const todayStr = new Date().toISOString().split("T")[0];
+const todayStr = toLocalISODate(new Date());
 
 const baseSchema = {
   startDate:           z.string().min(1, "Obligatoria"),
@@ -884,8 +885,8 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
   const meta = STATUS_META[a.status] ?? STATUS_META.REPORTED;
   const SI   = meta.icon;
 
-  const start = new Date(a.startDate);
-  const end   = new Date(a.endDate);
+  const start = parseCalendarDate(a.startDate);
+  const end   = parseCalendarDate(a.endDate);
   const isSameDay = start.toDateString() === end.toDateString();
   const fmt = (d: Date) => d.toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 

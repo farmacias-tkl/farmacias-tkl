@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -27,7 +28,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   REJECTED: { label: "Rechazada",  color: "bg-red-50 text-red-800 border-red-200",         icon: XCircle },
 };
 
-const today = new Date().toISOString().split("T")[0];
+const today = toLocalISODate(new Date());
 
 const createSchema = z.object({
   employeeId: z.string().min(1, "Empleado obligatorio"),
@@ -268,7 +269,7 @@ function OvertimeCard({ record: r }: { record: any }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[r.status] ?? STATUS_META.REPORTED;
   const SI   = meta.icon;
-  const date = new Date(r.date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+  const date = parseCalendarDate(r.date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
   const hasDetail = r.notes || r.rejectionReason;
 
   return (

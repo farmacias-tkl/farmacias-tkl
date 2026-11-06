@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import {
   Clock, LogOut, ChevronRight, CheckCircle2, XCircle, Ban,
   AlertTriangle, ClipboardCheck, Hourglass,
@@ -22,7 +23,7 @@ interface Props {
 }
 
 function fmtDate(d: string | Date): string {
-  return new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
+  return parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 function fmtTime(d: string | Date): string {

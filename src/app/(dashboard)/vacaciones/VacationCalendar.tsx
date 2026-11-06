@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   addMonths, formatMonthLong, getMonthGrid, isSameDay,
-  startOfDay, WEEKDAY_LABELS_SHORT,
+  startOfDay, parseCalendarDate, WEEKDAY_LABELS_SHORT,
 } from "@/lib/dates/calendar";
 import { VACATION_STATUS_LABEL, visibleVacationStatuses } from "@/lib/vacations/status-labels";
 
@@ -64,8 +64,8 @@ export default function VacationCalendar({
   // Pre-procesar eventos parseando fechas
   const parsedEvents = useMemo(() => events.map(e => ({
     ...e,
-    _start: startOfDay(new Date(e.startDate)),
-    _end:   startOfDay(new Date(e.endDate)),
+    _start: parseCalendarDate(e.startDate),
+    _end:   parseCalendarDate(e.endDate),
   })), [events]);
 
   const changeMonth = (delta: number) => {

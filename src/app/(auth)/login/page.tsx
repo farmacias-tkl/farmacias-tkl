@@ -1,4 +1,5 @@
 "use client";
+import { emailField } from "@/lib/users/email";
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, getSession } from "next-auth/react";
@@ -9,7 +10,7 @@ import { Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
-  email:    z.string().email("Email invalido"),
+  email:    emailField("Email invalido"),
   password: z.string().min(1, "Contrasena obligatoria"),
 });
 type F = z.infer<typeof schema>;

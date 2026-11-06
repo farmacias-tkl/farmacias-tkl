@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AlertTriangle, Clock, LogOut, ArrowLeft } from "lucide-react";
@@ -15,14 +16,14 @@ interface Props {
 type SubType = "LATE_ARRIVAL" | "EARLY_DEPARTURE";
 
 function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
+  return toLocalISODate(new Date());
 }
 
 function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
   if (!dateStr || !timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
   if (isNaN(h) || isNaN(m)) return null;
-  const d = new Date(dateStr);
+  const d = parseCalendarDate(dateStr);
   d.setHours(h, m, 0, 0);
   return d;
 }

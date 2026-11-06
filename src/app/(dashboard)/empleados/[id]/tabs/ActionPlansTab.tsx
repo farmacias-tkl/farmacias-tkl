@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -100,7 +101,7 @@ function PlanCard({ plan: p, onOpen }: {
   const meta = STATUS_META[p.status] ?? STATUS_META.OPEN;
   const SI   = meta.icon;
   const fmt  = (d: string) =>
-    new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+    parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 
   return (
     <div

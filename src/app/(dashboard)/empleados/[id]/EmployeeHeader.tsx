@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import {
   Briefcase, Building2, Calendar, CheckCircle2, XCircle,
   RotateCcw, AlertTriangle, Clock,
@@ -40,7 +41,7 @@ interface Props {
 }
 
 function seniority(iso: string): string {
-  const ms    = Date.now() - new Date(iso).getTime();
+  const ms    = Date.now() - parseCalendarDate(iso).getTime();
   const years = Math.floor(ms / (365.25 * 24 * 60 * 60 * 1000));
   if (years === 0) {
     const months = Math.floor(ms / (30.44 * 24 * 60 * 60 * 1000));
@@ -121,7 +122,7 @@ export default function EmployeeHeader({ employee: e, activeAbsences, overdueCou
             {e.hireDate ? (
               <span className="flex items-center gap-1">
                 <Calendar className="w-3 h-3" />
-                {new Date(e.hireDate).toLocaleDateString("es-AR", { month: "long", year: "numeric" })}
+                {parseCalendarDate(e.hireDate).toLocaleDateString("es-AR", { month: "long", year: "numeric" })}
                 <span className="text-gray-400">· {seniority(e.hireDate)} de antigüedad</span>
               </span>
             ) : (

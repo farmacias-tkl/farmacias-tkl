@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Clock, UserMinus, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,7 +20,7 @@ const PLAN_STATUS_META: Record<string, { label: string; color: string }> = {
 };
 
 const fmt = (d: string) =>
-  new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
+  parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 
 interface Props {
   employeeId: string;

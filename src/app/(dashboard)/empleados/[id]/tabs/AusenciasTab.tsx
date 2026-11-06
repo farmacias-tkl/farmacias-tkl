@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { typeAllowsReasonDetail } from "@/lib/absences";
 import Link from "next/link";
 import { useState } from "react";
@@ -106,8 +107,8 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
   const meta = STATUS_META[a.status] ?? STATUS_META.REPORTED;
   const SI   = meta.icon;
 
-  const start = new Date(a.startDate);
-  const end   = new Date(a.endDate);
+  const start = parseCalendarDate(a.startDate);
+  const end   = parseCalendarDate(a.endDate);
   const same  = start.toDateString() === end.toDateString();
   const fmt   = (d: Date) => d.toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 

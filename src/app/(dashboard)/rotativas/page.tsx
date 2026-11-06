@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   COMPLETED: { label: "Completada", color: "bg-gray-50 text-gray-600 border-gray-200",      icon: CheckCircle2 },
 };
 
-const todayStr = new Date().toISOString().split("T")[0];
+const todayStr = toLocalISODate(new Date());
 
 const createSchema = z.object({
   employeeId: z.string().min(1, "Rotativa obligatoria"),
@@ -337,8 +338,8 @@ function AssignmentCard({ assignment: a, canManage, onCancel, onComplete }: {
   const meta = STATUS_META[a.status] ?? STATUS_META.ACTIVE;
   const SI   = meta.icon;
 
-  const start = new Date(a.startDate);
-  const end   = a.endDate ? new Date(a.endDate) : null;
+  const start = parseCalendarDate(a.startDate);
+  const end   = a.endDate ? parseCalendarDate(a.endDate) : null;
   const fmt   = (d: Date) => d.toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 
   const typeLabel = ASSIGNMENT_TYPES.find(t => t.value === a.type)?.label ?? a.type;

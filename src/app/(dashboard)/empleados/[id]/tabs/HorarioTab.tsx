@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -6,7 +7,7 @@ import { DAY_NAMES, fmtMinutes } from "@/lib/personal/schedule";
 
 // Fechas @db.Date (00:00 UTC): se muestran en UTC para no correr un día.
 const fmt = (d: string) =>
-  new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 
 const WEEK_LABEL: Record<string, string> = { ALL: "Todas las semanas", A: "Semana A", B: "Semana B" };
 

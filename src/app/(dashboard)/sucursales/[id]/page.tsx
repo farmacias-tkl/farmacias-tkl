@@ -1,3 +1,4 @@
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -209,8 +210,8 @@ export default async function SucursalDetailPage({
                 const typeMeta   = ABSENCE_TYPE_META[(a as any).absenceType] ?? { label: "Otro", color: "bg-gray-100 text-gray-600" };
                 const statusMeta = STATUS_META[(a as any).status] ?? { label: "Reportada", color: "bg-yellow-50 text-yellow-700" };
 
-                const start = new Date(a.startDate);
-                const end   = new Date(a.endDate);
+                const start = parseCalendarDate(a.startDate);
+                const end   = parseCalendarDate(a.endDate);
                 const isSameDay = start.toDateString() === end.toDateString();
                 const fmt = (d: Date) => d.toLocaleDateString("es-AR", { day: "numeric", month: "short" });
                 const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
@@ -289,7 +290,7 @@ export default async function SucursalDetailPage({
                           </p>
                           {emp.hireDate && (
                             <p className="text-xs text-gray-400">
-                              Desde {new Date(emp.hireDate).getFullYear()}
+                              Desde {parseCalendarDate(emp.hireDate).getFullYear()}
                             </p>
                           )}
                         </td>

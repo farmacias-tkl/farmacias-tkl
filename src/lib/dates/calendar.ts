@@ -5,6 +5,21 @@
 // Todas las fechas se manejan en zona local del servidor/cliente.
 // =============================================================================
 
+/**
+ * Fecha de SOLO DÍA (inicio/fin de vacaciones y ausencias, horas extras,
+ * ingreso, plazos, etc.) → Date a las 00:00 locales de ESE MISMO día, sin
+ * conversión de zona. Es la única forma de leerlas para mostrarlas o compararlas
+ * con días locales: se guardan a las 00:00 UTC y llegan como "YYYY-MM-DD",
+ * ISO completo o Date, y `new Date(x)` las muestra un día antes en Argentina.
+ *
+ * No usar con instantes con hora real (createdAt, horarios de llegada).
+ */
+export function parseCalendarDate(value: string | Date): Date {
+  const iso = typeof value === "string" ? value : Number.isNaN(value.getTime()) ? "" : value.toISOString();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(NaN);
+}
+
 /** Devuelve un Date al inicio del día (00:00:00) en zona local. */
 export function startOfDay(d: Date): Date {
   const c = new Date(d);

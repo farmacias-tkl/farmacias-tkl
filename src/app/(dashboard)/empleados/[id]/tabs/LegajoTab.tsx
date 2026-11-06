@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -38,7 +39,7 @@ export default function LegajoTab({ employee: e }: { employee: Employee }) {
   const { data: positions } = useQuery({ queryKey: ["positions-list"], queryFn: () => fetchList("/api/positions"), enabled: editing });
 
   const hireDateFmt = e.hireDate
-    ? new Date(e.hireDate).toLocaleDateString("es-AR", {
+    ? parseCalendarDate(e.hireDate).toLocaleDateString("es-AR", {
         day: "numeric", month: "long", year: "numeric",
       })
     : null;

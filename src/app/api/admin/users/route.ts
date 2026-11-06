@@ -4,6 +4,7 @@
  *
  * Solo ADMIN.
  */
+import { emailEquals, emailField } from "@/lib/users/email";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -19,7 +20,7 @@ const ROLES_WITH_BRANCH = ["BRANCH_MANAGER"];
 // La gestion de OWNER y otros ADMIN esta reservada al panel /owner (solo OWNER).
 const createSchema = z.object({
   name:       z.string().min(2, "Nombre obligatorio"),
-  email:      z.string().email("Email invalido"),
+  email:      emailField("Email invalido"),
   role:       z.enum(["SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Email único
-  const existing = await prisma.user.findUnique({ where: { email: data.email } });
+  const existing = await prisma.user.findFirst({ where: { email: emailEquals(data.email) } });
   if (existing) {
     return NextResponse.json(
       { error: "Ya existe un usuario con ese email" },

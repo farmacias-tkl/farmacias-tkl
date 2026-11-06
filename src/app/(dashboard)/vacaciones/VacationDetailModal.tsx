@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -83,10 +84,10 @@ const ACTIONS: Record<ActionKind, ActionConfig> = {
   },
 };
 
-// startDate/endDate son @db.Date (00:00 UTC): se formatean en UTC.
+// startDate/endDate son fechas de solo día.
 function fmtDate(d: string | Date): string {
-  return new Date(d).toLocaleDateString("es-AR", {
-    weekday: "short", day: "numeric", month: "short", year: "2-digit", timeZone: "UTC",
+  return parseCalendarDate(d).toLocaleDateString("es-AR", {
+    weekday: "short", day: "numeric", month: "short", year: "2-digit",
   });
 }
 

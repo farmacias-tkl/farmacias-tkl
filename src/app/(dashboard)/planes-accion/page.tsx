@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -127,7 +128,7 @@ function PlanCard({ plan: p, onOpen }: {
 }) {
   const meta = STATUS_META[p.status] ?? STATUS_META.OPEN;
   const SI   = meta.icon;
-  const deadline = new Date(p.deadline);
+  const deadline = parseCalendarDate(p.deadline);
 
   return (
     <div

@@ -5,6 +5,7 @@
  * Solo OWNER. Cuando se crea un OWNER, se loguea SecurityEvent con
  * detail.isOwner: true para distinguirlo en queries.
  */
+import { emailEquals, emailField } from "@/lib/users/email";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -16,7 +17,7 @@ import bcrypt from "bcryptjs";
 
 const createSchema = z.object({
   name:       z.string().min(2, "Nombre obligatorio"),
-  email:      z.string().email("Email invalido"),
+  email:      emailField("Email invalido"),
   role:       z.enum(["OWNER","ADMIN","SUPERVISOR","HR","BRANCH_MANAGER","MAINTENANCE"]),
   branchId:   z.string().optional().nullable(),
   employeeId: z.string().optional().nullable(),
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "El rol Encargado/a requiere una sucursal asignada" }, { status: 400 });
   }
 
-  const existing = await prisma.user.findUnique({ where: { email: data.email } });
+  const existing = await prisma.user.findFirst({ where: { email: emailEquals(data.email) } });
   if (existing) {
     return NextResponse.json({ error: "Ya existe un usuario con ese email" }, { status: 409 });
   }

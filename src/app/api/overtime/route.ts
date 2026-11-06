@@ -7,15 +7,12 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
+import { utcDay } from "@/lib/personal/dates";
 
 const createSchema = z.object({
   employeeId: z.string().min(1),
   branchId:   z.string().min(1),
-  date:       z.string().transform(d => {
-    const dt = new Date(d);
-    dt.setHours(0,0,0,0);
-    return dt;
-  }),
+  date:       z.string().transform(d => utcDay(new Date(d))),
   hours:  z.number().min(0.5).max(24),
   reason: z.enum(["ABSENCE_COVERAGE","VACATION_COVERAGE","UNDERSTAFFING","HIGH_DEMAND","OTHER"]),
   notes:  z.string().optional().nullable(),

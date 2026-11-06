@@ -37,6 +37,11 @@ export function diffDays(a: Date, b: Date): number {
   return Math.round((utcDay(b).getTime() - utcDay(a).getTime()) / DAY_MS);
 }
 
+/** Último milisegundo del día calendario (UTC) de d. */
+export function endOfUtcDay(d: Date): Date {
+  return new Date(utcDay(d).getTime() + 86_399_999);
+}
+
 /** 1 = lunes … 7 = domingo. */
 export function isoWeekday(d: Date): number {
   const w = d.getUTCDay();

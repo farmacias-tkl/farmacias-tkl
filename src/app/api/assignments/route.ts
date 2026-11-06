@@ -10,14 +10,15 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
+import { endOfUtcDay, utcDay } from "@/lib/personal/dates";
 
 const createSchema = z.object({
   employeeId:  z.string().min(1, "Rotativa obligatoria"),
   branchId:    z.string().min(1, "Sucursal obligatoria"),
   positionId:  z.string().optional().nullable(),  // puesto cubierto
   type:        z.enum(["ROTATION", "TEMPORARY_COVERAGE"]),
-  startDate:   z.string().transform(d => { const dt = new Date(d); dt.setHours(0,0,0,0); return dt; }),
-  endDate:     z.string().transform(d => { const dt = new Date(d); dt.setHours(23,59,59,999); return dt; }),
+  startDate:   z.string().transform(d => utcDay(new Date(d))),
+  endDate:     z.string().transform(d => endOfUtcDay(new Date(d))),
   reason:      z.string().optional().nullable(),
   notes:       z.string().optional().nullable(),
 });

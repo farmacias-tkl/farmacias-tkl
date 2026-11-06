@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -35,7 +36,7 @@ interface Props {
 }
 
 const fmtDate = (d?: string | Date | null) =>
-  d ? new Date(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" }) : "—";
+  d ? parseCalendarDate(d).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
 export default function ActionPlanDetailModal({ open, plan, canManage, onClose, onChanged }: Props) {
   const [busy, setBusy]   = useState(false);

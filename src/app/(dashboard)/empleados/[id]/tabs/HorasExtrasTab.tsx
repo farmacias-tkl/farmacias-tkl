@@ -1,4 +1,5 @@
 "use client";
+import { parseCalendarDate } from "@/lib/dates/calendar";
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -72,7 +73,7 @@ function OvertimeCard({ record: r }: { record: any }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[r.status] ?? STATUS_META.REPORTED;
   const SI   = meta.icon;
-  const date = new Date(r.date).toLocaleDateString("es-AR", {
+  const date = parseCalendarDate(r.date).toLocaleDateString("es-AR", {
     day: "numeric", month: "short", year: "numeric",
   });
 
