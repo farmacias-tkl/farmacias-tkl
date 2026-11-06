@@ -1,3 +1,4 @@
+import { actionPlanOverdueWhere } from "@/lib/action-plan-overdue";
 import { todayRangeAR } from "@/lib/dates/today";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -19,7 +20,6 @@ export default async function EmpleadoDetailPage({
   if (!session?.user) redirect("/login");
 
   const { today, todayEnd } = todayRangeAR();
-  const now      = new Date();
 
   const [
     employee,
@@ -61,8 +61,7 @@ export default async function EmpleadoDetailPage({
     prisma.actionPlan.count({
       where: {
         employeeId: params.id,
-        deadline:   { lt: now },
-        status:     { notIn: ["COMPLETED", "CLOSED", "CANCELLED"] },
+        ...actionPlanOverdueWhere(),
       },
     }),
     prisma.absenceRecord.count({ where: { employeeId: params.id } }),

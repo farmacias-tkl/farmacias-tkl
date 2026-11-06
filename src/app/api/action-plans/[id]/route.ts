@@ -2,6 +2,7 @@
  * GET  /api/action-plans/[id]
  * PATCH /api/action-plans/[id]  — solo actualiza status, cierra automáticamente en estados terminales
  */
+import { isActionPlanOverdue } from "@/lib/action-plan-overdue";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -50,11 +51,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const today = new Date();
   return NextResponse.json({
     data: {
       ...plan,
-      isOverdue: plan.deadline < today && !TERMINAL.includes(plan.status as Terminal),
+      isOverdue: isActionPlanOverdue(plan),
     },
   });
 }

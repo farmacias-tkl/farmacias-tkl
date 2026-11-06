@@ -81,6 +81,21 @@ async function main() {
       assert.equal(d.ausentes, 0);
       assert.equal(d.totalPlantel, 2);
     });
+    await check("planes de acción: el del plazo 06/11 vence al empezar el 07/11 en Argentina", async () => {
+      const { actionPlanOverdueWhere, isActionPlanOverdue } = await import("@/lib/action-plan-overdue");
+      const plan = await db.actionPlan.create({ data: {
+        employeeId: "e1", branchId: "b1", createdByUserId: "u1", date: D("2026-11-01"), reason: "Prueba",
+        requiredActions: "Prueba", deadline: D("2026-11-06"),
+      } });
+      const count = (now: Date) => db.actionPlan.count({ where: actionPlanOverdueWhere(now) });
+      assert.equal(await count(new Date("2026-11-06T01:30:00Z")), 0); // 05/11 22:30
+      assert.equal(await count(NIGHT), 0);                            // 06/11 22:30
+      assert.equal(await count(NEXT_DAY), 1);
+      assert.equal(isActionPlanOverdue(plan, NIGHT), false);
+      assert.equal(isActionPlanOverdue(plan, NEXT_DAY), true);
+      await db.actionPlan.update({ where: { id: plan.id }, data: { status: "COMPLETED" } });
+      assert.equal(await count(NEXT_DAY), 0);
+    });
     await check("el filtro de ausentes de hoy (dashboard, sucursales, employees, absences) trae lo mismo", async () => {
       const count = (now: Date) => {
         const { today, todayEnd } = todayRangeAR(now);

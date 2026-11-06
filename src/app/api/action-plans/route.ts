@@ -4,6 +4,7 @@
  * BRANCH_MANAGER: GET forzado a su sucursal.
  * La creación de planes se hace exclusivamente vía POST /api/action-plan-forms/complete.
  */
+import { isActionPlanOverdue } from "@/lib/action-plan-overdue";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -52,10 +53,9 @@ export async function GET(req: NextRequest) {
     prisma.actionPlan.count({ where }),
   ]);
 
-  const today = new Date();
   const enriched = plans.map(p => ({
     ...p,
-    isOverdue: p.deadline < today && !["COMPLETED","CLOSED","CANCELLED"].includes(p.status),
+    isOverdue: isActionPlanOverdue(p),
   }));
 
   return NextResponse.json({
