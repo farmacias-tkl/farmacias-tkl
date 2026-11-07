@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
     where.startDate = { gt: today, lte: in7Days };
   }
 
-  const [assignments, total] = await Promise.all([
+  const [assignments, total, assignedToday] = await Promise.all([
     prisma.employeeBranchAssignment.findMany({
       where,
       include: {
@@ -81,10 +81,23 @@ export async function GET(req: NextRequest) {
       take: limit,
     }),
     prisma.employeeBranchAssignment.count({ where }),
+    // Quiénes están asignadas hoy, para el encabezado: no depende de la vista ni de la página.
+    prisma.employeeBranchAssignment.findMany({
+      where: {
+        type: { in: ["ROTATION", "TEMPORARY_COVERAGE"] },
+        status: "ACTIVE",
+        ...(forcedBranch ? { branchId: forcedBranch } : branchId ? { branchId } : {}),
+        ...(employeeId ? { employeeId } : {}),
+        startDate: { lte: todayEnd },
+        OR: [{ endDate: null }, { endDate: { gte: today } }],
+      },
+      select: { employeeId: true },
+    }),
   ]);
 
   // Enriquecer con estado operativo hoy
-  const empIds = assignments.map(a => a.employeeId);
+  const assignedTodayIds = assignedToday.map(a => a.employeeId);
+  const empIds = [...new Set([...assignments.map(a => a.employeeId), ...assignedTodayIds])];
   const ausenciasHoy = empIds.length > 0
     ? await prisma.absenceRecord.findMany({
         where: {
@@ -106,7 +119,13 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     data: enriched,
-    meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    meta: {
+      total, page, limit, pages: Math.ceil(total / limit),
+      today: {
+        active: assignedToday.length,
+        absent: assignedTodayIds.filter(id => absMap.has(id)).length,
+      },
+    },
   });
 }
 

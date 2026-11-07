@@ -84,7 +84,7 @@ export default function RotativasPage() {
 
   const { data: posRes } = useQuery({
     queryKey: ["positions"],
-    queryFn:  () => fetch("/api/positions").then(r => r.json()),
+    queryFn:  () => fetch("/api/positions?basic=true").then(r => r.json()),
     enabled:  sessionReady,
   });
 
@@ -131,8 +131,9 @@ export default function RotativasPage() {
     return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
   }
 
-  const activeToday = assignments.filter((a: any) => a.isActiveToday && a.status === "ACTIVE").length;
-  const absentToday = assignments.filter((a: any) => a.isActiveToday && a.employeeAbsentToday).length;
+  // Totales reales de hoy, sin importar la vista, los filtros o la página.
+  const activeToday = assignRes?.meta?.today?.active ?? 0;
+  const absentToday = assignRes?.meta?.today?.absent ?? 0;
 
   return (
     <div className="space-y-4">

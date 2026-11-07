@@ -40,7 +40,7 @@ async function fetchBranches() {
 }
 
 async function fetchPositions() {
-  const res = await fetch("/api/positions");
+  const res = await fetch("/api/positions?basic=true");
   const json = await res.json();
   if (!res.ok) throw new Error(json.error ?? "Error al cargar puestos");
   return json;
@@ -117,10 +117,10 @@ export default function EmpleadosPage() {
   const employees = empData?.data    ?? [];
   const total     = empData?.meta?.total ?? 0;
 
-  // Desglose "fuera hoy"
+  // Desglose "fuera hoy": total real del filtro, no solo de la página visible.
   const fueraHoy = {
-    ausente:  employees.filter((e: any) => e.statusHoy === "ABSENT").length,
-    licencia: employees.filter((e: any) => e.statusHoy === "ON_LEAVE").length,
+    ausente:  empData?.meta?.outToday?.absent  ?? 0,
+    licencia: empData?.meta?.outToday?.onLeave ?? 0,
   };
   const totalFuera = fueraHoy.ausente + fueraHoy.licencia;
 

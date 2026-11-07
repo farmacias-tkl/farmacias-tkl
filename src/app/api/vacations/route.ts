@@ -66,17 +66,15 @@ export async function GET(req: NextRequest) {
   const [data, total] = await Promise.all([
     prisma.vacationRequest.findMany({
       where,
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true, isRotating: true } },
-        branch:   { select: { id: true, name: true } },
-        position: { select: { id: true, name: true } },
-        requestedBy:        { select: { id: true, name: true } },
-        supervisorActionBy: { select: { id: true, name: true } },
-        rrhhActionBy:       { select: { id: true, name: true } },
-        coverages: {
-          where:  { status: "ACTIVE" },
-          select: { id: true, employee: { select: { id: true, firstName: true, lastName: true } } },
-        },
+      // Lo que muestran la lista y el calendario. El resto va en /api/vacations/[id].
+      select: {
+        id: true, status: true, conflictLevel: true, withoutCoverage: true, approvedWithWarnings: true,
+        employeeNameSnapshot: true, branchNameSnapshot: true, positionNameSnapshot: true,
+        startDate: true, endDate: true, daysCount: true,
+        createdAt: true, updatedAt: true, supervisorActionAt: true, rrhhActionAt: true,
+        requestedBy:        { select: { name: true } },
+        supervisorActionBy: { select: { name: true } },
+        rrhhActionBy:       { select: { name: true } },
       },
       orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
       skip: (page - 1) * limit,

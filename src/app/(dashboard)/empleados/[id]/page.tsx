@@ -32,7 +32,10 @@ export default async function EmpleadoDetailPage({
   ] = await Promise.all([
     prisma.employee.findUnique({
       where: { id: params.id },
-      include: {
+      select: {
+        id: true, firstName: true, lastName: true, active: true, isRotating: true,
+        hireDate: true, workScheduleNotes: true, notes: true, currentBranchId: true,
+        isTechnicalDirector: true, weeklyHours: true, extraTasks: true,
         position:      { select: { id: true, name: true, requiresCoverage: true } },
         secondaryPosition: { select: { id: true, name: true } },
         currentBranch: { select: { id: true, name: true } },

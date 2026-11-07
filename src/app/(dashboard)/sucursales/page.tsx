@@ -25,11 +25,12 @@ export default async function SucursalesPage() {
   const branches = await prisma.branch.findMany({
     where: { showInOperative: true },
     orderBy: { name: "asc" },
-    include: {
+    select: {
+      id: true, name: true, address: true, active: true,
       _count: { select: { employees: { where: { active: true } } } },
       absenceRecords: {
         where: { startDate: { lte: todayEnd }, endDate: { gte: today } },
-        include: { employee: { select: { position: { select: { requiresCoverage: true } } } } },
+        select: { employee: { select: { position: { select: { requiresCoverage: true } } } } },
       },
     },
   });

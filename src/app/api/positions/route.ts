@@ -24,6 +24,16 @@ export async function GET(req: NextRequest) {
 
   const includeInactive = req.nextUrl.searchParams.get("includeInactive") === "true";
 
+  // basic=true: solo lo que necesitan filtros y formularios (sin alcance ni permisos).
+  if (req.nextUrl.searchParams.get("basic") === "true") {
+    const data = await prisma.position.findMany({
+      where:   includeInactive ? undefined : { active: true },
+      select:  { id: true, name: true, requiresCoverage: true, isRotatingRole: true, active: true },
+      orderBy: { name: "asc" },
+    });
+    return NextResponse.json({ data });
+  }
+
   const positions = await prisma.position.findMany({
     where:   includeInactive ? undefined : { active: true },
     include: {

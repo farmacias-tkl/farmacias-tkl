@@ -42,11 +42,13 @@ export default async function SucursalDetailPage({
 
   const branch = await prisma.branch.findUnique({
     where: { id: params.id },
-    include: {
+    select: {
+      id: true, name: true, address: true, phone: true, active: true, notes: true,
       employees: {
         where: { active: true },
-        include: {
-          position: { select: { id: true, name: true, requiresCoverage: true, isRotatingRole: true } },
+        select: {
+          id: true, firstName: true, lastName: true, hireDate: true,
+          position: { select: { name: true, requiresCoverage: true } },
         },
         orderBy: [{ position: { name: "asc" } }, { lastName: "asc" }],
       },
@@ -55,7 +57,8 @@ export default async function SucursalDetailPage({
           startDate: { lte: todayEnd },
           endDate:   { gte: today },
         },
-        include: {
+        select: {
+          id: true, employeeId: true, absenceType: true, status: true, startDate: true, endDate: true,
           employee: {
             select: {
               id: true, firstName: true, lastName: true,
@@ -82,14 +85,6 @@ export default async function SucursalDetailPage({
   const criticalToday = branch.absenceRecords.filter(
     a => a.employee.position.requiresCoverage
   );
-
-  // Agrupar empleados por puesto
-  const byPosition = branch.employees.reduce<Record<string, typeof branch.employees>>((acc, emp) => {
-    const key = emp.position.name;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(emp);
-    return acc;
-  }, {});
 
   const dotacion     = branch.employees.length;
   const ausentes     = branch.absenceRecords.length;

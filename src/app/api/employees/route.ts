@@ -112,7 +112,11 @@ export async function GET(req: NextRequest) {
   const [employees, total] = await Promise.all([
     prisma.employee.findMany({
       where,
-      include: {
+      select: {
+        id: true, firstName: true, lastName: true, active: true, isRotating: true, zone: true,
+        hireDate: true, notes: true, workScheduleNotes: true, isTechnicalDirector: true,
+        positionId: true, secondaryPositionId: true, currentBranchId: true, contractBranchId: true,
+        weeklyHours: true, extraTasks: true, maxConcurrentAssignments: true,
         position:      { select: { id: true, name: true, requiresCoverage: true, isRotatingRole: true } },
         secondaryPosition: { select: { id: true, name: true } },
         currentBranch: { select: { id: true, name: true } },
@@ -133,28 +137,33 @@ export async function GET(req: NextRequest) {
       : null,
   }));
 
-  if (withStatus && employees.length > 0) {
+  // Ausentes y con licencia hoy entre TODOS los que cumplen el filtro, no solo
+  // los de esta página: la lista está paginada y el total tiene que ser real.
+  let outToday: { absent: number; onLeave: number } | undefined;
+  if (withStatus) {
     const { today, todayEnd } = todayRangeAR();
-    const ids      = employees.map(e => e.id);
-
     const absences = await prisma.absenceRecord.findMany({
-      where: { employeeId: { in: ids }, startDate: { lte: todayEnd }, endDate: { gte: today } },
+      where: { employee: where, startDate: { lte: todayEnd }, endDate: { gte: today } },
       select: { employeeId: true, absenceType: true },
     });
 
     const absMap = new Map(absences.map(a => [a.employeeId, a.absenceType]));
+    const statusOf = (aType: string) =>
+      ["MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE"].includes(aType) ? "ON_LEAVE" : "ABSENT";
+    const statuses = [...absMap.values()].map(statusOf);
+    outToday = {
+      absent:  statuses.filter(s => s === "ABSENT").length,
+      onLeave: statuses.filter(s => s === "ON_LEAVE").length,
+    };
     data = data.map(emp => {
-      const aType    = absMap.get(emp.id);
-      const statusHoy = !aType ? "ACTIVE"
-        : ["MEDICAL_LEAVE","MATERNITY_LEAVE","SPECIAL_LEAVE"].includes(aType) ? "ON_LEAVE"
-        : "ABSENT";
-      return { ...emp, statusHoy };
+      const aType = absMap.get(emp.id);
+      return { ...emp, statusHoy: aType ? statusOf(aType) : "ACTIVE" };
     });
   }
 
   return NextResponse.json({
     data,
-    meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    meta: { total, page, limit, pages: Math.ceil(total / limit), outToday },
   });
 }
 

@@ -36,7 +36,7 @@ export default function LegajoTab({ employee: e }: { employee: Employee }) {
   const canEdit = role ? can.manageEmployees(role) : false;
   const [editing, setEditing] = useState(false);
   const { data: branches } = useQuery({ queryKey: ["branches-list"], queryFn: () => fetchList("/api/branches"), enabled: editing });
-  const { data: positions } = useQuery({ queryKey: ["positions-list"], queryFn: () => fetchList("/api/positions"), enabled: editing });
+  const { data: positions } = useQuery({ queryKey: ["positions-list"], queryFn: () => fetchList("/api/positions?basic=true"), enabled: editing });
 
   const hireDateFmt = e.hireDate
     ? parseCalendarDate(e.hireDate).toLocaleDateString("es-AR", {

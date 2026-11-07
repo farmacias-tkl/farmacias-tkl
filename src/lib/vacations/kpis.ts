@@ -73,10 +73,12 @@ export type VacationKpiCounts = Record<VacationKpi, number>;
 
 export async function countVacationKpis(
   db: Db,
-  p: { branchId?: string | null; now?: Date } = {},
+  p: { branchId?: string | null; now?: Date; only?: readonly VacationKpi[] } = {},
 ): Promise<VacationKpiCounts> {
   const scope: Prisma.VacationRequestWhereInput = p.branchId ? { branchId: p.branchId } : {};
-  const count = (kpi: VacationKpi) => db.vacationRequest.count({ where: { AND: [scope, kpiWhere(kpi, p.now)] } });
+  // only: los indicadores que no se piden quedan en 0, sin ir a la base.
+  const count = async (kpi: VacationKpi) => p.only && !p.only.includes(kpi) ? 0
+    : db.vacationRequest.count({ where: { AND: [scope, kpiWhere(kpi, p.now)] } });
   const [solicitadas, aprobadas, rechazadas, hoy] = await Promise.all(VACATION_KPIS.map(count));
   return { solicitadas, aprobadas, rechazadas, hoy };
 }

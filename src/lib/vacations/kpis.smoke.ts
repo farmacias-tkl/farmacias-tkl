@@ -101,6 +101,10 @@ async function main() {
         assert.deepEqual(ids, EXPECTED[k], k);
       }
     });
+    await check("only: cuenta solo lo pedido y el resto queda en 0", async () => {
+      const c = await countVacationKpis(db, { now: NOW, only: ["solicitadas", "hoy"] });
+      assert.deepEqual(c, { solicitadas: 3, aprobadas: 0, rechazadas: 0, hoy: 2 });
+    });
     await check("por sucursal: la otra sucursal no cuenta", async () => {
       assert.deepEqual(await countVacationKpis(db, { branchId: "bA", now: NOW }), { solicitadas: 2, aprobadas: 4, rechazadas: 3, hoy: 2 });
       assert.deepEqual(await countVacationKpis(db, { branchId: "bB", now: NOW }), { solicitadas: 1, aprobadas: 0, rechazadas: 0, hoy: 0 });

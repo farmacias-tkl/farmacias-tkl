@@ -41,21 +41,43 @@ export default async function DashboardPage() {
     empWhere.currentBranchId = branchId;
   }
 
-  // Ausencias activas hoy con detalle
-  const absencesHoy = await prisma.absenceRecord.findMany({
-    where: absWhere,
-    include: {
-      employee: {
-        select: {
-          firstName: true, lastName: true,
-          position: { select: { name: true, requiresCoverage: true } },
+  const showVacations = canAccessRoute(role as UserRole, "/vacaciones");
+  const showRotativas = canAccessRoute(role as UserRole, "/rotativas");
+  const showBranches  = !isBranchManager && can.viewAllBranches(role as UserRole);
+
+  const [absencesHoy, totalEmployees, totalBranches, vacationKpis, rotativasHoy] = await Promise.all([
+    // Todas las de hoy, sin tope: de acá salen los totales de las tarjetas.
+    prisma.absenceRecord.findMany({
+      where: absWhere,
+      select: {
+        id: true, absenceType: true, status: true,
+        employee: {
+          select: {
+            firstName: true, lastName: true,
+            position: { select: { name: true, requiresCoverage: true } },
+          },
         },
+        branch: { select: { name: true } },
       },
-      branch: { select: { name: true } },
-    },
-    take: 10,
-    orderBy: { startDate: "desc" },
-  });
+      orderBy: { startDate: "desc" },
+    }),
+    role === "MAINTENANCE" ? 0 : prisma.employee.count({ where: empWhere }),
+    showBranches ? prisma.branch.count({ where: { active: true, showInOperative: true } }) : 0,
+    // Vacaciones: mismos criterios que los indicadores de /vacaciones.
+    // Encargado/a sin sucursal: no ve otras sucursales (queda en 0).
+    !showVacations ? null
+      : role === "BRANCH_MANAGER" && !branchId ? { solicitadas: 0, hoy: 0 }
+      : countVacationKpis(prisma, { branchId: role === "BRANCH_MANAGER" ? branchId : null, only: ["solicitadas", "hoy"] }),
+    // Rotativas: coberturas y rotaciones activas que incluyen hoy (mismo criterio que la pantalla Rotativas).
+    !showRotativas ? 0 : prisma.employeeBranchAssignment.count({
+      where: {
+        status: "ACTIVE",
+        type: { in: ["ROTATION", "TEMPORARY_COVERAGE"] },
+        startDate: { lte: todayEnd },
+        OR: [{ endDate: null }, { endDate: { gte: today } }],
+      },
+    }),
+  ]);
 
   // Desglose: ausencias puntuales vs licencias
   const ausenciasPuntuales = absencesHoy.filter(
@@ -69,30 +91,7 @@ export default async function DashboardPage() {
 
   const totalFuera      = absencesHoy.length; // + vacaciones.length cuando exista
   const criticalUncov   = absencesHoy.filter(a => a.employee.position.requiresCoverage);
-  const sinRevisar      = await prisma.absenceRecord.count({ where: { ...absWhere, status: "REPORTED" } });
-
-  const [totalEmployees, totalBranches] = await Promise.all([
-    prisma.employee.count({ where: empWhere }),
-    prisma.branch.count({ where: { active: true, showInOperative: true } }),
-  ]);
-
-  // Vacaciones: mismos criterios que los indicadores de /vacaciones.
-  // Encargado/a sin sucursal: no ve otras sucursales (queda en 0).
-  const showVacations = canAccessRoute(role as UserRole, "/vacaciones");
-  const vacationKpis = !showVacations ? null
-    : role === "BRANCH_MANAGER" && !branchId ? { solicitadas: 0, hoy: 0 }
-    : await countVacationKpis(prisma, { branchId: role === "BRANCH_MANAGER" ? branchId : null });
-
-  // Rotativas: coberturas y rotaciones activas que incluyen hoy (mismo criterio que la pantalla Rotativas).
-  const showRotativas = canAccessRoute(role as UserRole, "/rotativas");
-  const rotativasHoy = !showRotativas ? 0 : await prisma.employeeBranchAssignment.count({
-    where: {
-      status: "ACTIVE",
-      type: { in: ["ROTATION", "TEMPORARY_COVERAGE"] },
-      startDate: { lte: todayEnd },
-      OR: [{ endDate: null }, { endDate: { gte: today } }],
-    },
-  });
+  const sinRevisar      = absencesHoy.filter(a => a.status === "REPORTED").length;
   const upcomingModules = UPCOMING_MODULES
     .filter(m => m.roles.includes(role as UserRole) || m.roles.includes("ALL" as UserRole));
 
