@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, CalendarDays, List, LayoutGrid } from "lucide-react";
+import { Plus, CalendarDays, CalendarRange, List, LayoutGrid } from "lucide-react";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
@@ -18,8 +18,11 @@ import type { VacationKpi } from "@/lib/vacations/kpis";
 import VacationDetailModal from "./VacationDetailModal";
 import VacationDayPanel from "./VacationDayPanel";
 import EmployeeSearchInput from "./EmployeeSearchInput";
+import VacationAgenda from "./VacationAgenda";
+import { weekRange } from "@/lib/vacations/agenda";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 
-type ViewMode = "list" | "calendar";
+type ViewMode = "list" | "calendar" | "agenda";
 
 export default function VacacionesPage() {
   const { data: session, status } = useSession();
@@ -39,6 +42,8 @@ export default function VacacionesPage() {
   const [kpiFilter,   setKpiFilter]   = useState<VacationKpi | null>(null);
   // Mes visible del calendario; default hoy
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  // Cualquier día de la semana visible en la agenda (celular)
+  const [agendaDate, setAgendaDate] = useState<Date>(new Date());
   // Modal de detalle
   const [detailId, setDetailId] = useState<string | null>(null);
   // Panel del día del calendario ("YYYY-MM-DD"). Sigue abierto debajo de la ficha.
@@ -72,11 +77,12 @@ export default function VacacionesPage() {
   // Rango del calendario: la grilla 7x6 cubre desde un día previo al mes
   // hasta varios después. Pedimos exactamente ese rango al backend.
   const calendarRange = useMemo(() => {
+    if (viewMode === "agenda") return weekRange(agendaDate);
     const grid = getMonthGrid(calendarMonth.getFullYear(), calendarMonth.getMonth());
     const from = grid[0][0];
     const last = grid[grid.length - 1][6];
     return { from, to: last };
-  }, [calendarMonth]);
+  }, [calendarMonth, agendaDate, viewMode]);
 
   // Filtros del calendario: los mismos para la grilla y para el panel del día.
   const calendarFilters = useMemo(() => {
@@ -120,7 +126,7 @@ export default function VacacionesPage() {
       if (!res.ok) throw new Error("Error al cargar vacaciones");
       return res.json();
     },
-    enabled: sessionReady && viewMode === "calendar",
+    enabled: sessionReady && viewMode !== "list",
     placeholderData: keepPreviousData,
   });
   const calLoading = calFirstLoad || calChanging;
@@ -167,29 +173,41 @@ export default function VacacionesPage() {
       )}
 
       {/* Toggle Lista / Calendario */}
-      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-full md:w-fit">
         <button
           onClick={() => setViewMode("list")}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+            "flex flex-1 md:flex-none justify-center items-center gap-1 md:gap-1.5 px-1 md:px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
             viewMode === "list" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
           )}
         >
-          <List className="w-3.5 h-3.5" />Lista
+          <List className="w-3.5 h-3.5 shrink-0" />Lista
         </button>
         <button
           onClick={() => setViewMode("calendar")}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+            "flex flex-1 md:flex-none justify-center items-center gap-1 md:gap-1.5 px-1 md:px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
             viewMode === "calendar" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
           )}
         >
-          <LayoutGrid className="w-3.5 h-3.5" />Calendario
+          <LayoutGrid className="w-3.5 h-3.5 shrink-0" />Calendario
+        </button>
+        <button
+          onClick={() => setViewMode("agenda")}
+          className={cn(
+            "flex flex-1 justify-center items-center gap-1 px-1 py-1.5 rounded-md text-xs font-medium transition-colors md:hidden",
+            viewMode === "agenda" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+          )}
+        >
+          <CalendarRange className="w-3.5 h-3.5 shrink-0" />Agenda
         </button>
       </div>
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2 items-center">
+        <FilterPanel
+          activeCount={[!isBranchManager && branchFilter, statusFilter, flagFilter, viewMode === "list" && pendingOnly, empFilter].filter(Boolean).length}
+          onClear={() => { setBranchFilter(""); setStatusFilter(""); setFlagFilter(""); setPendingOnly(false); setEmpFilter(null); }}>
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
             <option value="">Todas las sucursales</option>
@@ -219,6 +237,7 @@ export default function VacacionesPage() {
             branchId={effectiveBranchId || undefined}
           />
         </div>
+        </FilterPanel>
       </div>
 
       {/* Vista */}
@@ -237,6 +256,15 @@ export default function VacacionesPage() {
             ))}
           </div>
         )
+      ) : viewMode === "agenda" ? (
+        <VacationAgenda
+          events={calData}
+          date={agendaDate}
+          loading={calLoading}
+          onDateChange={setAgendaDate}
+          onEventClick={setDetailId}
+          onDayClick={setDayPanel}
+        />
       ) : (
         <div className="relative">
           {calLoading && (

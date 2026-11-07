@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AsyncButton } from "@/components/ui/AsyncButton";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import {
   Plus, Search, Users, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, AlertTriangle, RotateCcw, UserMinus,
@@ -151,7 +152,7 @@ export default function EmpleadosPage() {
     <div className="space-y-4">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Empleados</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -196,7 +197,7 @@ export default function EmpleadosPage() {
 
       {/* Formulario */}
       {showForm && !isOwner && (
-        <div className="card p-5">
+        <div className="card p-5 form-sheet">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Nuevo empleado</h3>
           {(positions.length === 0 || branches.length === 0) && (
             <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 mb-4">
@@ -222,12 +223,15 @@ export default function EmpleadosPage() {
       )}
 
       {/* Filtros — encargado no ve filtro de sucursal */}
-      <div className="flex flex-wrap gap-2">
-        <div className="relative flex-1 min-w-[160px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full md:w-auto md:flex-1 md:min-w-[160px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Buscar por nombre..." className="input pl-9" />
         </div>
+        <FilterPanel
+          activeCount={[branchFilter, contractFilter, posFilter, showInactive].filter(Boolean).length}
+          onClear={() => { setBranchFilter(""); setContractFilter(""); setPosFilter(""); setShowInactive(false); }}>
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
             <option value="">Trabaja en: todas</option>
@@ -248,6 +252,7 @@ export default function EmpleadosPage() {
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} className="rounded" />
           Ver inactivos
         </label>
+        </FilterPanel>
       </div>
 
       {/* Tabla */}
@@ -273,7 +278,14 @@ export default function EmpleadosPage() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Celular: tarjetas; al tocar se abre el detalle. */}
+          <ul className="divide-y divide-gray-100 md:hidden">
+            {employees.map((emp: any) => (
+              <EmployeeMobileCard key={emp.id} emp={emp} isOwner={isOwner} canManage={canCreate}
+                onUpdate={() => qc.invalidateQueries({ queryKey: ["employees"] })} />
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -298,7 +310,7 @@ export default function EmpleadosPage() {
             </table>
           </div>
           {empData?.meta && (
-            <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-500 flex items-center justify-between gap-2">
+            <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
               <span>
                 {empData.meta.total} empleados · Página {empData.meta.page} de {Math.max(1, empData.meta.pages)}
               </span>
@@ -319,6 +331,67 @@ export default function EmpleadosPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Tarjeta de celular: lo esencial; al tocar, el detalle y las acciones. */
+function EmployeeMobileCard({ emp, isOwner, canManage, onUpdate }: {
+  emp: any; isOwner: boolean; canManage: boolean; onUpdate: () => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const sm = STATUS_HOY[emp.statusHoy ?? "ACTIVE"] ?? STATUS_HOY.ACTIVE;
+  const SI = sm.icon;
+
+  const toggleActive = async () => {
+    await fetch(`/api/employees/${emp.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: !emp.active }),
+    });
+    await onUpdate();
+  };
+
+  return (
+    <li className={cn(!emp.active && "opacity-60")}>
+      <button type="button" onClick={() => setExpanded(v => !v)} aria-expanded={expanded}
+        className="flex w-full items-start gap-3 px-4 py-3 text-left">
+        <div className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+          emp.isRotating ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700",
+          !emp.active && "bg-gray-100 text-gray-400",
+        )}>
+          {emp.isRotating ? <RotateCcw className="w-4 h-4" /> : `${emp.firstName?.[0] ?? ""}${emp.lastName?.[0] ?? ""}`}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="break-words text-sm font-medium text-gray-900">{emp.firstName} {emp.lastName}</p>
+          <p className="break-words text-sm text-gray-600">{emp.position?.name ?? "—"}</p>
+          <p className="break-words text-sm text-gray-500">{emp.currentBranch?.name ?? "Sin sucursal fija"}</p>
+          <span className={cn("mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium", sm.color)}>
+            <SI className="w-3 h-3" />{sm.label}
+          </span>
+          {!emp.active && <span className="ml-2 text-xs font-medium text-gray-400">Inactivo</span>}
+        </div>
+        {expanded ? <ChevronUp className="mt-1 w-4 h-4 shrink-0 text-gray-400" /> : <ChevronDown className="mt-1 w-4 h-4 shrink-0 text-gray-400" />}
+      </button>
+      {expanded && (
+        <div className="space-y-2 bg-gray-50/70 px-4 py-3">
+          {emp.notes && <p className="text-xs italic text-gray-500">{emp.notes}</p>}
+          {emp.workScheduleNotes && <p className="text-xs text-gray-400">Horario: {emp.workScheduleNotes}</p>}
+          {emp.vacationBalanceTotal !== null && emp.vacationBalanceTotal !== undefined && (
+            <p className="text-xs text-gray-600">Saldo de vacaciones: {emp.vacationBalanceTotal} d</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Link href={`/empleados/${emp.id}`} className="btn-secondary justify-center">Ver ficha →</Link>
+            {canManage && !isOwner && (
+              <AsyncButton onClick={toggleActive}
+                className={cn("btn-secondary", !emp.active && "text-green-700 border-green-300 hover:bg-green-50")}>
+                {emp.active ? "Dar de baja" : "Reactivar"}
+              </AsyncButton>
+            )}
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 

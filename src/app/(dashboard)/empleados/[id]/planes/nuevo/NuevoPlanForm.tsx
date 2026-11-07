@@ -313,7 +313,7 @@ export default function NuevoPlanForm({ employeeId, branchId }: Props) {
         <p className="error-msg">{error}</p>
       )}
 
-      <div className="flex gap-3">
+      <div className="form-actions flex gap-3">
         <button
           type="submit"
           disabled={saving || submitted}

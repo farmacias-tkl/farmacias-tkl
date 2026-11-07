@@ -265,7 +265,7 @@ export default async function SucursalDetailPage({
                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       Nombre
                     </th>
-                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <th className="hidden sm:table-cell text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                       Puesto
                     </th>
                     <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -283,13 +283,14 @@ export default async function SucursalDetailPage({
                           <p className="font-medium text-gray-900 text-sm">
                             {emp.firstName} {emp.lastName}
                           </p>
+                          <p className="text-sm text-gray-600 sm:hidden">{emp.position.name}</p>
                           {emp.hireDate && (
                             <p className="text-xs text-gray-400">
                               Desde {parseCalendarDate(emp.hireDate).getFullYear()}
                             </p>
                           )}
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="hidden sm:table-cell px-4 py-2.5">
                           <span className="text-sm text-gray-600">{emp.position.name}</span>
                           {emp.position.requiresCoverage && (
                             <span className="ml-1.5 text-[10px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded">

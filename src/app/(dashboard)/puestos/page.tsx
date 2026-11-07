@@ -90,7 +90,7 @@ export default function PuestosPage() {
     <div className="space-y-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Puestos</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -117,7 +117,7 @@ export default function PuestosPage() {
 
       {/* Formulario de creación */}
       {showForm && isAdmin && (
-        <div className="card p-5">
+        <div className="card p-5 form-sheet">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Nuevo puesto</h3>
           <form onSubmit={handleSubmit(d => createMut.mutate(d))} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -177,7 +177,7 @@ export default function PuestosPage() {
               <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{serverErr}</p>
             )}
 
-            <div className="flex gap-2 justify-end">
+            <div className="form-actions flex gap-2 justify-end">
               <button
                 type="button"
                 onClick={() => { setShowForm(false); reset(); setServerErr(""); }}
@@ -215,8 +215,8 @@ export default function PuestosPage() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="md:overflow-x-auto">
+            <table className="stack-table w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">

@@ -215,7 +215,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
             </p>
           )}
 
-          <div className="flex gap-2 justify-end">
+          <div className="form-actions flex gap-2 justify-end">
             {saveOk && <span className="text-sm text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />Guardado</span>}
             <button type="submit" disabled={!isDirty || isSubmitting} className="btn-primary disabled:opacity-50">
               {isSubmitting ? "Guardando..." : "Guardar cambios"}

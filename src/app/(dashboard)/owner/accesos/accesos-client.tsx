@@ -100,16 +100,16 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
-        <div className="relative">
+        <div className="relative w-full md:w-auto">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar por nombre o email..."
-            className="input pl-9 w-64"
+            className="input pl-9 w-full md:w-64"
           />
         </div>
-        <select value={filter} onChange={e => setFilter(e.target.value as FilterValue)} className="input w-auto">
+        <select value={filter} onChange={e => setFilter(e.target.value as FilterValue)} className="input w-full md:w-auto">
           <option value="all">Todos</option>
           <option value="with-access">Con acceso ejecutivo</option>
           <option value="without-access">Sin acceso ejecutivo</option>
@@ -129,8 +129,8 @@ export function AccessosClient({ currentUserId }: { currentUserId: string }) {
           <p className="text-sm text-gray-400">No hay usuarios con los filtros aplicados.</p>
         </div>
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="card overflow-hidden md:overflow-x-auto">
+          <table className="stack-table w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Usuario</th>

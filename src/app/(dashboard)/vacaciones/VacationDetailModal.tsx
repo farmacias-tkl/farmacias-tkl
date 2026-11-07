@@ -261,7 +261,7 @@ export default function VacationDetailModal({
             </div>
           )}
 
-          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+          <div className="form-actions flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
             <button
               onClick={cancelAction}
               disabled={busy}
@@ -390,7 +390,7 @@ export default function VacationDetailModal({
 
           {/* Acciones */}
           {(availableActions.length > 0 || canChangeCoverage) && (
-            <div className="border-t border-gray-100 pt-4 flex flex-wrap gap-2 justify-end">
+            <div className={cn("border-t border-gray-100 pt-4 flex flex-wrap gap-2 justify-end", !showApprovalPanel && "form-actions")}>
               {canChangeCoverage && (
                 <button onClick={() => { setView("coverage"); setError(null); }}
                   className="btn-secondary text-xs py-1.5 px-3">

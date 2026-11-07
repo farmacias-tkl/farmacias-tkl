@@ -2,42 +2,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import {
-  LayoutDashboard, CalendarDays, Users, Wrench, ClipboardList,
-  MessageSquare, BellDot, Settings, LogOut, ChevronRight,
-  X, MapPin, UserMinus, RotateCcw, Clock, FileWarning,
-  User, ShieldCheck, Briefcase, Crown,
-} from "lucide-react";
+import { LogOut, ChevronRight, User } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 import { visibleMenu, ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
-
-const ROUTE_META: Record<string, { label: string; icon: React.ElementType }> = {
-  "/dashboard":      { label: "Dashboard",        icon: LayoutDashboard },
-  "/sucursales":     { label: "Sucursales",        icon: MapPin          },
-  "/empleados":      { label: "Empleados",         icon: Users           },
-  "/ausencias":      { label: "Asistencia",        icon: UserMinus       },
-  "/planes-accion":  { label: "Planes de accion",  icon: FileWarning     },
-  "/horas-extras":   { label: "Horas extras",      icon: Clock           },
-  "/vacaciones":     { label: "Vacaciones",        icon: CalendarDays    },
-  "/rotativas":      { label: "Rotativas",         icon: RotateCcw       },
-  "/mantenimiento":  { label: "Mantenimiento",     icon: Wrench          },
-  "/tareas":         { label: "Tareas",            icon: ClipboardList   },
-  "/whatsapp":       { label: "WhatsApp",          icon: MessageSquare   },
-  "/alertas":        { label: "Alertas",           icon: BellDot         },
-  "/puestos":        { label: "Puestos",           icon: Briefcase       },
-  "/admin":          { label: "Administracion",    icon: Settings        },
-  "/admin/usuarios": { label: "Usuarios",          icon: ShieldCheck     },
-  "/owner":          { label: "Panel Direccion",   icon: Crown           },
-};
+import { isRouteActive, ROUTE_META } from "./menu-meta";
 
 interface SidebarProps {
   user: { name: string; email: string; role: UserRole; branchId: string | null };
-  open: boolean;
-  onClose: () => void;
 }
 
-export function Sidebar({ user, open, onClose }: SidebarProps) {
+/** Menú lateral de escritorio. En celular y tablet navega BottomNav. */
+export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
 
   // Rutas del menú excluyendo /perfil (va en zona de usuario)
@@ -45,33 +21,21 @@ export function Sidebar({ user, open, onClose }: SidebarProps) {
   const menuRoutes = menu.filter(r => r !== "/perfil");
   const hasPerfil  = menu.includes("/perfil");
 
-  const isActive = (route: string) =>
-    route === "/dashboard"
-      ? pathname === "/dashboard"
-      : pathname === route || pathname.startsWith(route + "/");
+  const isActive = (route: string) => isRouteActive(route, pathname);
 
   return (
     <>
-      {open && (
-        <div className="fixed inset-0 z-20 bg-black/40 lg:hidden" onClick={onClose} />
-      )}
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-30 flex w-60 flex-col bg-[#1e2433] transition-transform duration-200",
-        open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-      )}>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-[#1e2433] lg:flex">
         {/* Logo */}
         <div className="flex h-14 items-center justify-between px-4 border-b border-[#2d3548]">
           <div>
             <span className="text-white font-semibold text-sm tracking-wide">Farmacias TKL</span>
             <span className="block text-[11px] text-slate-400 mt-0.5">Supervision operativa</span>
           </div>
-          <button onClick={onClose} className="lg:hidden text-slate-400 hover:text-white p-1 rounded">
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Usuario + acceso a perfil */}
-        <Link href="/perfil" onClick={onClose}
+        <Link href="/perfil"
           className={cn(
             "px-4 py-3 border-b border-[#2d3548] group transition-colors",
             hasPerfil ? "hover:bg-[#2d3548] cursor-pointer" : "cursor-default"
@@ -100,7 +64,7 @@ export function Sidebar({ user, open, onClose }: SidebarProps) {
             const Icon   = meta.icon;
             const active = isActive(route);
             return (
-              <Link key={route} href={route} onClick={onClose}
+              <Link key={route} href={route}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm mb-0.5 transition-colors",
                   active

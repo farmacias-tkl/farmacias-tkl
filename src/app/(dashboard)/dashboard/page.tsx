@@ -238,11 +238,11 @@ export default async function DashboardPage() {
       {(vacationKpis || showRotativas) && (
         <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {vacationKpis && (
-          <Link href="/vacaciones" className="card p-4 flex items-center gap-4 hover:shadow-md transition-shadow">
+          <Link href="/vacaciones" className="card p-4 flex items-center gap-3 sm:gap-4 hover:shadow-md transition-shadow">
             <div className="inline-flex p-2 rounded-lg bg-indigo-50 shrink-0">
               <CalendarDays className="w-5 h-5 text-indigo-600" />
             </div>
-            <div className="flex gap-8 flex-1">
+            <div className="flex gap-4 sm:gap-8 flex-1 min-w-0">
               <div>
                 <p className="text-2xl font-bold text-gray-900 leading-none">{vacationKpis.solicitadas}</p>
                 <p className="text-sm font-medium text-gray-700 mt-1">Solicitadas</p>
@@ -408,6 +408,10 @@ function AbsenceRow({ a, showBranch, isLeave }: { a: any; showBranch: boolean; i
       <td className="px-4 py-2.5">
         <p className="font-medium text-gray-900 text-sm">
           {a.employee.firstName} {a.employee.lastName}
+        </p>
+        {/* Celular: puesto y sucursal debajo del nombre, sin columnas de más. */}
+        <p className="text-sm text-gray-500 sm:hidden">
+          {a.employee.position.name}{showBranch ? ` · ${a.branch.name}` : ""}
         </p>
       </td>
       <td className="px-4 py-2.5 hidden sm:table-cell">

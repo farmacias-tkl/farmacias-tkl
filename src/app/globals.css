@@ -42,3 +42,91 @@
 
   .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
 }
+
+/* Celular: textos de al menos 14 px y zonas táctiles de al menos 44 px. */
+@media (max-width: 767px) {
+  .tkl-app .text-xs,
+  .tkl-app .text-\[9px\],
+  .tkl-app .text-\[10px\],
+  .tkl-app .text-\[11px\],
+  .tkl-app .text-\[13px\],
+  .tkl-app .label,
+  .tkl-app .error-msg,
+  .tkl-app .badge {
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .tkl-app button,
+  .tkl-app select,
+  .tkl-app [role="button"],
+  .tkl-app .btn,
+  .tkl-app .btn-primary,
+  .tkl-app .btn-secondary,
+  .tkl-app .btn-danger,
+  .tkl-app .btn-ghost,
+  .tkl-app input:not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Links sueltos (Ver, Revisar, Volver): las tarjetas y bloques ya son grandes. */
+  .tkl-app main a:not(.card):not(.block):not(.btn-secondary):not(.btn-primary) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* 16 px evita que iOS haga zoom al tocar un campo. */
+  .tkl-app .input { font-size: 16px; }
+  .tkl-app input[type="checkbox"],
+  .tkl-app input[type="radio"] { width: 20px; height: 20px; }
+  .tkl-app label.cursor-pointer { min-height: 44px; }
+
+  /* Formularios: pantalla completa, con las acciones fijas abajo. */
+  .tkl-app .form-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    margin: 0 !important;
+    overflow-y: auto;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fff;
+    padding: 1rem 1rem 7rem;
+  }
+  .tkl-app .form-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 46;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0;
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  }
+  /* auto: si no entran en un renglón pasan al siguiente, sin cortar el texto. */
+  .tkl-app .form-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  /* Tablas de administración: cada fila es una tarjeta, sin scroll de costado. */
+  .tkl-app .stack-table thead { display: none; }
+  .tkl-app .stack-table,
+  .tkl-app .stack-table tbody,
+  .tkl-app .stack-table tr,
+  .tkl-app .stack-table td { display: block; width: 100%; }
+  .tkl-app .stack-table tr { padding: 0.75rem 1rem; }
+  .tkl-app .stack-table td { padding: 0.125rem 0; text-align: left; overflow-wrap: anywhere; }
+  .tkl-app .stack-table td > .justify-center,
+  .tkl-app .stack-table td > .justify-end { justify-content: flex-start; }
+
+  /* Filtros dentro del panel: un campo por renglón. */
+  .tkl-app .filter-sheet .input { width: 100%; }
+}

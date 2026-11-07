@@ -61,7 +61,7 @@ export default function LegajoTab({ employee: e }: { employee: Employee }) {
         <div className="card p-5 text-xs text-gray-400">Cargando...</div>
       )}
       {editing && branches && positions && (
-        <div className="card p-5">
+        <div className="card p-5 form-sheet">
           <EmployeeForm
             initial={{
               id: e.id,

@@ -260,7 +260,7 @@ export function ApprovalPanel({ vacation: v, onApproved, onReject }: {
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span>
         </div>
       )}
-      <div className="flex flex-wrap gap-2 justify-end">
+      <div className="form-actions flex flex-wrap gap-2 justify-end">
         <button onClick={onReject} disabled={busy} className="btn-secondary text-xs py-1.5 px-3 text-red-600 border-red-300 hover:bg-red-50">
           <XCircle className="w-3.5 h-3.5" />Rechazar
         </button>
@@ -313,7 +313,7 @@ export function ChangeCoveragePanel({ vacation: v, onDone, onBack }: {
     <div className="space-y-4">
       <CoveragePicker vacationId={v.id} value={rotative} onChange={setRotative} />
       {error && <p className="text-sm text-red-700">{error}</p>}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions flex gap-2 justify-end">
         <button onClick={onBack} disabled={busy} className="btn-secondary">Volver</button>
         <button onClick={save} disabled={busy || rotative === currentId} className="btn-primary">
           {busy ? "Guardando..." : rotative ? "Guardar cobertura" : "Quitar cobertura"}

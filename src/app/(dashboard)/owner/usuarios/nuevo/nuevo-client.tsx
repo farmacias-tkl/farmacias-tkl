@@ -143,7 +143,7 @@ export function NuevoUsuarioClient() {
         </div>
       </div>
 
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions flex gap-2 justify-end">
         <Link href="/owner/usuarios" className="btn-secondary">Cancelar</Link>
         <button onClick={handleSubmitClick} disabled={submitting} className="btn-primary">
           {submitting ? "Creando..." : "Crear usuario"}

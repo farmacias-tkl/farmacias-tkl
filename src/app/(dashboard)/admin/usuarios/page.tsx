@@ -10,6 +10,7 @@ import {
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { AsyncButton } from "@/components/ui/AsyncButton";
 import { cn } from "@/lib/utils";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { ActionErrorModal } from "@/components/users/action-error-modal";
 import { ConfirmModal } from "@/components/ConfirmModal";
@@ -107,7 +108,7 @@ export default function UsuariosPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Usuarios</h2>
           <p className="text-sm text-gray-500 mt-0.5">{total} usuarios</p>
@@ -119,13 +120,16 @@ export default function UsuariosPage() {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
-        <div className="relative">
+        <div className="relative w-full md:w-auto">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Buscar por nombre o email..."
-            className="input pl-9 w-64" />
+            className="input pl-9 w-full md:w-64" />
         </div>
+        <FilterPanel
+          activeCount={[roleFilter, branchFilter, activeFilter !== "true"].filter(Boolean).length}
+          onClear={() => { setRoleFilter(""); setBranchFilter(""); setActiveFilter("true"); }}>
         <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} className="input w-auto">
           <option value="">Todos los roles</option>
           {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
@@ -139,6 +143,7 @@ export default function UsuariosPage() {
           <option value="false">Inactivos</option>
           <option value="">Todos</option>
         </select>
+        </FilterPanel>
       </div>
 
       {/* Tabla */}
@@ -151,7 +156,7 @@ export default function UsuariosPage() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="stack-table w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Usuario</th>

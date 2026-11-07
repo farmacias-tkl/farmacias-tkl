@@ -192,7 +192,7 @@ export default function EmployeeForm({ initial, branches, positions, lockBranchI
       {mut.isError && (
         <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{(mut.error as Error).message}</p>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="btn-secondary">Cancelar</button>
         <button type="submit" disabled={mut.isPending} className="btn-primary">
           {mut.isPending ? "Guardando..." : isEdit ? "Guardar cambios" : "Crear empleado"}

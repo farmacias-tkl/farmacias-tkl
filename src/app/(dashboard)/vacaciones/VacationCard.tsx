@@ -58,7 +58,7 @@ export default function VacationCard({ vacation: v, onClick }: Props) {
       onClick={onClick}
       className={cn(
         "card w-full text-left hover:border-gray-300 hover:shadow-sm transition-all",
-        "px-4 py-3 flex items-start gap-3 group",
+        "px-4 py-3 flex flex-wrap sm:flex-nowrap items-start gap-3 group",
         v.conflictLevel === "BLOCKING" && "border-red-200",
         v.conflictLevel === "WARNING"  && "border-amber-200",
       )}
@@ -68,10 +68,10 @@ export default function VacationCard({ vacation: v, onClick }: Props) {
         {initials(v.employeeNameSnapshot)}
       </div>
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 basis-[calc(100%-3rem)] sm:basis-0">
         {/* Línea 1: nombre + badges */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <p className="text-sm font-semibold text-gray-900 truncate">{v.employeeNameSnapshot}</p>
+          <p className="w-full sm:w-auto text-sm font-semibold text-gray-900 break-words sm:truncate">{v.employeeNameSnapshot}</p>
           <span className="inline-flex items-center text-[10px] font-medium bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">
             {v.positionNameSnapshot}
           </span>
@@ -111,7 +111,7 @@ export default function VacationCard({ vacation: v, onClick }: Props) {
         {/* Línea 2: rango visual */}
         <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-600">
           <span className="font-medium text-gray-800">{fmt(v.startDate)}</span>
-          <span className="flex-1 h-0.5 bg-gradient-to-r from-gray-300 to-gray-200 rounded-full max-w-[80px]" />
+          <span className="flex-1 h-0.5 bg-gradient-to-r from-gray-300 to-gray-200 rounded-full max-w-[80px] min-w-[8px]" />
           <span className="font-medium text-gray-800">{fmt(v.endDate)}</span>
           <span className="text-gray-500">·</span>
           <span className="text-gray-500 font-medium">{v.daysCount}d</span>
@@ -128,7 +128,7 @@ export default function VacationCard({ vacation: v, onClick }: Props) {
       </div>
 
       {/* Estado + chevron */}
-      <div className="flex flex-col items-end gap-1 shrink-0">
+      <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:flex-col sm:items-end sm:shrink-0">
         <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
           <SI className="w-3 h-3" />{meta.label}
         </span>

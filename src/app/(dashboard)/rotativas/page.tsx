@@ -11,6 +11,7 @@ import {
   ChevronDown, ChevronUp, Calendar, MapPin, Briefcase,
 } from "lucide-react";
 import { AsyncButton } from "@/components/ui/AsyncButton";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
@@ -141,7 +142,7 @@ export default function RotativasPage() {
     <div className="space-y-4">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Rotativas y coberturas</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -160,7 +161,7 @@ export default function RotativasPage() {
 
       {/* Formulario nueva asignación */}
       {showForm && canManage && (
-        <div className="card p-5">
+        <div className="card p-5 form-sheet">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">Nueva asignacion de rotativa</h3>
           <form onSubmit={handleSubmit(d => createMut.mutate(d))} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -239,7 +240,7 @@ export default function RotativasPage() {
               </p>
             )}
 
-            <div className="flex gap-2 justify-end">
+            <div className="form-actions flex gap-2 justify-end">
               <button type="button" onClick={() => { setShowForm(false); reset(); }} className="btn-secondary">
                 Cancelar
               </button>
@@ -252,15 +253,15 @@ export default function RotativasPage() {
       )}
 
       {/* Tabs de vista */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+      <div className="flex items-center gap-2 md:gap-4 flex-wrap">
+        <div className="flex w-full md:w-auto gap-1 bg-gray-100 p-1 rounded-lg">
           {([
             { key: "today",    label: "Hoy" },
             { key: "upcoming", label: "Proximos 7 dias" },
             { key: "all",      label: "Todas" },
           ] as const).map(v => (
             <button key={v.key} onClick={() => setView(v.key)}
-              className={cn("px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+              className={cn("flex-1 md:flex-none px-2 md:px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
                 view === v.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700")}>
               {v.label}
             </button>
@@ -268,6 +269,9 @@ export default function RotativasPage() {
         </div>
 
         {/* Filtros */}
+        <FilterPanel
+          activeCount={[branchFilter, statusFilter !== "ACTIVE"].filter(Boolean).length}
+          onClear={() => { setBranchFilter(""); setStatusFilter("ACTIVE"); }}>
         <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
           <option value="">Todas las sucursales</option>
           {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -279,6 +283,7 @@ export default function RotativasPage() {
           <option value="COMPLETED">Completadas</option>
           <option value="all">Todas</option>
         </select>
+        </FilterPanel>
       </div>
 
       {/* Lista */}
@@ -352,8 +357,8 @@ function AssignmentCard({ assignment: a, canManage, onCancel, onComplete }: {
       a.isActiveToday && a.status === "ACTIVE" && "border-violet-200",
       a.employeeAbsentToday && "border-red-200",
     )}>
-      <div className="px-4 py-3 cursor-pointer flex items-start gap-3" onClick={() => setExpanded(v => !v)}>
-        <div className="flex-1 min-w-0">
+      <div className="px-4 py-3 cursor-pointer flex flex-wrap sm:flex-nowrap items-start gap-3" onClick={() => setExpanded(v => !v)}>
+        <div className="flex-1 min-w-0 basis-full sm:basis-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
               {a.employee.firstName} {a.employee.lastName}
@@ -394,7 +399,7 @@ function AssignmentCard({ assignment: a, canManage, onCancel, onComplete }: {
             <span className="text-gray-400">{typeLabel}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:shrink-0">
           <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
             <SI className="w-3 h-3" />{meta.label}
           </span>

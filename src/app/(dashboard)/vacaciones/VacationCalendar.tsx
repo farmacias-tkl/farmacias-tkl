@@ -133,10 +133,14 @@ export default function VacationCalendar({
           return (
             <div
               key={idx}
+              role="button"
+              tabIndex={0}
+              aria-label={`Ver el día ${day.getDate()}`}
+              onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onDayClick(isoDate); } }}
               onClick={() => onDayClick(isoDate)}
               title={holiday ? holidayFullName(holiday) : undefined}
               className={cn(
-                "min-h-[58px] sm:min-h-[110px] border-r border-b border-gray-100 p-1 sm:p-1.5 relative cursor-pointer",
+                "min-h-[64px] min-w-0 sm:min-h-[110px] border-r border-b border-gray-100 p-1 sm:p-1.5 relative cursor-pointer",
                 holiday
                   ? (inMonth ? "bg-violet-50 hover:bg-violet-100/70" : "bg-violet-50/50 hover:bg-violet-100/50")
                   : (inMonth ? "hover:bg-gray-50" : "bg-gray-50/60 hover:bg-gray-100/60"),
@@ -145,17 +149,15 @@ export default function VacationCalendar({
             >
               {/* Número del día + indicadores */}
               <div className="flex items-center justify-between mb-1">
-                <button
-                  type="button"
-                  aria-label={`Ver el día ${day.getDate()}`}
+                <span
                   className={cn(
                     "text-[11px] sm:text-xs font-medium hover:underline",
                     inMonth ? "text-gray-800" : "text-gray-400",
-                    isToday && "inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white",
+                    isToday && "inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white",
                   )}
                 >
                   {day.getDate()}
-                </button>
+                </span>
                 <div className="flex items-center gap-1">
                   {hasBlocking && (
                     <AlertTriangle className="w-3 h-3 text-red-500" aria-label="Conflicto bloqueante" />
@@ -179,14 +181,12 @@ export default function VacationCalendar({
 
               {/* Eventos: chips en desktop, dots en mobile */}
               <div className="space-y-0.5">
-                {/* Mobile: dots agrupados */}
-                <div className="flex sm:hidden flex-wrap gap-0.5">
+                {/* Mobile: dots agrupados. Tocar la celda abre el panel del día. */}
+                <div className="flex sm:hidden flex-wrap gap-0.5" aria-hidden>
                   {dayEvents.slice(0, 6).map(e => (
-                    <button
+                    <span
                       key={e.id}
-                      onClick={(ev) => { ev.stopPropagation(); onEventClick(e.id); }}
                       className={cn("w-2 h-2 rounded-full", STATUS_DOT[e.status] ?? "bg-gray-400")}
-                      aria-label={`${e.employeeNameSnapshot} — abrir detalle`}
                     />
                   ))}
                   {dayEvents.length > 6 && (
@@ -216,12 +216,9 @@ export default function VacationCalendar({
                     </button>
                   ))}
                   {dayEvents.length > maxChipsDesktop && (
-                    <button
-                      type="button"
-                      className="w-full text-left text-[10px] text-gray-500 hover:text-gray-800 px-1.5"
-                    >
+                    <span className="block w-full text-left text-[10px] text-gray-500 hover:text-gray-800 px-1.5">
                       +{dayEvents.length - maxChipsDesktop} más
-                    </button>
+                    </span>
                   )}
                 </div>
               </div>

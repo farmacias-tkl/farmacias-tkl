@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { typeAllowsReasonDetail } from "@/lib/absences";
 import { AsyncButton } from "@/components/ui/AsyncButton";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import {
   Plus, UserMinus, AlertTriangle, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, RotateCcw, Users, Info, LogOut, CalendarDays,
@@ -306,7 +307,7 @@ export default function AusenciasPage() {
     <div className="space-y-4">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-gray-900">Asistencia y novedades</h2>
         {canCreate && (
           <button
@@ -324,11 +325,11 @@ export default function AusenciasPage() {
       </div>
 
       {/* Toggle Ausencias y licencias / Llegadas tarde y retiros */}
-      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg w-fit overflow-x-auto">
+      <div className="flex items-stretch gap-1 bg-gray-100 p-1 rounded-lg w-full md:w-fit">
         <button
           onClick={() => setSectionTab("absences")}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
+            "flex flex-1 md:flex-none justify-center items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-md text-xs font-medium transition-colors md:whitespace-nowrap",
             sectionTab === "absences" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
           )}
         >
@@ -337,7 +338,7 @@ export default function AusenciasPage() {
         <button
           onClick={() => setSectionTab("time-events")}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap",
+            "flex flex-1 md:flex-none justify-center items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-md text-xs font-medium transition-colors md:whitespace-nowrap",
             sectionTab === "time-events" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
           )}
         >
@@ -370,7 +371,7 @@ export default function AusenciasPage() {
           }}
         />
       ) : showForm && (
-        <div className="card p-5">
+        <div className="card p-5 form-sheet">
           {/* Paso 1 — Chooser de tipo de evento */}
           {flow === null && (
             <div className="space-y-3">
@@ -408,7 +409,7 @@ export default function AusenciasPage() {
                   </p>
                 </button>
               </div>
-              <div className="flex justify-end">
+              <div className="form-actions flex justify-end">
                 <button type="button" onClick={() => setShowForm(false)} className="btn-secondary text-sm">
                   Cancelar
                 </button>
@@ -608,7 +609,7 @@ export default function AusenciasPage() {
                   {(createMut.error as Error).message}
                 </p>
               )}
-              <div className="flex gap-2 justify-end">
+              <div className="form-actions flex gap-2 justify-end">
                 <button type="button"
                   onClick={() => { setShowForm(false); setFlow(null); fixedForm.reset({ startDate: todayStr, endDate: todayStr }); setFormBranchId(""); setFormDate(todayStr); }}
                   className="btn-secondary">Cancelar</button>
@@ -770,7 +771,7 @@ export default function AusenciasPage() {
                   {(createMut.error as Error).message}
                 </p>
               )}
-              <div className="flex gap-2 justify-end">
+              <div className="form-actions flex gap-2 justify-end">
                 <button type="button"
                   onClick={() => { setShowForm(false); setFlow(null); rotForm.reset({ startDate: todayStr, endDate: todayStr }); setSelectedRotId(""); setSuggestedBranch(null); setOverrideBranch(false); }}
                   className="btn-secondary">Cancelar</button>
@@ -787,6 +788,9 @@ export default function AusenciasPage() {
 
       {/* Filtros (compartidos por las dos vistas, ajustando lo aplicable) */}
       <div className="flex flex-wrap gap-2">
+        <FilterPanel
+          activeCount={[!isBranchManager && branchFilter, statusFilter, activeOnly].filter(Boolean).length}
+          onClear={() => { setBranchFilter(""); setStatusFilter(""); setActiveOnly(false); }}>
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
             <option value="">Todas las sucursales</option>
@@ -823,6 +827,7 @@ export default function AusenciasPage() {
             </label>
           </>
         )}
+        </FilterPanel>
       </div>
 
       {/* === VISTA: AUSENCIAS Y LICENCIAS === */}
@@ -897,8 +902,8 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
     <div className={cn("card overflow-hidden",
       a.isActiveToday && "border-red-200",
       a.absenceType === "SUSPENSION" && "border-orange-200")}>
-      <div className="px-4 py-3 cursor-pointer flex items-start gap-3" onClick={() => setExpanded(v => !v)}>
-        <div className="flex-1 min-w-0">
+      <div className="px-4 py-3 cursor-pointer flex flex-wrap sm:flex-nowrap items-start gap-3" onClick={() => setExpanded(v => !v)}>
+        <div className="flex-1 min-w-0 basis-full sm:basis-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-semibold text-gray-900">
               {a.employeeNameSnapshot ?? `${a.employee.firstName} ${a.employee.lastName}`}
@@ -924,7 +929,7 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
             {a.hasCertificate && <span className="text-blue-600 font-medium">Con certificado</span>}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:shrink-0">
           <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
             <SI className="w-3 h-3" />{meta.label}
           </span>

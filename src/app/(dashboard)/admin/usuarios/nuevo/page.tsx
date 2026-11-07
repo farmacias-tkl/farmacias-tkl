@@ -200,7 +200,7 @@ export default function NuevoUsuarioPage() {
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
 
-          <div className="flex gap-2 justify-end">
+          <div className="form-actions flex gap-2 justify-end">
             <Link href="/admin/usuarios" className="btn-secondary">Cancelar</Link>
             <button type="submit" disabled={isSubmitting} className="btn-primary">
               {isSubmitting ? "Creando..." : "Crear usuario"}

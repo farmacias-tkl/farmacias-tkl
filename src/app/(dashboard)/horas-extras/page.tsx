@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import type { UserRole } from "@prisma/client";
 
 const OVERTIME_REASONS = [
@@ -126,7 +127,7 @@ export default function HorasExtrasPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold text-gray-900">Horas extras</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -146,7 +147,7 @@ export default function HorasExtrasPage() {
       </div>
 
       {showForm && canCreate && (
-        <div className="card p-5">
+        <div className="card p-5 form-sheet">
           <h3 className="text-sm font-semibold text-gray-900 mb-1">Registrar horas extras</h3>
           <p className="text-xs text-gray-400 mb-4">Un registro por empleado por dia.</p>
           <form onSubmit={handleSubmit(d => createMut.mutate(d))} className="space-y-4">
@@ -221,7 +222,7 @@ export default function HorasExtrasPage() {
               </p>
             )}
 
-            <div className="flex gap-2 justify-end">
+            <div className="form-actions flex gap-2 justify-end">
               <button type="button" onClick={() => { setShowForm(false); reset({ date: today }); setFormBranchId(""); }}
                 className="btn-secondary">Cancelar</button>
               <button type="submit" disabled={createMut.isPending} className="btn-primary">
@@ -234,6 +235,9 @@ export default function HorasExtrasPage() {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
+        <FilterPanel
+          activeCount={[!isBranchManager && branchFilter, statusFilter].filter(Boolean).length}
+          onClear={() => { setBranchFilter(""); setStatusFilter(""); }}>
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
             <option value="">Todas las sucursales</option>
@@ -244,6 +248,7 @@ export default function HorasExtrasPage() {
           <option value="">Todos los estados</option>
           {Object.entries(STATUS_META).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
+        </FilterPanel>
       </div>
 
       {/* Lista */}

@@ -300,7 +300,7 @@ export default function TimeEventDetailModal({
             </div>
           )}
 
-          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+          <div className="form-actions flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
             <button onClick={cancelAction} disabled={busy} className="btn-secondary">Volver</button>
             <button
               onClick={submitAction}

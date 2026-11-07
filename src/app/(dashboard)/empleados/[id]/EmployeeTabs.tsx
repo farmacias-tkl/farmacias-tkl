@@ -60,8 +60,12 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
     <div className="space-y-4">
 
       {/* Barra de tabs */}
-      <div className="border-b border-gray-200 overflow-x-auto">
-        <nav className="flex min-w-max" aria-label="Secciones del legajo">
+      <select value={activeTab} onChange={e => navigate(e.target.value as TabId)}
+        aria-label="Sección del legajo" className="input md:hidden">
+        {tabs.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+      </select>
+      <div className="hidden border-b border-gray-200 md:block">
+        <nav className="flex flex-wrap" aria-label="Secciones del legajo">
           {tabs.map(t => (
             <button
               key={t.id}

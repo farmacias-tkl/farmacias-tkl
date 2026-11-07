@@ -170,7 +170,7 @@ export function EditarUsuarioClient({ userId, currentUserId }: { userId: string;
         />
       )}
 
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions flex gap-2 justify-end">
         <Link href="/owner/usuarios" className="btn-secondary">Cancelar</Link>
         <button onClick={handleSubmitClick} disabled={submitting} className="btn-primary">
           {submitting ? "Guardando..." : "Guardar cambios"}

@@ -281,7 +281,7 @@ export default function TimeEventFormPanel({
             </div>
           )}
 
-          <div className="flex gap-2 justify-end">
+          <div className="form-actions flex gap-2 justify-end">
             <button onClick={onClose} className="btn-secondary">Cancelar</button>
             <button
               onClick={() => createMut.mutate()}

@@ -96,7 +96,7 @@ export default function VacationFormPanel({
   const canSubmit = !!employeeId && !!startDate && !!endDate && !validating && !isBlocking;
 
   return (
-    <div className="card p-5 space-y-4">
+    <div className="card p-5 space-y-4 form-sheet">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-900">Solicitar vacaciones</h3>
       </div>
@@ -199,7 +199,7 @@ export default function VacationFormPanel({
         </div>
       )}
 
-      <div className="flex gap-2 justify-end">
+      <div className="form-actions flex gap-2 justify-end">
         <button onClick={onClose} className="btn-secondary">Cancelar</button>
         <button
           onClick={() => createMut.mutate()}

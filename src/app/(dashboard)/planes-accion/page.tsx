@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { FilterPanel } from "@/components/ui/FilterPanel";
 import type { UserRole } from "@prisma/client";
 import ActionPlanDetailModal from "@/components/action-plans/ActionPlanDetailModal";
 
@@ -83,6 +84,9 @@ export default function PlanesAccionPage() {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
+        <FilterPanel
+          activeCount={[!isBranchManager && branchFilter, statusFilter].filter(Boolean).length}
+          onClear={() => { setBranchFilter(""); setStatusFilter(""); }}>
         {!isBranchManager && (
           <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-auto">
             <option value="">Todas las sucursales</option>
@@ -93,6 +97,7 @@ export default function PlanesAccionPage() {
           <option value="">Todos los estados</option>
           {Object.entries(STATUS_META).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
+        </FilterPanel>
       </div>
 
       {/* Lista */}

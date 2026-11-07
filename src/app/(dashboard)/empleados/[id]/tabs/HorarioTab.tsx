@@ -64,7 +64,7 @@ export default function HorarioTab({ employeeId }: { employeeId: string }) {
                   {weeks.length > 1 || w !== "ALL" ? (
                     <p className="text-[11px] font-medium text-gray-500 mb-1">{WEEK_LABEL[w]}</p>
                   ) : null}
-                  <table className="w-full text-xs">
+                  <table className="w-full table-fixed text-xs">
                     <tbody>
                       {[1, 2, 3, 4, 5, 6, 7].map((day) => {
                         const ss = s.slots.filter((x: any) => x.week === w && x.dayOfWeek === day);

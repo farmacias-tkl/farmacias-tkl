@@ -79,7 +79,7 @@ export function Modal({
       <div
         ref={contentRef}
         className={cn(
-          "card w-full bg-white relative my-0 sm:my-4 rounded-t-2xl sm:rounded-2xl max-h-[95vh] flex flex-col",
+          "card w-full bg-white relative my-0 sm:my-4 rounded-none sm:rounded-2xl h-dvh sm:h-auto sm:max-h-[95vh] flex flex-col",
           SIZE_CLASSES[size],
         )}
         onMouseDown={(e) => e.stopPropagation()}
@@ -94,7 +94,7 @@ export function Modal({
             {showCloseButton && (
               <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-700 transition-colors shrink-0 -mr-1 -mt-1 p-1"
+                className="flex items-center justify-center text-gray-400 hover:text-gray-700 transition-colors shrink-0 -mr-1 -mt-1 p-1"
                 aria-label="Cerrar"
               >
                 <X className="w-5 h-5" />
@@ -102,7 +102,7 @@ export function Modal({
             )}
           </div>
         )}
-        <div className="overflow-y-auto px-4 sm:px-5 py-4 flex-1">
+        <div className="overflow-y-auto px-4 sm:px-5 pt-4 pb-44 sm:pb-4 flex-1">
           {children}
         </div>
       </div>

@@ -64,7 +64,22 @@ export default function EmployeeBalanceSection({ branchId }: Props) {
               Ningún empleado tiene minutos pendientes de compensación.
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <ul className="divide-y divide-gray-100 md:hidden">
+              {rows.map(r => (
+                <li key={r.employeeId} className="px-4 py-3">
+                  <p className="break-words text-sm font-medium text-gray-900">{r.employeeName}</p>
+                  <p className="break-words text-sm text-gray-500">
+                    {[r.positionName, r.branchName].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Pendientes: <span className="font-semibold text-red-700">{r.totalRemaining}</span>
+                    {" · "}Adeudados: {r.totalOwed}{" · "}Compensados: {r.totalCompensated}{" · "}Eventos: {r.eventsCount}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
                   <tr>
@@ -92,6 +107,7 @@ export default function EmployeeBalanceSection({ branchId }: Props) {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
       )}
