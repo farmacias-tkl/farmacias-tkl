@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessOwnerPanel, CALL_CENTER_ROLE_ACCESS } from "@/lib/permissions";
+import { ownerPanelVisibleWhere } from "@/lib/owner-panel/visibility";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -27,7 +28,8 @@ export async function GET(req: NextRequest) {
   const filter = sp.get("filter") ?? "all";
 
   // Se combinan con AND para no colisionar entre sí (la búsqueda usa OR).
-  const and: any[] = [];
+  // Los usuarios ocultos del panel no entran en la lista, las búsquedas ni los filtros.
+  const and: any[] = [ownerPanelVisibleWhere(session.user.id)];
   if (search) {
     and.push({ OR: [
       { name:  { contains: search, mode: "insensitive" } },

@@ -17,6 +17,7 @@ import {
 } from "../src/lib/permissions/position-permissions";
 import {
   can as roleCan,
+  canAccessOwnerPanel,
   canAccessRoute,
   canValidateVacationFor,
   HIDDEN_MENU_ROUTES,
@@ -26,6 +27,7 @@ import {
 } from "../src/lib/permissions";
 import { vacationFilterWhere } from "../src/lib/vacations/list-where";
 import { canSeeBranchRecord, listBranchScope } from "../src/lib/branch-scope";
+import { isVisibleInOwnerPanel, ownerPanelUserByIdWhere, ownerPanelVisibleWhere } from "../src/lib/owner-panel/visibility";
 
 let passed = 0;
 let failed = 0;
@@ -271,6 +273,39 @@ assert("encargado sin sucursal: registro sin sucursal => no", canSeeBranchRecord
 for (const role of ["HR", "OWNER", "SUPERVISOR", "ADMIN"] as const) {
   assert(`${role}: todas las sucursales o la que pida`, listBranchScope({ role }, null) === undefined && listBranchScope({ role }, "galesa-id") === "galesa-id");
   assert(`${role}: ve registros de cualquier sucursal`, canSeeBranchRecord({ role }, "galesa-id") === true);
+}
+
+console.log("\n=== Usuario oculto en el Panel de Dirección ===");
+{
+  // Fixture: el usuario de pruebas oculto, otro OWNER y dos usuarios comunes.
+  const users = [
+    { id: "u-oculto", role: "OWNER", hiddenFromOwnerPanel: true },
+    { id: "u-owner", role: "OWNER", hiddenFromOwnerPanel: false },
+    { id: "u-sup", role: "SUPERVISOR", hiddenFromOwnerPanel: false },
+    { id: "u-hr", role: "HR", hiddenFromOwnerPanel: false },
+  ];
+  // Evalúa el filtro de Prisma que usan las listas del panel sobre la fixture.
+  const matches = (u: (typeof users)[number], w: any): boolean =>
+    w.AND ? w.AND.every((x: any) => matches(u, x))
+    : w.OR ? w.OR.some((x: any) => matches(u, x))
+    : Object.entries(w).every(([k, v]) => (u as any)[k] === v);
+  const list = (viewer: string) => users.filter((u) => matches(u, ownerPanelVisibleWhere(viewer)));
+  const byId = (id: string, viewer: string) => users.find((u) => matches(u, ownerPanelUserByIdWhere(id, viewer))) ?? null;
+
+  assert("otro OWNER: el oculto no está en la lista", !list("u-owner").some((u) => u.id === "u-oculto"));
+  assert("otro OWNER: el conteo no lo incluye", list("u-owner").length === users.length - 1);
+  assert("otro OWNER: tampoco aparece filtrando por rol OWNER", list("u-owner").filter((u) => u.role === "OWNER").map((u) => u.id).join() === "u-owner");
+  assert("otro OWNER: detalle por id del oculto => no encontrado (404)", byId("u-oculto", "u-owner") === null);
+  assert("otro OWNER: isVisibleInOwnerPanel => false", isVisibleInOwnerPanel(users[0], "u-owner") === false);
+  assert("otro OWNER: sigue viendo al resto por id", byId("u-sup", "u-owner")?.id === "u-sup");
+  assert("el propio oculto: se ve en la lista", list("u-oculto").some((u) => u.id === "u-oculto"));
+  assert("el propio oculto: ve a todos (panel completo)", list("u-oculto").length === users.length);
+  assert("el propio oculto: su detalle por id funciona", byId("u-oculto", "u-oculto")?.id === "u-oculto");
+  assert("el propio oculto: isVisibleInOwnerPanel => true", isVisibleInOwnerPanel(users[0], "u-oculto") === true);
+  assert("el oculto entra al panel como cualquier OWNER", canAccessOwnerPanel({ role: "OWNER" }) && routeDecision("OWNER", "/owner/usuarios") === "allow");
+  // Administración no usa el filtro del panel: lista todos, incluido el oculto.
+  assert("ADMIN entra a /admin/usuarios", routeDecision("ADMIN", "/admin/usuarios") === "allow" && routeDecision("ADMIN", "/api/admin/users") === "allow");
+  assert("ADMIN no entra al Panel de Dirección", routeDecision("ADMIN", "/owner/usuarios") === "redirect" && routeDecision("ADMIN", "/api/owner/users") === "forbidden");
 }
 
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);

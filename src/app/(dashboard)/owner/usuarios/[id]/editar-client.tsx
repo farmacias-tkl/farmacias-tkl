@@ -56,7 +56,17 @@ export function EditarUsuarioClient({ userId, currentUserId }: { userId: string;
     }
   }, [u]);
 
-  if (isLoading || !u) return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
+  if (isLoading) return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
+  if (!u) {
+    return (
+      <div className="space-y-4 max-w-2xl">
+        <Link href="/owner/usuarios" className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800">
+          <ArrowLeft className="w-3.5 h-3.5" />Volver
+        </Link>
+        <div className="card p-10 text-center text-sm text-gray-500">Usuario no encontrado.</div>
+      </div>
+    );
+  }
 
   const isSelf  = u.id === currentUserId;
   const wasOwner= u.role === "OWNER";

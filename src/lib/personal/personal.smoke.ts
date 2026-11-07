@@ -32,6 +32,7 @@ const TEST_DB = "tkl_personal_smoke";
 const BASE_COMMIT = "5c2ba5b";
 const GATE = "prisma/gates/2026-10-29-personal-real.sql";
 const GATE_PASSWORD_EVENT = "prisma/gates/2026-11-06-password-changed-event.sql";
+const GATE_HIDDEN_USER = "prisma/gates/2026-11-07-usuario-oculto-panel-direccion.sql";
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 const m = fs.readFileSync(".env", "utf8").match(/^DATABASE_URL\s*=\s*"?([^"\n]+?)"?\s*$/m);
@@ -139,6 +140,10 @@ async function main() {
     for (const s of [...gate.schema, ...gate.data]) await db.$executeRawUnsafe(s);
     // Gates posteriores: solo agregan.
     await db.$executeRawUnsafe(fs.readFileSync(GATE_PASSWORD_EVENT, "utf8").split(/\r?\n/).filter((l) => !l.trim().startsWith("--")).join("\n").trim().replace(/;$/, ""));
+    // Usuario oculto: solo la estructura. La marca exige el usuario real, que esta DB no tiene.
+    for (const s of fs.readFileSync(GATE_HIDDEN_USER, "utf8").split(/\r?\n/).filter((l) => /^ALTER TABLE /.test(l))) {
+      await db.$executeRawUnsafe(s.trim().replace(/;$/, ""));
+    }
 
     // ---------------------------------------------------------------- 3
     await check("migrate diff (DB con el SQL aplicado → schema.prisma) da vacío", async () => {

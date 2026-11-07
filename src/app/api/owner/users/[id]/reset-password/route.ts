@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessOwnerPanel } from "@/lib/permissions";
+import { ownerPanelUserByIdWhere } from "@/lib/owner-panel/visibility";
 import { generatePassword } from "@/lib/passwords";
 import bcrypt from "bcryptjs";
 
@@ -21,8 +22,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!session?.user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   if (!canAccessOwnerPanel(session.user)) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const user = await prisma.user.findUnique({
-    where:  { id: params.id },
+  const user = await prisma.user.findFirst({
+    where:  ownerPanelUserByIdWhere(params.id, session.user.id),
     select: { id: true, name: true, email: true, role: true, active: true },
   });
   if (!user) return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });

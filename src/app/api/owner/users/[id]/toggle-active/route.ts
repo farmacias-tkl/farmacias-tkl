@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessOwnerPanel } from "@/lib/permissions";
+import { ownerPanelUserByIdWhere } from "@/lib/owner-panel/visibility";
 import { z } from "zod";
 
 const schema = z.object({ active: z.boolean() });
@@ -35,8 +36,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     );
   }
 
-  const target = await prisma.user.findUnique({
-    where:  { id: params.id },
+  const target = await prisma.user.findFirst({
+    where:  ownerPanelUserByIdWhere(params.id, session.user.id),
     select: { id: true, name: true, email: true, role: true, active: true },
   });
   if (!target) return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });

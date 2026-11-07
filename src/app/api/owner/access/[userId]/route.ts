@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessOwnerPanel } from "@/lib/permissions";
+import { ownerPanelUserByIdWhere } from "@/lib/owner-panel/visibility";
 import { z } from "zod";
 
 const schema = z.object({ executiveAccess: z.boolean() });
@@ -38,8 +39,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { userId: st
     return NextResponse.json({ error: "Datos inválidos" }, { status: 400 });
   }
 
-  const target = await prisma.user.findUnique({
-    where:  { id: params.userId },
+  const target = await prisma.user.findFirst({
+    where:  ownerPanelUserByIdWhere(params.userId, session.user.id),
     select: { id: true, name: true, email: true, role: true, executiveAccess: true },
   });
   if (!target) {

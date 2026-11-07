@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessOwnerPanel } from "@/lib/permissions";
+import { ownerPanelVisibleWhere } from "@/lib/owner-panel/visibility";
 import { applyNewUserDefaults } from "@/lib/permissions/apply-new-user-defaults";
 import { generatePassword } from "@/lib/passwords";
 import { z } from "zod";
@@ -37,7 +38,8 @@ export async function GET(req: NextRequest) {
   const page     = Math.max(1, parseInt(sp.get("page") ?? "1"));
   const limit    = Math.min(100, parseInt(sp.get("limit") ?? "30"));
 
-  const where: any = {};
+  // Los usuarios ocultos del panel no entran en la lista, el total ni las búsquedas.
+  const where: any = { AND: [ownerPanelVisibleWhere(session.user.id)] };
   if (role)     where.role     = role;
   if (branchId) where.branchId = branchId;
   if (active === "true")  where.active = true;

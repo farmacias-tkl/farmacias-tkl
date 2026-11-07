@@ -628,6 +628,11 @@ model User {
   callCenterAccessGrantedAt DateTime?
   callCenterAccessGrantedBy String?
 
+  // Usuario de pruebas: no aparece en el Panel de Dirección (/owner) para los
+  // demás OWNER; el propio usuario lo ve completo. Administración lo sigue
+  // mostrando. Ver src/lib/owner-panel/visibility.ts.
+  hiddenFromOwnerPanel Boolean @default(false)
+
   @@index([email])
   @@index([role])
   @@index([branchId])

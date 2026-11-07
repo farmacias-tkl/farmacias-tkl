@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessOwnerPanel } from "@/lib/permissions";
+import { ownerPanelUserByIdWhere } from "@/lib/owner-panel/visibility";
 import { z } from "zod";
 
 const patchSchema = z.object({
@@ -31,8 +32,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   if (!session?.user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   if (!canAccessOwnerPanel(session.user)) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const user = await prisma.user.findUnique({
-    where: { id: params.id },
+  const user = await prisma.user.findFirst({
+    where: ownerPanelUserByIdWhere(params.id, session.user.id),
     select: {
       id: true, name: true, email: true, role: true, active: true,
       mustChangePassword: true, executiveAccess: true, createdAt: true, updatedAt: true,
@@ -63,7 +64,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!session?.user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   if (!canAccessOwnerPanel(session.user)) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
-  const user = await prisma.user.findUnique({ where: { id: params.id } });
+  const user = await prisma.user.findFirst({ where: ownerPanelUserByIdWhere(params.id, session.user.id) });
   if (!user) return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });
 
   const body = await req.json().catch(() => null);
