@@ -38,4 +38,38 @@ export function getHoliday(d: Date): Holiday | null {
   return HOLIDAYS_BY_DATE.get(toCalendarISODate(d)) ?? null;
 }
 
+/** Feriado de un día "YYYY-MM-DD". Sin datos de ese año: null, sin error. */
+export function getHolidayByISO(iso: string): Holiday | null {
+  return HOLIDAYS_BY_DATE.get(iso) ?? null;
+}
+
+const SHORT_NAMES: Record<string, string> = {
+  "Año Nuevo": "Año Nuevo",
+  "Carnaval": "Carnaval",
+  "Día no laborable con fines turísticos": "Puente turístico",
+  "Día Nacional de la Memoria por la Verdad y la Justicia": "Memoria",
+  "Día del Veterano y de los Caídos en la Guerra de Malvinas": "Malvinas",
+  "Viernes Santo": "Viernes Santo",
+  "Día del Trabajador": "Trabajador",
+  "Día de la Revolución de Mayo": "25 de Mayo",
+  "Paso a la Inmortalidad del Gral. Martín Miguel de Güemes": "Güemes",
+  "Paso a la Inmortalidad del Gral. Manuel Belgrano": "Belgrano",
+  "Día de la Independencia": "Independencia",
+  "Paso a la Inmortalidad del Gral. José de San Martín": "San Martín",
+  "Día del Respeto a la Diversidad Cultural": "Diversidad Cultural",
+  "Día de la Soberanía Nacional": "Soberanía",
+  "Día de la Inmaculada Concepción de María": "Inmaculada",
+  "Navidad": "Navidad",
+};
+
+/** Nombre corto para la celda del calendario. */
+export function holidayShortName(h: Holiday): string {
+  return SHORT_NAMES[h.name] ?? h.name;
+}
+
+/** Nombre completo, aclarando si la fecha todavía no está confirmada. */
+export function holidayFullName(h: Holiday): string {
+  return h.unconfirmed ? `${h.name} (fecha a confirmar)` : h.name;
+}
+
 export type { Holiday };

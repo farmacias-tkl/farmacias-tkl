@@ -4,8 +4,9 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   addMonths, formatMonthLong, getMonthGrid, isSameDay,
-  startOfDay, parseCalendarDate, WEEKDAY_LABELS_SHORT,
+  startOfDay, parseCalendarDate, toLocalISODate, WEEKDAY_LABELS_SHORT,
 } from "@/lib/dates/calendar";
+import { getHolidayByISO, holidayFullName, holidayShortName } from "@/lib/holidays";
 import { VACATION_STATUS_LABEL, visibleVacationStatuses } from "@/lib/vacations/status-labels";
 
 interface VacationEvent {
@@ -26,7 +27,10 @@ interface Props {
   /** Mes inicial. Default: hoy. */
   initialDate?:     Date;
   onMonthChange?:   (newDate: Date) => void;
+  /** Click en el nombre de una persona: abre su solicitud. */
   onEventClick:     (eventId: string) => void;
+  /** Click en el número, en el espacio libre de la celda o en "+N más". */
+  onDayClick:       (isoDate: string) => void;
   /** Paso de RRHH activo: solo entonces la leyenda muestra PENDING_RRHH. */
   rrhhStep?:        boolean;
 }
@@ -52,7 +56,7 @@ function initials(name: string): string {
 }
 
 export default function VacationCalendar({
-  events, initialDate, onMonthChange, onEventClick, rrhhStep = false,
+  events, initialDate, onMonthChange, onEventClick, onDayClick, rrhhStep = false,
 }: Props) {
   const [current, setCurrent] = useState<Date>(initialDate ?? new Date());
 
@@ -122,25 +126,36 @@ export default function VacationCalendar({
 
           // En desktop mostramos hasta 2 chips por celda, en mobile reducimos a dots.
           const maxChipsDesktop = 2;
+          const isoDate = toLocalISODate(day);
+          const holiday = getHolidayByISO(isoDate);
 
+          // El número y "+N más" no tienen handler propio: su click sube a la celda.
           return (
             <div
               key={idx}
+              onClick={() => onDayClick(isoDate)}
+              title={holiday ? holidayFullName(holiday) : undefined}
               className={cn(
-                "min-h-[58px] sm:min-h-[110px] border-r border-b border-gray-100 p-1 sm:p-1.5 relative",
-                !inMonth && "bg-gray-50/60",
+                "min-h-[58px] sm:min-h-[110px] border-r border-b border-gray-100 p-1 sm:p-1.5 relative cursor-pointer",
+                holiday
+                  ? (inMonth ? "bg-violet-50 hover:bg-violet-100/70" : "bg-violet-50/50 hover:bg-violet-100/50")
+                  : (inMonth ? "hover:bg-gray-50" : "bg-gray-50/60 hover:bg-gray-100/60"),
                 idx % 7 === 6 && "border-r-0",
               )}
             >
               {/* Número del día + indicadores */}
               <div className="flex items-center justify-between mb-1">
-                <span className={cn(
-                  "text-[11px] sm:text-xs font-medium",
-                  inMonth ? "text-gray-800" : "text-gray-400",
-                  isToday && "inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white",
-                )}>
+                <button
+                  type="button"
+                  aria-label={`Ver el día ${day.getDate()}`}
+                  className={cn(
+                    "text-[11px] sm:text-xs font-medium hover:underline",
+                    inMonth ? "text-gray-800" : "text-gray-400",
+                    isToday && "inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white",
+                  )}
+                >
                   {day.getDate()}
-                </span>
+                </button>
                 <div className="flex items-center gap-1">
                   {hasBlocking && (
                     <AlertTriangle className="w-3 h-3 text-red-500" aria-label="Conflicto bloqueante" />
@@ -153,6 +168,15 @@ export default function VacationCalendar({
                 </div>
               </div>
 
+              {holiday && (
+                <p className={cn(
+                  "text-[9px] sm:text-[10px] leading-tight font-medium truncate mb-0.5",
+                  inMonth ? "text-violet-700" : "text-violet-400",
+                )}>
+                  {holidayShortName(holiday)}
+                </p>
+              )}
+
               {/* Eventos: chips en desktop, dots en mobile */}
               <div className="space-y-0.5">
                 {/* Mobile: dots agrupados */}
@@ -160,7 +184,7 @@ export default function VacationCalendar({
                   {dayEvents.slice(0, 6).map(e => (
                     <button
                       key={e.id}
-                      onClick={() => onEventClick(e.id)}
+                      onClick={(ev) => { ev.stopPropagation(); onEventClick(e.id); }}
                       className={cn("w-2 h-2 rounded-full", STATUS_DOT[e.status] ?? "bg-gray-400")}
                       aria-label={`${e.employeeNameSnapshot} — abrir detalle`}
                     />
@@ -175,7 +199,7 @@ export default function VacationCalendar({
                   {dayEvents.slice(0, maxChipsDesktop).map(e => (
                     <button
                       key={e.id}
-                      onClick={() => onEventClick(e.id)}
+                      onClick={(ev) => { ev.stopPropagation(); onEventClick(e.id); }}
                       className={cn(
                         "w-full text-left truncate text-[10px] px-1.5 py-0.5 rounded border leading-tight",
                         STATUS_CHIP[e.status] ?? "bg-gray-50 text-gray-700 border-gray-200",
@@ -193,7 +217,7 @@ export default function VacationCalendar({
                   ))}
                   {dayEvents.length > maxChipsDesktop && (
                     <button
-                      onClick={() => onEventClick(dayEvents[maxChipsDesktop].id)}
+                      type="button"
                       className="w-full text-left text-[10px] text-gray-500 hover:text-gray-800 px-1.5"
                     >
                       +{dayEvents.length - maxChipsDesktop} más
@@ -214,6 +238,10 @@ export default function VacationCalendar({
             {VACATION_STATUS_LABEL[k]}
           </span>
         ))}
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-2 rounded bg-violet-100 ring-1 ring-violet-200" />
+          Feriado
+        </span>
         <span className="inline-flex items-center gap-1 ml-auto hidden sm:inline-flex">
           <AlertTriangle className="w-3 h-3 text-red-500" />
           Conflicto bloqueante

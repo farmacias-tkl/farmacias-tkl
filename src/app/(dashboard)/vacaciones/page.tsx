@@ -16,6 +16,7 @@ import VacationCalendar from "./VacationCalendar";
 import VacationMetrics, { useVacationMetrics } from "./VacationMetrics";
 import type { VacationKpi } from "@/lib/vacations/kpis";
 import VacationDetailModal from "./VacationDetailModal";
+import VacationDayPanel from "./VacationDayPanel";
 import EmployeeSearchInput from "./EmployeeSearchInput";
 
 type ViewMode = "list" | "calendar";
@@ -40,6 +41,8 @@ export default function VacacionesPage() {
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   // Modal de detalle
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Panel del día del calendario ("YYYY-MM-DD"). Sigue abierto debajo de la ficha.
+  const [dayPanel, setDayPanel] = useState<string | null>(null);
 
   const sessionReady    = status === "authenticated";
   const canCreate       = role ? can.createVacation(role) : false;
@@ -75,6 +78,17 @@ export default function VacacionesPage() {
     return { from, to: last };
   }, [calendarMonth]);
 
+  // Filtros del calendario: los mismos para la grilla y para el panel del día.
+  const calendarFilters = useMemo(() => {
+    const p = new URLSearchParams();
+    if (effectiveBranchId) p.set("branchId", effectiveBranchId);
+    if (statusFilter)      p.set("status", statusFilter);
+    if (empFilter?.id)     p.set("employeeId", empFilter.id);
+    if (flagFilter)        p.set(flagFilter, "true");
+    if (kpiFilter)         p.set("kpi", kpiFilter);
+    return p.toString();
+  }, [effectiveBranchId, statusFilter, empFilter?.id, flagFilter, kpiFilter]);
+
   // Lista: filtros de la pestaña Lista
   const { data: listRes, isLoading: listLoading } = useQuery({
     queryKey: ["vacations-list", { branch: effectiveBranchId, statusFilter, emp: empFilter?.id, pendingOnly, flagFilter, kpiFilter }],
@@ -95,18 +109,12 @@ export default function VacacionesPage() {
 
   // Calendario: trae todo el rango de la grilla visible
   const { data: calRes, isLoading: calLoading } = useQuery({
-    queryKey: ["vacations-cal", { branch: effectiveBranchId, statusFilter, flagFilter, kpiFilter, emp: empFilter?.id, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
+    queryKey: ["vacations-cal", { filters: calendarFilters, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
     queryFn: async () => {
-      const p = new URLSearchParams({
-        limit: "200",
-        from: toLocalISODate(calendarRange.from),
-        to:   toLocalISODate(calendarRange.to),
-      });
-      if (effectiveBranchId) p.set("branchId", effectiveBranchId);
-      if (statusFilter)      p.set("status", statusFilter);
-      if (empFilter?.id)     p.set("employeeId", empFilter.id);
-      if (flagFilter)        p.set(flagFilter, "true");
-      if (kpiFilter)         p.set("kpi", kpiFilter);
+      const p = new URLSearchParams(calendarFilters);
+      p.set("limit", "200");
+      p.set("from", toLocalISODate(calendarRange.from));
+      p.set("to",   toLocalISODate(calendarRange.to));
       const res = await fetch(`/api/vacations?${p}`);
       if (!res.ok) throw new Error("Error al cargar vacaciones");
       return res.json();
@@ -122,6 +130,7 @@ export default function VacacionesPage() {
     qc.invalidateQueries({ queryKey: ["vacations-cal"] });
     qc.invalidateQueries({ queryKey: ["vacations-metrics"] });
     qc.invalidateQueries({ queryKey: ["vacation-detail"] });
+    qc.invalidateQueries({ queryKey: ["vacation-day"] });
   };
 
   if (status === "loading") {
@@ -237,10 +246,20 @@ export default function VacacionesPage() {
             initialDate={calendarMonth}
             onMonthChange={setCalendarMonth}
             onEventClick={(id) => setDetailId(id)}
+            onDayClick={setDayPanel}
             rrhhStep={rrhhStep}
           />
         </div>
       )}
+
+      {/* Panel del día */}
+      <VacationDayPanel
+        date={dayPanel}
+        filters={calendarFilters}
+        detailOpen={!!detailId}
+        onClose={() => setDayPanel(null)}
+        onOpenRequest={setDetailId}
+      />
 
       {/* Modal de detalle */}
       <VacationDetailModal

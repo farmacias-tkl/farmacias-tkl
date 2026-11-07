@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/utils";
-import { can } from "@/lib/permissions";
+import { vacationActionsFor, type VacationActionKind as ActionKind } from "@/lib/vacations/available-actions";
 import type { UserRole } from "@prisma/client";
 import VacationTimeline from "./VacationTimeline";
 import { STATUS_META } from "./VacationCard";
@@ -22,9 +22,6 @@ interface Props {
   onClose:     () => void;
   onChanged:   () => void;   // se llama tras cualquier acción exitosa
 }
-
-// supervisor-approve no pasa por acá: lo maneja ApprovalPanel (saldo, advertencias, rotativos).
-type ActionKind = "supervisor-reject" | "rrhh-approve" | "rrhh-reject" | "cancel" | "undo-approval";
 
 interface ActionConfig {
   label:        string;
@@ -122,30 +119,8 @@ export default function VacationDetailModal({
 
   const v = detailRes?.data;
 
-  // Permisos
-  const canSupervisorAct  = role ? can.approveVacation(role) : false;
-  const canRrhhAct        = role ? can.confirmVacation(role) : false;
-  const canCancelStd      = role ? can.cancelVacation(role) : false;
-  const canCancelApproved = role ? can.cancelApprovedVacation(role) : false;
-
-  // Acciones disponibles según estado
-  const availableActions: ActionKind[] = [];
-  const showApprovalPanel = !!v && v.status === "PENDING_SUPERVISOR" && canSupervisorAct;
-  const canChangeCoverage = !!v && (v.status === "APPROVED" || v.status === "PENDING_RRHH") && canSupervisorAct;
-  if (v) {
-    if (v.status === "APPROVED" && canSupervisorAct) {
-      availableActions.push("undo-approval");
-    }
-    if (v.status === "PENDING_RRHH" && canRrhhAct) {
-      availableActions.push("rrhh-approve", "rrhh-reject");
-    }
-    if (v.status !== "CANCELLED") {
-      const canDoCancel =
-        v.status === "APPROVED" ? canCancelApproved
-        : canCancelStd;
-      if (canDoCancel) availableActions.push("cancel");
-    }
-  }
+  // Acciones disponibles según rol y estado
+  const { showApprovalPanel, canChangeCoverage, actions: availableActions } = vacationActionsFor(role, v?.status);
 
   // Nota obligatoria para cancelación de APPROVED
   const currentAction = view !== "detail" && view !== "coverage" ? ACTIONS[view] : null;

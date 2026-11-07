@@ -17,7 +17,7 @@ import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
 import { validateVacationRequest } from "@/lib/vacations/validation";
 import { vacationCreatedAuditDetail, vacationRequestCreateData } from "@/lib/vacations/create";
-import { isVacationKpi, kpiWhere } from "@/lib/vacations/kpis";
+import { vacationFilterWhere } from "@/lib/vacations/list-where";
 import { Prisma } from "@prisma/client";
 
 const createSchema = z.object({
@@ -33,41 +33,14 @@ export async function GET(req: NextRequest) {
   if (authErr) return NextResponse.json({ error: authErr.error }, { status: authErr.status });
 
   const sp = req.nextUrl.searchParams;
-  const branchId    = sp.get("branchId");
-  const employeeId  = sp.get("employeeId");
-  const status      = sp.get("status");
   const month       = sp.get("month"); // YYYY-MM
   const from        = sp.get("from");  // YYYY-MM-DD (inclusive)
   const to          = sp.get("to");    // YYYY-MM-DD (inclusive)
-  const q           = sp.get("q");     // búsqueda por nombre snapshot
-  const pendingOnly = sp.get("pendingOnly") === "true";
-  const withoutCoverage = sp.get("withoutCoverage") === "true"; // aprobadas sin rotativo
-  const withWarnings    = sp.get("withWarnings") === "true";    // aprobadas con "Aprobar igual"
-  const kpi             = sp.get("kpi");
   const page        = Math.max(1, parseInt(sp.get("page") ?? "1"));
   const limit       = Math.min(200, parseInt(sp.get("limit") ?? "50"));
 
-  const where: Prisma.VacationRequestWhereInput = {};
-
-  // BRANCH_MANAGER no ve otras sucursales
-  if (session!.user.role === "BRANCH_MANAGER") {
-    if (!session!.user.branchId) {
-      return NextResponse.json({ data: [], meta: { total: 0, page, limit, pages: 0 } });
-    }
-    where.branchId = session!.user.branchId;
-  } else if (branchId) {
-    where.branchId = branchId;
-  }
-
-  if (employeeId) where.employeeId = employeeId;
-  if (status)     where.status     = status as Prisma.VacationRequestWhereInput["status"];
-
-  if (pendingOnly) {
-    where.status = { in: ["PENDING_SUPERVISOR", "PENDING_RRHH"] };
-  }
-  if (withoutCoverage) where.withoutCoverage = true;
-  if (withWarnings)    where.approvedWithWarnings = true;
-  if (isVacationKpi(kpi)) where.AND = [kpiWhere(kpi)];
+  const where = vacationFilterWhere(sp, session!.user);
+  if (!where) return NextResponse.json({ data: [], meta: { total: 0, page, limit, pages: 0 } });
 
   if (month) {
     const [y, m] = month.split("-").map(Number);
@@ -88,11 +61,6 @@ export async function GET(req: NextRequest) {
     // Si pasaste solo to, fromD es muy viejo; si solo from, toD es muy futuro.
     where.startDate = { ...(where.startDate as object ?? {}), lte: toD };
     where.endDate   = { ...(where.endDate as object ?? {}),   gte: fromD };
-  }
-
-  // Búsqueda por nombre snapshot — case-insensitive, contains.
-  if (q && q.trim()) {
-    where.employeeNameSnapshot = { contains: q.trim(), mode: "insensitive" };
   }
 
   const [data, total] = await Promise.all([
