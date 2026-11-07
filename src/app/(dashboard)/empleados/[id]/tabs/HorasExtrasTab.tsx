@@ -20,7 +20,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   REJECTED: { label: "Rechazada", color: "bg-red-50 text-red-800 border-red-200",         icon: XCircle },
 };
 
-export default function HorasExtrasTab({ employeeId }: { employeeId: string }) {
+export default function HorasExtrasTab({ employeeId, canCreate }: { employeeId: string; canCreate: boolean }) {
   const { data, isLoading } = useQuery({
     queryKey: ["overtime-tab", employeeId],
     queryFn:  () => fetch(`/api/overtime?employeeId=${employeeId}&limit=50`).then(r => r.json()),
@@ -44,9 +44,11 @@ export default function HorasExtrasTab({ employeeId }: { employeeId: string }) {
             </p>
           )}
         </div>
-        <Link href="/horas-extras" className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5">
-          <ExternalLink className="w-3.5 h-3.5" />Registrar horas extras
-        </Link>
+        {canCreate && (
+          <Link href="/horas-extras" className="btn-secondary text-xs py-1.5 px-3 inline-flex items-center gap-1.5">
+            <ExternalLink className="w-3.5 h-3.5" />Registrar horas extras
+          </Link>
+        )}
       </div>
 
       {isLoading ? (

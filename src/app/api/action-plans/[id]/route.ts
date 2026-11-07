@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth, requireCan } from "@/lib/permissions";
 import { z } from "zod";
+import { canSeeBranchRecord } from "@/lib/branch-scope";
 
 const TERMINAL = ["COMPLETED", "CLOSED", "CANCELLED"] as const;
 type Terminal = (typeof TERMINAL)[number];
@@ -44,10 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   if (!plan) return NextResponse.json({ error: "Plan no encontrado" }, { status: 404 });
 
-  if (
-    session!.user.role === "BRANCH_MANAGER" &&
-    plan.branchId !== session!.user.branchId
-  ) {
+  if (!canSeeBranchRecord(session!.user, plan.branchId)) {
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 

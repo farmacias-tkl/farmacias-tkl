@@ -121,7 +121,9 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/sucursales":    ["SUPERVISOR","OWNER","ADMIN"],
   "/empleados":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/ausencias":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/planes-accion": ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  // Planes de acción y horas extras: RRHH y Dirección solo leen (las escrituras
+  // se cortan en cada handler con can.createActionPlan / can.createOvertime).
+  "/planes-accion": ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/horas-extras":  ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/vacaciones":    ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/rotativas":     ["SUPERVISOR","HR","ADMIN"],
@@ -150,8 +152,9 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/absences":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/vacations":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/time-events":   ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/api/action-plans":  ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
-  "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","ADMIN"],
+  "/api/action-plans":  ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/action-plan-forms": ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
   "/api/owner":         ["OWNER"],

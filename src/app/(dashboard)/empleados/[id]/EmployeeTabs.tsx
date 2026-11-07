@@ -1,7 +1,7 @@
 "use client";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { canAccessRoute } from "@/lib/permissions";
+import { can, canAccessRoute } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import ResumenTab from "./tabs/ResumenTab";
 import AusenciasTab from "./tabs/AusenciasTab";
@@ -101,7 +101,7 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
         />
       )}
       {activeTab === "horas-extras" && (
-        <HorasExtrasTab employeeId={employee.id} />
+        <HorasExtrasTab employeeId={employee.id} canCreate={!!role && can.createOvertime(role)} />
       )}
       {activeTab === "historial" && (
         <HistorialSucursalesTab employeeId={employee.id} />

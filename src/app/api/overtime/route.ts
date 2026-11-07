@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
 import { utcDay } from "@/lib/personal/dates";
+import { listBranchScope } from "@/lib/branch-scope";
 
 const createSchema = z.object({
   employeeId: z.string().min(1),
@@ -34,15 +35,12 @@ export async function GET(req: NextRequest) {
 
   const where: any = {};
 
-  // BRANCH_MANAGER: forzar su sucursal en backend, ignorar cualquier branchId de la query
-  if (session!.user.role === "BRANCH_MANAGER") {
-    if (!session!.user.branchId) {
-      return NextResponse.json({ data: [], meta: { total: 0, page, limit, pages: 0 } });
-    }
-    where.branchId = session!.user.branchId;
-  } else if (branchId) {
-    where.branchId = branchId;
+  // BRANCH_MANAGER: forzado a su sucursal, ignora cualquier branchId de la query.
+  const scope = listBranchScope(session!.user, branchId);
+  if (scope === null) {
+    return NextResponse.json({ data: [], meta: { total: 0, page, limit, pages: 0 } });
   }
+  if (scope) where.branchId = scope;
 
   if (employeeId) where.employeeId = employeeId;
   if (status) where.status = status;

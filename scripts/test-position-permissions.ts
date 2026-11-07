@@ -25,6 +25,7 @@ import {
   visibleMenu,
 } from "../src/lib/permissions";
 import { vacationFilterWhere } from "../src/lib/vacations/list-where";
+import { canSeeBranchRecord, listBranchScope } from "../src/lib/branch-scope";
 
 let passed = 0;
 let failed = 0;
@@ -194,9 +195,6 @@ for (const [role, path] of [
   ["MAINTENANCE", "/api/vacations"],
   ["MAINTENANCE", "/api/absences"],
   ["BRANCH_MANAGER", "/api/assignments"],
-  ["HR", "/api/overtime"],
-  ["HR", "/api/action-plans/x"],
-  ["OWNER", "/api/overtime"],
   ["SUPERVISOR", "/api/admin/users"],
   ["SUPERVISOR", "/api/owner/users"],
   ["ADMIN", "/api/owner/users"],
@@ -207,7 +205,6 @@ for (const [role, path] of [
   ["MAINTENANCE", "/empleados"],
   ["BRANCH_MANAGER", "/rotativas"],
   ["BRANCH_MANAGER", "/sucursales"],
-  ["HR", "/planes-accion"],
   ["SUPERVISOR", "/admin"],
   ["ADMIN", "/owner"],
 ] as const) {
@@ -232,12 +229,49 @@ for (const role of ROLES_MENU) {
   assert(`${role}: todos los ítems entran`, menu.every((r) => canAccessRoute(role, r)));
   assert(`${role}: conserva dashboard y perfil`, menu.includes("/dashboard") && menu.includes("/perfil"));
 }
-assert("RRHH no ve Planes (la ruta lo manda al dashboard)", !visibleMenu("HR").includes("/planes-accion"));
-assert("RRHH no ve Horas extras (la API le da 403)", !visibleMenu("HR").includes("/horas-extras"));
-assert("Dirección no ve Horas extras (la API le da 403)", !visibleMenu("OWNER").includes("/horas-extras"));
-assert("encargado conserva Horas extras y Planes", visibleMenu("BRANCH_MANAGER").includes("/horas-extras") && visibleMenu("BRANCH_MANAGER").includes("/planes-accion"));
+assert("supervisión conserva Horas extras y Planes", visibleMenu("SUPERVISOR").includes("/horas-extras") && visibleMenu("SUPERVISOR").includes("/planes-accion"));
 assert("supervisión conserva Rotativas y Sucursales", visibleMenu("SUPERVISOR").includes("/rotativas") && visibleMenu("SUPERVISOR").includes("/sucursales"));
 assert("las secciones ocultas siguen teniendo ruta", canAccessRoute("SUPERVISOR", "/tareas") && canAccessRoute("SUPERVISOR", "/whatsapp"));
+
+console.log("\n=== Horas extras y Planes de acción ===");
+const SECTION_PATHS = ["/horas-extras", "/planes-accion"] as const;
+const SECTION_APIS = ["/api/overtime", "/api/action-plans", "/api/action-plans/x", "/api/action-plan-forms/x", "/api/action-plan-forms/x/pdf"] as const;
+// Ver: SUPERVISOR, ADMIN, encargado, RRHH y Dirección. MAINTENANCE no.
+for (const role of ["SUPERVISOR", "ADMIN", "BRANCH_MANAGER", "HR", "OWNER"] as const) {
+  for (const p of SECTION_PATHS) {
+    assert(`${role} entra a ${p}`, routeDecision(role, p) === "allow");
+    assert(`${role} tiene ${p} en el menú (escritorio y "Más")`, visibleMenu(role).includes(p));
+  }
+  for (const p of SECTION_APIS) assert(`${role} lee ${p}`, routeDecision(role, p) === "allow");
+}
+for (const p of SECTION_PATHS) {
+  assert(`MAINTENANCE en ${p}: redirige`, routeDecision("MAINTENANCE", p) === "redirect");
+  assert(`MAINTENANCE sin ${p} en el menú`, !visibleMenu("MAINTENANCE").includes(p));
+}
+for (const p of SECTION_APIS) assert(`MAINTENANCE en ${p}: 403`, routeDecision("MAINTENANCE", p) === "forbidden");
+// Escribir: RRHH y Dirección solo leen; supervisión, admin y encargado como hoy.
+for (const role of ["HR", "OWNER", "MAINTENANCE"] as const) {
+  assert(`${role} no crea horas extras`, roleCan.createOvertime(role) === false);
+  assert(`${role} no aprueba horas extras`, roleCan.approveOvertime(role) === false);
+  assert(`${role} no crea ni cambia planes`, roleCan.createActionPlan(role) === false);
+}
+for (const role of ["SUPERVISOR", "ADMIN", "BRANCH_MANAGER"] as const) {
+  assert(`${role} sigue creando horas extras`, roleCan.createOvertime(role) === true);
+  assert(`${role} sigue creando y cambiando planes`, roleCan.createActionPlan(role) === true);
+}
+assert("encargado sigue sin aprobar horas extras", roleCan.approveOvertime("BRANCH_MANAGER") === false);
+// Sucursal: el encargado no recibe nada ajeno.
+const bm = { role: "BRANCH_MANAGER" as const, branchId: "tekiel-id" };
+assert("encargado pide otra sucursal: lista forzada a la suya", listBranchScope(bm, "galesa-id") === "tekiel-id");
+assert("encargado sin pedir sucursal: la suya", listBranchScope(bm, null) === "tekiel-id");
+assert("encargado sin sucursal: lista vacía", listBranchScope({ role: "BRANCH_MANAGER", branchId: null }, "galesa-id") === null);
+assert("encargado: registro de otra sucursal => no", canSeeBranchRecord(bm, "galesa-id") === false);
+assert("encargado: registro de su sucursal => sí", canSeeBranchRecord(bm, "tekiel-id") === true);
+assert("encargado sin sucursal: registro sin sucursal => no", canSeeBranchRecord({ role: "BRANCH_MANAGER", branchId: null }, null) === false);
+for (const role of ["HR", "OWNER", "SUPERVISOR", "ADMIN"] as const) {
+  assert(`${role}: todas las sucursales o la que pida`, listBranchScope({ role }, null) === undefined && listBranchScope({ role }, "galesa-id") === "galesa-id");
+  assert(`${role}: ve registros de cualquier sucursal`, canSeeBranchRecord({ role }, "galesa-id") === true);
+}
 
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);
 process.exit(failed === 0 ? 0 : 1);
