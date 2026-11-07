@@ -115,5 +115,7 @@ export default auth((req: NextRequest & { auth: any }) => {
 });
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|public|favicon.ico).*)"],
+  // Archivos de public/ afuera: sin sesión o sin permiso caían en un redirect, y
+  // el manifest y los íconos renderizaban el dashboard entero en cada carga.
+  matcher: ["/((?!_next/static|_next/image|public|favicon.ico|manifest.json|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)"],
 };
