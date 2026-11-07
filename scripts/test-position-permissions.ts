@@ -19,7 +19,10 @@ import {
   can as roleCan,
   canAccessRoute,
   canValidateVacationFor,
-  isVacationDetailApi,
+  HIDDEN_MENU_ROUTES,
+  MENU_BY_ROLE,
+  routeDecision,
+  visibleMenu,
 } from "../src/lib/permissions";
 import { vacationFilterWhere } from "../src/lib/vacations/list-where";
 
@@ -176,15 +179,65 @@ assert("encargado: otra sucursal => no", canValidateVacationFor({ role: "BRANCH_
 assert("encargado: empleado sin sucursal o inexistente => no", canValidateVacationFor({ role: "BRANCH_MANAGER", branchId: "tekiel-id" }, null) === false);
 assert("encargado sin sucursal => no, aunque el empleado tampoco tenga", canValidateVacationFor({ role: "BRANCH_MANAGER", branchId: null }, null) === false);
 for (const path of ["/api/vacations/day", "/api/vacations/validate"]) {
-  assert(`${path}: el middleware responde 403`, isVacationDetailApi(path) === true);
+  assert(`${path}: el middleware responde 403`, routeDecision("MAINTENANCE", path) === "forbidden");
   assert(`${path}: MAINTENANCE frenado también en la ruta`, canAccessRoute("MAINTENANCE", path) === false);
   assert(`${path}: encargado pasa la ruta`, canAccessRoute("BRANCH_MANAGER", path) === true);
 }
-assert("el resto de las rutas conserva su respuesta", isVacationDetailApi("/api/vacations") === false && isVacationDetailApi("/api/vacations/day/x") === false);
 assert("día: encargado forzado a su sucursal aunque pida otra",
   vacationFilterWhere(new URLSearchParams("branchId=galesa-id"), { role: "BRANCH_MANAGER", branchId: "tekiel-id" })?.branchId === "tekiel-id");
 assert("día: encargado sin sucursal no ve nada",
   vacationFilterWhere(new URLSearchParams(""), { role: "BRANCH_MANAGER", branchId: null }) === null);
+
+console.log("\n=== Ruta sin permiso: API 403, página al dashboard ===");
+for (const [role, path] of [
+  ["MAINTENANCE", "/api/employees"],
+  ["MAINTENANCE", "/api/vacations"],
+  ["MAINTENANCE", "/api/absences"],
+  ["BRANCH_MANAGER", "/api/assignments"],
+  ["HR", "/api/overtime"],
+  ["HR", "/api/action-plans/x"],
+  ["OWNER", "/api/overtime"],
+  ["SUPERVISOR", "/api/admin/users"],
+  ["SUPERVISOR", "/api/owner/users"],
+  ["ADMIN", "/api/owner/users"],
+] as const) {
+  assert(`${role} en ${path}: 403`, routeDecision(role, path) === "forbidden");
+}
+for (const [role, path] of [
+  ["MAINTENANCE", "/empleados"],
+  ["BRANCH_MANAGER", "/rotativas"],
+  ["BRANCH_MANAGER", "/sucursales"],
+  ["HR", "/planes-accion"],
+  ["SUPERVISOR", "/admin"],
+  ["ADMIN", "/owner"],
+] as const) {
+  assert(`${role} en ${path}: redirige`, routeDecision(role, path) === "redirect");
+}
+for (const [role, path] of [
+  ["SUPERVISOR", "/api/employees"],
+  ["HR", "/api/assignments"],
+  ["ADMIN", "/api/admin/users"],
+  ["OWNER", "/api/owner/users"],
+  ["BRANCH_MANAGER", "/empleados"],
+  ["MAINTENANCE", "/dashboard"],
+] as const) {
+  assert(`${role} en ${path}: pasa`, routeDecision(role, path) === "allow");
+}
+
+console.log("\n=== Menú visible ===");
+const ROLES_MENU = Object.keys(MENU_BY_ROLE) as (keyof typeof MENU_BY_ROLE)[];
+for (const role of ROLES_MENU) {
+  const menu = visibleMenu(role);
+  assert(`${role}: sin secciones ocultas`, !menu.some((r) => HIDDEN_MENU_ROUTES.includes(r)));
+  assert(`${role}: todos los ítems entran`, menu.every((r) => canAccessRoute(role, r)));
+  assert(`${role}: conserva dashboard y perfil`, menu.includes("/dashboard") && menu.includes("/perfil"));
+}
+assert("RRHH no ve Planes (la ruta lo manda al dashboard)", !visibleMenu("HR").includes("/planes-accion"));
+assert("RRHH no ve Horas extras (la API le da 403)", !visibleMenu("HR").includes("/horas-extras"));
+assert("Dirección no ve Horas extras (la API le da 403)", !visibleMenu("OWNER").includes("/horas-extras"));
+assert("encargado conserva Horas extras y Planes", visibleMenu("BRANCH_MANAGER").includes("/horas-extras") && visibleMenu("BRANCH_MANAGER").includes("/planes-accion"));
+assert("supervisión conserva Rotativas y Sucursales", visibleMenu("SUPERVISOR").includes("/rotativas") && visibleMenu("SUPERVISOR").includes("/sucursales"));
+assert("las secciones ocultas siguen teniendo ruta", canAccessRoute("SUPERVISOR", "/tareas") && canAccessRoute("SUPERVISOR", "/whatsapp"));
 
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);
 process.exit(failed === 0 ? 0 : 1);

@@ -9,7 +9,7 @@ import {
   User, ShieldCheck, Briefcase, Crown,
 } from "lucide-react";
 import type { UserRole } from "@prisma/client";
-import { MENU_BY_ROLE, ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
+import { visibleMenu, ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 const ROUTE_META: Record<string, { label: string; icon: React.ElementType }> = {
@@ -41,8 +41,9 @@ export function Sidebar({ user, open, onClose }: SidebarProps) {
   const pathname = usePathname();
 
   // Rutas del menú excluyendo /perfil (va en zona de usuario)
-  const menuRoutes = (MENU_BY_ROLE[user.role] ?? []).filter(r => r !== "/perfil");
-  const hasPerfil  = (MENU_BY_ROLE[user.role] ?? []).includes("/perfil");
+  const menu       = visibleMenu(user.role);
+  const menuRoutes = menu.filter(r => r !== "/perfil");
+  const hasPerfil  = menu.includes("/perfil");
 
   const isActive = (route: string) =>
     route === "/dashboard"

@@ -63,7 +63,7 @@ export default function PlanesAccionPage() {
     return <div className="card p-10 text-center text-sm text-gray-400">Cargando...</div>;
   }
 
-  const overdueCount = plans.filter((p: any) => p.isOverdue).length;
+  const overdueCount = plansData?.meta?.overdue ?? 0;
 
   return (
     <div className="space-y-4">

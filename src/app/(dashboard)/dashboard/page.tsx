@@ -2,7 +2,7 @@ import { todayRangeAR } from "@/lib/dates/today";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLE_LABELS, can, canAccessRoute } from "@/lib/permissions";
+import { ROLE_LABELS, can, canAccessRoute, isMenuRouteHidden } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
 import {
   Users, MapPin, Wrench, ClipboardList, AlertTriangle,
@@ -93,6 +93,7 @@ export default async function DashboardPage() {
   const criticalUncov   = absencesHoy.filter(a => a.employee.position.requiresCoverage);
   const sinRevisar      = absencesHoy.filter(a => a.status === "REPORTED").length;
   const upcomingModules = UPCOMING_MODULES
+    .filter(m => !isMenuRouteHidden(m.href))
     .filter(m => m.roles.includes(role as UserRole) || m.roles.includes("ALL" as UserRole));
 
   const todayFormatted = today.toLocaleDateString("es-AR", {
@@ -222,11 +223,11 @@ export default async function DashboardPage() {
             color={sinRevisar === 0 ? "green" : "amber"}
             href="/ausencias"
           />
-          {role !== "HR" && role !== "MAINTENANCE" && (
+          {!isMenuRouteHidden("/mantenimiento") && role !== "HR" && role !== "MAINTENANCE" && (
             <StatCard label="Tickets abiertos" value={0} sub="Sin tickets"
               icon={Wrench} color="green" href="/mantenimiento" isComingSoon />
           )}
-          {role !== "MAINTENANCE" && (
+          {!isMenuRouteHidden("/tareas") && role !== "MAINTENANCE" && (
             <StatCard label="Tareas vencidas" value={0} sub="Al dia"
               icon={ClipboardList} color="green" href="/tareas" isComingSoon />
           )}

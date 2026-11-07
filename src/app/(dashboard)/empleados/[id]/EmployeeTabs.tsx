@@ -1,5 +1,7 @@
 "use client";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { canAccessRoute } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import ResumenTab from "./tabs/ResumenTab";
 import AusenciasTab from "./tabs/AusenciasTab";
@@ -24,6 +26,12 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+// Pestañas que dependen de una API que no todos los roles tienen.
+const TAB_API: Partial<Record<TabId, string>> = {
+  "planes":       "/api/action-plans",
+  "horas-extras": "/api/overtime",
+};
+
 interface Props {
   employee:  SerializedEmployee;
   canCreate: boolean;
@@ -33,7 +41,14 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
   const router       = useRouter();
   const pathname     = usePathname();
   const searchParams = useSearchParams();
-  const activeTab    = (searchParams.get("tab") ?? "resumen") as TabId;
+  const { data: session } = useSession();
+  const role = session?.user?.role;
+  const tabs = TABS.filter(t => {
+    const api = TAB_API[t.id];
+    return !api || (!!role && canAccessRoute(role, api));
+  });
+  const requested = (searchParams.get("tab") ?? "resumen") as TabId;
+  const activeTab: TabId = tabs.some(t => t.id === requested) ? requested : "resumen";
 
   const navigate = (tab: TabId) => {
     const p = new URLSearchParams(searchParams.toString());
@@ -47,7 +62,7 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
       {/* Barra de tabs */}
       <div className="border-b border-gray-200 overflow-x-auto">
         <nav className="flex min-w-max" aria-label="Secciones del legajo">
-          {TABS.map(t => (
+          {tabs.map(t => (
             <button
               key={t.id}
               onClick={() => navigate(t.id)}

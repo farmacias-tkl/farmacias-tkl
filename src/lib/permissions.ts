@@ -83,6 +83,35 @@ export const MENU_BY_ROLE: Record<UserRole, string[]> = {
   ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
 };
 
+/**
+ * Secciones que todavía no tienen funcionalidad: la pantalla es solo un aviso de
+ * "disponible en la siguiente etapa". No aparecen en el menú ni en el dashboard;
+ * el código y la ruta siguen. Para mostrar una, sacarla de esta lista.
+ */
+export const HIDDEN_MENU_ROUTES: readonly string[] = ["/tareas", "/mantenimiento", "/whatsapp", "/alertas"];
+
+/** La API de la que depende una pantalla, cuando una pantalla sin ella queda vacía. */
+const MENU_ROUTE_API: Record<string, string> = {
+  "/horas-extras": "/api/overtime",
+};
+
+export function isMenuRouteHidden(route: string): boolean {
+  return HIDDEN_MENU_ROUTES.includes(route);
+}
+
+/**
+ * Menú de un rol: sin las secciones ocultas ni los ítems a los que el rol no
+ * puede entrar (tocarlos lo mandaría de vuelta al dashboard o mostraría una
+ * pantalla vacía).
+ */
+export function visibleMenu(role: UserRole): string[] {
+  return (MENU_BY_ROLE[role] ?? []).filter((route) => {
+    if (isMenuRouteHidden(route) || !canAccessRoute(role, route)) return false;
+    const api = MENU_ROUTE_API[route];
+    return !api || canAccessRoute(role, api);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Permisos por ruta — usado por middleware
 // ---------------------------------------------------------------------------
@@ -135,14 +164,6 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
 
-/**
- * Rutas de vacaciones que devuelven saldo y horario de una persona. Un rol sin
- * acceso recibe 403 y no el redirect a /dashboard del middleware.
- */
-export function isVacationDetailApi(pathname: string): boolean {
-  return pathname === "/api/vacations/day" || pathname === "/api/vacations/validate";
-}
-
 /** Validar una solicitud de un empleado: el encargado, solo los de su sucursal. */
 export function canValidateVacationFor(
   user: { role: UserRole; branchId?: string | null },
@@ -163,6 +184,16 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
     return ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"].includes(role);
   }
   return role === "ADMIN";
+}
+
+/**
+ * Qué hace el middleware con una ruta según el rol. Una API sin permiso responde
+ * 403: quien llama es código, y un redirect le devolvería el HTML del dashboard.
+ * Una página sin permiso sigue yendo al dashboard.
+ */
+export function routeDecision(role: UserRole, pathname: string): "allow" | "forbidden" | "redirect" {
+  if (canAccessRoute(role, pathname)) return "allow";
+  return pathname.startsWith("/api/") ? "forbidden" : "redirect";
 }
 
 export const can = {

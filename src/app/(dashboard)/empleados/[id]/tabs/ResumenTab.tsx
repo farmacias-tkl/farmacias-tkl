@@ -1,6 +1,8 @@
 "use client";
 import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useQuery } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
+import { canAccessRoute } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, Clock, UserMinus, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,13 +35,18 @@ export default function ResumenTab({ employeeId, onNavigate }: Props) {
     queryKey: ["absences-resumen", employeeId],
     queryFn:  () => fetch(`/api/absences?employeeId=${employeeId}&limit=5`).then(r => r.json()),
   });
+  // RRHH y Dirección no tienen acceso a estas APIs: no se piden.
+  const { data: session } = useSession();
+  const role = session?.user?.role;
   const { data: plansData } = useQuery({
     queryKey: ["plans-resumen", employeeId],
     queryFn:  () => fetch(`/api/action-plans?employeeId=${employeeId}&limit=5`).then(r => r.json()),
+    enabled:  !!role && canAccessRoute(role, "/api/action-plans"),
   });
   const { data: otData } = useQuery({
     queryKey: ["overtime-resumen", employeeId],
     queryFn:  () => fetch(`/api/overtime?employeeId=${employeeId}&limit=5`).then(r => r.json()),
+    enabled:  !!role && canAccessRoute(role, "/api/overtime"),
   });
 
   const absences = absData?.data    ?? [];

@@ -4,7 +4,7 @@
  * BRANCH_MANAGER: GET forzado a su sucursal.
  * La creación de planes se hace exclusivamente vía POST /api/action-plan-forms/complete.
  */
-import { isActionPlanOverdue } from "@/lib/action-plan-overdue";
+import { actionPlanOverdueWhere, isActionPlanOverdue } from "@/lib/action-plan-overdue";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   if (employeeId) where.employeeId = employeeId;
   if (status)     where.status     = status;
 
-  const [plans, total] = await Promise.all([
+  const [plans, total, overdue] = await Promise.all([
     prisma.actionPlan.findMany({
       where,
       include: {
@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
       take: limit,
     }),
     prisma.actionPlan.count({ where }),
+    prisma.actionPlan.count({ where: { AND: [where, actionPlanOverdueWhere()] } }),
   ]);
 
   const enriched = plans.map(p => ({
@@ -60,6 +61,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     data: enriched,
-    meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    meta: { total, page, limit, pages: Math.ceil(total / limit), overdue },
   });
 }
