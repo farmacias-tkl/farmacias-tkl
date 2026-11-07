@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { countVacationKpis } from "@/lib/vacations/kpis";
+import { KpiCard, KpiGrid } from "@/components/ui/Kpi";
 
 
 function ClockIcon(props: any) {
@@ -187,90 +188,72 @@ export default async function DashboardPage() {
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
           Resumen operativo
         </h3>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiGrid cols={4}>
           {role !== "MAINTENANCE" && (
-            <StatCard label="Empleados activos" value={totalEmployees}
+            <KpiCard label="Empleados activos" value={totalEmployees}
               sub={isBranchManager ? "En tu sucursal" : "En toda la cadena"}
-              icon={Users} color="blue" href="/empleados" />
+              icon={Users} tone="blue" href="/empleados" />
           )}
           {!isBranchManager && can.viewAllBranches(role as UserRole) && (
-            <StatCard label="Sucursales" value={totalBranches} sub="Activas"
-              icon={MapPin} color="teal" href="/sucursales" />
+            <KpiCard label="Sucursales" value={totalBranches} sub="Activas"
+              icon={MapPin} tone="teal" href="/sucursales" />
           )}
 
           {/* Desglose fuera hoy */}
-          <StatCard
+          <KpiCard
             label="Ausentes hoy"
             value={ausenciasPuntuales.length}
             sub={criticalUncov.length > 0 ? `${criticalUncov.length} critico${criticalUncov.length > 1 ? "s" : ""}` : ausenciasPuntuales.length === 0 ? "Sin ausencias" : "Sin criticos"}
             icon={UserMinus}
-            color={ausenciasPuntuales.length === 0 ? "green" : criticalUncov.length > 0 ? "red" : "orange"}
+            tone={ausenciasPuntuales.length === 0 ? "green" : criticalUncov.length > 0 ? "red" : "orange"}
             href="/ausencias"
           />
-          <StatCard
+          <KpiCard
             label="Con licencia"
             value={licencias.length}
             sub={licencias.length === 0 ? "Sin licencias" : "Medicas / especiales"}
             icon={ClockIcon}
-            color={licencias.length === 0 ? "green" : "blue"}
+            tone={licencias.length === 0 ? "green" : "blue"}
             href="/ausencias"
           />
-          <StatCard
+          <KpiCard
             label="Sin revisar"
             value={sinRevisar}
             sub={sinRevisar === 0 ? "Al dia" : "Pendientes de revision"}
             icon={BellDot}
-            color={sinRevisar === 0 ? "green" : "amber"}
+            tone={sinRevisar === 0 ? "green" : "amber"}
             href="/ausencias"
           />
           {!isMenuRouteHidden("/mantenimiento") && role !== "HR" && role !== "MAINTENANCE" && (
-            <StatCard label="Tickets abiertos" value={0} sub="Sin tickets"
-              icon={Wrench} color="green" href="/mantenimiento" isComingSoon />
+            <KpiCard label="Tickets abiertos" value={0} sub="Sin tickets · Proximamente"
+              icon={Wrench} tone="gray" />
           )}
           {!isMenuRouteHidden("/tareas") && role !== "MAINTENANCE" && (
-            <StatCard label="Tareas vencidas" value={0} sub="Al dia"
-              icon={ClipboardList} color="green" href="/tareas" isComingSoon />
+            <KpiCard label="Tareas vencidas" value={0} sub="Al dia · Proximamente"
+              icon={ClipboardList} tone="gray" />
           )}
-        </div>
+        </KpiGrid>
       </section>
 
       {/* Vacaciones y Rotativas */}
       {(vacationKpis || showRotativas) && (
-        <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <KpiGrid cols={3}>
           {vacationKpis && (
-          <Link href="/vacaciones" className="card p-4 flex items-center gap-3 sm:gap-4 hover:shadow-md transition-shadow">
-            <div className="inline-flex p-2 rounded-lg bg-indigo-50 shrink-0">
-              <CalendarDays className="w-5 h-5 text-indigo-600" />
-            </div>
-            <div className="flex gap-4 sm:gap-8 flex-1 min-w-0">
-              <div>
-                <p className="text-2xl font-bold text-gray-900 leading-none">{vacationKpis.solicitadas}</p>
-                <p className="text-sm font-medium text-gray-700 mt-1">Solicitadas</p>
-                <p className="text-xs text-gray-400 mt-0.5">Pendientes de supervisión</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900 leading-none">{vacationKpis.hoy}</p>
-                <p className="text-sm font-medium text-gray-700 mt-1">De vacaciones hoy</p>
-                <p className="text-xs text-gray-400 mt-0.5">{isBranchManager ? "En tu sucursal" : "En toda la cadena"}</p>
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
-          </Link>
+            <KpiCard label="Solicitadas" value={vacationKpis.solicitadas}
+              sub="Vacaciones pendientes de supervisión"
+              icon={CalendarDays} tone="indigo" href="/vacaciones" />
+          )}
+          {vacationKpis && (
+            <KpiCard label="De vacaciones hoy" value={vacationKpis.hoy}
+              sub={isBranchManager ? "En tu sucursal" : "En toda la cadena"}
+              icon={CalendarDays} tone="indigo" href="/vacaciones" />
           )}
           {showRotativas && (
-            <Link href="/rotativas" className="card p-4 flex items-center gap-4 hover:shadow-md transition-shadow">
-              <div className="inline-flex p-2 rounded-lg bg-violet-50 shrink-0">
-                <RotateCcw className="w-5 h-5 text-violet-600" />
-              </div>
-              <div className="flex-1">
-                <p className="text-2xl font-bold text-gray-900 leading-none">{rotativasHoy}</p>
-                <p className="text-sm font-medium text-gray-700 mt-1">Rotativas y coberturas</p>
-                <p className="text-xs text-gray-400 mt-0.5">Asignaciones activas hoy</p>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
-            </Link>
+            <KpiCard label="Rotativas y coberturas" value={rotativasHoy}
+              sub="Asignaciones activas hoy"
+              icon={RotateCcw} tone="violet" href="/rotativas" />
           )}
-        </section>
+        </KpiGrid>
       )}
 
       {/* Detalle ausentes hoy */}
@@ -361,40 +344,6 @@ function AlertBanner({ level, children }: { level: "critical"|"warning"|"info"; 
       {children}
     </div>
   );
-}
-
-function StatCard({ label, value, sub, icon: Icon, color, href, isComingSoon }: {
-  label: string; value: number; sub?: string;
-  icon: React.ElementType; color: string;
-  href?: string; isComingSoon?: boolean;
-}) {
-  const colorMap: Record<string, { bg: string; text: string }> = {
-    blue:   { bg: "bg-blue-50",   text: "text-blue-600"   },
-    teal:   { bg: "bg-teal-50",   text: "text-teal-600"   },
-    orange: { bg: "bg-orange-50", text: "text-orange-500" },
-    red:    { bg: "bg-red-50",    text: "text-red-500"    },
-    green:  { bg: "bg-green-50",  text: "text-green-600"  },
-    amber:  { bg: "bg-amber-50",  text: "text-amber-600"  },
-    violet: { bg: "bg-violet-50", text: "text-violet-600" },
-  };
-  const c = colorMap[color] ?? colorMap.blue;
-  const content = (
-    <div className={cn("card p-5 hover:shadow-md transition-shadow", isComingSoon && "opacity-70")}>
-      <div className={cn("inline-flex p-2 rounded-lg mb-3", c.bg)}>
-        <Icon className={cn("w-5 h-5", c.text)} />
-      </div>
-      <p className="text-2xl font-bold text-gray-900 leading-none">{value}</p>
-      <p className="text-sm font-medium text-gray-700 mt-1">{label}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
-      {isComingSoon && (
-        <span className="inline-block mt-2 text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">
-          Proximamente
-        </span>
-      )}
-    </div>
-  );
-  if (href && !isComingSoon) return <Link href={href}>{content}</Link>;
-  return content;
 }
 
 function AbsenceRow({ a, showBranch, isLeave }: { a: any; showBranch: boolean; isLeave?: boolean }) {

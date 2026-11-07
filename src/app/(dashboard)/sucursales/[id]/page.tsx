@@ -9,6 +9,7 @@ import {
   CheckCircle2, XCircle, AlertTriangle, Phone as PhoneIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { KpiCard, KpiGrid } from "@/components/ui/Kpi";
 
 // Badge de tipo de ausencia
 const ABSENCE_TYPE_META: Record<string, { label: string; color: string }> = {
@@ -137,25 +138,15 @@ export default async function SucursalDetailPage({
               )}
             </div>
           </div>
-
-          {/* Métricas rápidas */}
-          <div className="flex items-center gap-3">
-            <div className="text-center">
-              <p className="text-xl font-bold text-gray-900">{dotacion}</p>
-              <p className="text-xs text-gray-400">Activos</p>
-            </div>
-            <div className="text-center">
-              <p className={cn("text-xl font-bold", ausentes > 0 ? "text-red-600" : "text-green-600")}>
-                {ausentes}
-              </p>
-              <p className="text-xs text-gray-400">Ausentes</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xl font-bold text-gray-700">{disponibles}</p>
-              <p className="text-xs text-gray-400">Disponibles</p>
-            </div>
-          </div>
         </div>
+
+        {/* Métricas rápidas */}
+        <KpiGrid cols={3} className="mt-4">
+          <KpiCard label="Activos" value={dotacion} icon={Users} tone="blue" />
+          <KpiCard label="Ausentes hoy" value={ausentes} icon={UserMinus} tone={ausentes > 0 ? "red" : "green"}
+            valueClassName={ausentes > 0 ? "text-red-600" : "text-green-600"} />
+          <KpiCard label="Disponibles" value={disponibles} icon={CheckCircle2} tone="green" />
+        </KpiGrid>
       </div>
 
       {/* Alerta crítica */}

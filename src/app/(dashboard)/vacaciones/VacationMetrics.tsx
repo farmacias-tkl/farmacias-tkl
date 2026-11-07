@@ -4,7 +4,7 @@
 // saca el filtro.
 import { useQuery } from "@tanstack/react-query";
 import { Clock, CheckCircle2, XCircle, Sun } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { KpiCard, KpiGrid, type KpiTone } from "@/components/ui/Kpi";
 import type { VacationKpi } from "@/lib/vacations/kpis";
 
 export interface MetricsResponse {
@@ -29,7 +29,7 @@ export function useVacationMetrics(branchId?: string | null) {
   });
 }
 
-const CARDS: Array<{ kpi: VacationKpi; label: string; icon: any; tone: Tone; hint: string }> = [
+const CARDS: Array<{ kpi: VacationKpi; label: string; icon: any; tone: KpiTone; hint: string }> = [
   { kpi: "solicitadas", label: "Solicitadas",       icon: Clock,        tone: "yellow", hint: "Pendientes de aprobación de supervisión" },
   { kpi: "aprobadas",   label: "Aprobadas",         icon: CheckCircle2, tone: "green",  hint: "Aprobadas en curso o futuras" },
   { kpi: "rechazadas",  label: "Rechazadas",        icon: XCircle,      tone: "red",    hint: "Rechazadas este mes" },
@@ -45,55 +45,19 @@ export default function VacationMetrics({ branchId, active, onSelect }: {
   const m = data?.data;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+    <KpiGrid cols={4}>
       {CARDS.map((c) => (
         <KpiCard
           key={c.kpi}
           label={c.label}
-          value={m?.[c.kpi]}
+          value={isLoading ? "—" : (m?.[c.kpi] ?? 0)}
           icon={c.icon}
           tone={c.tone}
-          hint={c.hint}
-          loading={isLoading}
+          title={c.hint}
           selected={active === c.kpi}
           onClick={() => onSelect(active === c.kpi ? null : c.kpi)}
         />
       ))}
-    </div>
-  );
-}
-
-type Tone = "yellow" | "green" | "red" | "indigo";
-
-const TONE: Record<Tone, { ring: string; iconBg: string; iconText: string; selected: string }> = {
-  yellow: { ring: "ring-yellow-100", iconBg: "bg-yellow-50", iconText: "text-yellow-600", selected: "ring-2 ring-yellow-400" },
-  green:  { ring: "ring-green-100",  iconBg: "bg-green-50",  iconText: "text-green-600",  selected: "ring-2 ring-green-400" },
-  red:    { ring: "ring-red-100",    iconBg: "bg-red-50",    iconText: "text-red-600",    selected: "ring-2 ring-red-400" },
-  indigo: { ring: "ring-indigo-100", iconBg: "bg-indigo-50", iconText: "text-indigo-600", selected: "ring-2 ring-indigo-400" },
-};
-
-function KpiCard({ label, value, icon: Icon, tone, loading, hint, selected, onClick }: {
-  label: string; value: number | undefined; icon: any; tone: Tone; loading: boolean; hint: string;
-  selected: boolean; onClick: () => void;
-}) {
-  const t = TONE[tone];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={hint}
-      aria-pressed={selected}
-      className={cn("card px-3 py-2.5 flex items-center gap-2.5 text-left hover:shadow-md transition-shadow", selected ? t.selected : t.ring)}
-    >
-      <div className={cn("rounded-md p-2 shrink-0", t.iconBg)}>
-        <Icon className={cn("w-4 h-4", t.iconText)} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[10px] uppercase font-medium tracking-wide text-gray-500 leading-tight">{label}</p>
-        <p className="text-base font-semibold text-gray-900 leading-tight mt-0.5">
-          {loading ? "—" : (value ?? 0)}
-        </p>
-      </div>
-    </button>
+    </KpiGrid>
   );
 }

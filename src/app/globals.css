@@ -43,6 +43,13 @@
   .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
 }
 
+/* Filas de KPI (components/ui/Kpi.tsx): cada tarjeta llena su celda. */
+.kpi-grid > * { min-width: 0; width: 100%; height: 100%; }
+/* Mientras la grilla tiene 2 columnas, una tarjeta sola al final ocupa todo el ancho. */
+@media (max-width: 1023px) {
+  .kpi-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
 /* Celular: textos de al menos 14 px y zonas táctiles de al menos 44 px. */
 @media (max-width: 767px) {
   .tkl-app .text-xs,
