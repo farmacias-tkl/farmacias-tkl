@@ -8,6 +8,7 @@ import {
   ShieldCheck, KeyRound, ChevronDown, ChevronUp, Loader2,
 } from "lucide-react";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
+import { AsyncButton } from "@/components/ui/AsyncButton";
 import { cn } from "@/lib/utils";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { ActionErrorModal } from "@/components/users/action-error-modal";
@@ -73,7 +74,7 @@ export default function UsuariosPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: !current }),
     });
-    qc.invalidateQueries({ queryKey: ["admin-users"] });
+    await qc.invalidateQueries({ queryKey: ["admin-users"] });
   };
 
   const resetPassword = async (id: string, name: string) => {
@@ -208,14 +209,14 @@ export default function UsuariosPage() {
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           : <KeyRound className="w-3.5 h-3.5" />}
                       </button>
-                      <button
+                      <AsyncButton
                         onClick={() => toggleActive(u.id, u.active)}
                         title={u.active ? "Desactivar" : "Activar"}
                         className={cn("btn-secondary text-xs py-1 px-2",
                           u.active ? "text-red-600 border-red-300 hover:bg-red-50"
                                    : "text-green-700 border-green-300 hover:bg-green-50")}>
                         {u.active ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                      </button>
+                      </AsyncButton>
                     </div>
                   </td>
                 </tr>

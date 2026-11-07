@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, CalendarDays, List, LayoutGrid } from "lucide-react";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -105,10 +105,11 @@ export default function VacacionesPage() {
       return res.json();
     },
     enabled: sessionReady && viewMode === "list",
+    placeholderData: keepPreviousData,
   });
 
   // Calendario: trae todo el rango de la grilla visible
-  const { data: calRes, isLoading: calLoading } = useQuery({
+  const { data: calRes, isLoading: calFirstLoad, isPlaceholderData: calChanging } = useQuery({
     queryKey: ["vacations-cal", { filters: calendarFilters, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
     queryFn: async () => {
       const p = new URLSearchParams(calendarFilters);
@@ -120,7 +121,9 @@ export default function VacacionesPage() {
       return res.json();
     },
     enabled: sessionReady && viewMode === "calendar",
+    placeholderData: keepPreviousData,
   });
+  const calLoading = calFirstLoad || calChanging;
 
   const listData = listRes?.data ?? [];
   const calData  = calRes?.data  ?? [];

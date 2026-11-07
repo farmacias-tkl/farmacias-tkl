@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import type { UserRole } from "@prisma/client";
@@ -12,6 +13,10 @@ interface Props {
 
 export function DashboardShell({ user, children }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const qc = useQueryClient();
+  useEffect(() => {
+    qc.prefetchQuery({ queryKey: ["branches"], queryFn: () => fetch("/api/branches").then(r => r.json()) });
+  }, [qc]);
   const canExecutive  = canViewExecutive({ role: user.role, executiveAccess: user.executiveAccess ?? false });
   const canCallCenter = canViewCallCenter({ role: user.role, callCenterAccess: user.callCenterAccess ?? false });
   return (

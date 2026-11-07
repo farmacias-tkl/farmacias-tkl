@@ -70,6 +70,7 @@ export default function PuestosPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["positions"] });
+      qc.invalidateQueries({ queryKey: ["positions-list"] });
       reset();
       setShowForm(false);
       setServerErr("");

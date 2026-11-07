@@ -2,11 +2,12 @@
 import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { typeAllowsReasonDetail } from "@/lib/absences";
+import { AsyncButton } from "@/components/ui/AsyncButton";
 import {
   Plus, UserMinus, AlertTriangle, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, RotateCcw, Users, Info, LogOut, CalendarDays,
@@ -139,6 +140,7 @@ export default function AusenciasPage() {
       return res.json();
     },
     enabled: sessionReady,
+    placeholderData: keepPreviousData,
   });
 
   // Sucursales
@@ -164,6 +166,7 @@ export default function AusenciasPage() {
       return res.json();
     },
     enabled: sessionReady && sectionTab === "time-events",
+    placeholderData: keepPreviousData,
   });
 
   // PLANTEL REAL del día para el formulario fijo
@@ -292,7 +295,7 @@ export default function AusenciasPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus }),
     });
-    qc.invalidateQueries({ queryKey: ["absences"] });
+    await qc.invalidateQueries({ queryKey: ["absences"] });
   };
 
   if (status === "loading") {
@@ -879,7 +882,7 @@ export default function AusenciasPage() {
 
 function AbsenceCard({ absence: a, canJustify, onUpdate }: {
   absence: any; canJustify: boolean;
-  onUpdate: (id: string, status: string) => void;
+  onUpdate: (id: string, status: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[a.status] ?? STATUS_META.REPORTED;
@@ -965,23 +968,23 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
           {canJustify && a.status !== "CLOSED" && (
             <div className="flex flex-wrap gap-2">
               {a.status !== "JUSTIFIED" && (
-                <button onClick={() => onUpdate(a.id, "JUSTIFIED")}
+                <AsyncButton onClick={() => onUpdate(a.id, "JUSTIFIED")}
                   className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
                   Justificar
-                </button>
+                </AsyncButton>
               )}
               {a.status !== "UNJUSTIFIED" && (
-                <button onClick={() => onUpdate(a.id, "UNJUSTIFIED")}
+                <AsyncButton onClick={() => onUpdate(a.id, "UNJUSTIFIED")}
                   className="btn-secondary text-xs py-1.5 px-3 text-red-600 border-red-300 hover:bg-red-50">
                   Injustificada
-                </button>
+                </AsyncButton>
               )}
               {a.status !== "UNDER_REVIEW" && (
-                <button onClick={() => onUpdate(a.id, "UNDER_REVIEW")}
-                  className="btn-secondary text-xs py-1.5 px-3">En revision</button>
+                <AsyncButton onClick={() => onUpdate(a.id, "UNDER_REVIEW")}
+                  className="btn-secondary text-xs py-1.5 px-3">En revision</AsyncButton>
               )}
-              <button onClick={() => onUpdate(a.id, "CLOSED")}
-                className="btn-secondary text-xs py-1.5 px-3">Cerrar</button>
+              <AsyncButton onClick={() => onUpdate(a.id, "CLOSED")}
+                className="btn-secondary text-xs py-1.5 px-3">Cerrar</AsyncButton>
             </div>
           )}
         </div>

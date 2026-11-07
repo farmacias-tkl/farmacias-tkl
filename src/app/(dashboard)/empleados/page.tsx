@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AsyncButton } from "@/components/ui/AsyncButton";
 import {
   Plus, Search, Users, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, AlertTriangle, RotateCcw, UserMinus,
@@ -321,8 +323,9 @@ export default function EmpleadosPage() {
 }
 
 function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
-  emp: any; isOwner: boolean; canManage: boolean; onUpdate: () => void;
+  emp: any; isOwner: boolean; canManage: boolean; onUpdate: () => Promise<void>;
 }) {
+  const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const sm = STATUS_HOY[emp.statusHoy ?? "ACTIVE"] ?? STATUS_HOY.ACTIVE;
   const SI = sm.icon;
@@ -333,7 +336,7 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: !emp.active }),
     });
-    onUpdate();
+    await onUpdate();
   };
 
   return (
@@ -343,7 +346,7 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
         emp.statusHoy === "ABSENT"   && "bg-red-50/20",
         emp.statusHoy === "ON_LEAVE" && "bg-blue-50/10",
         !emp.active && "opacity-50",
-      )} onClick={() => setExpanded(v => !v)}>
+      )} onClick={() => setExpanded(v => !v)} onMouseEnter={() => router.prefetch(`/empleados/${emp.id}`)}>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2.5">
             <div className={cn(
@@ -418,11 +421,11 @@ function EmployeeRow({ emp, isOwner, canManage, onUpdate }: {
                 Ver ficha →
               </Link>
               {canManage && !isOwner && (
-                <button onClick={e => { e.stopPropagation(); toggleActive(); }}
+                <AsyncButton onClick={e => { e.stopPropagation(); return toggleActive(); }}
                   className={cn("btn-secondary text-xs py-1.5 px-3",
                     !emp.active && "text-green-700 border-green-300 hover:bg-green-50")}>
                   {emp.active ? "Dar de baja" : "Reactivar"}
-                </button>
+                </AsyncButton>
               )}
               {isOwner && <p className="text-xs text-gray-400 italic">Vista de solo lectura</p>}
             </div>

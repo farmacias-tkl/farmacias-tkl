@@ -10,6 +10,7 @@ import { ROLE_LABELS, ROLE_COLORS } from "@/lib/permissions";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { ActionErrorModal } from "@/components/users/action-error-modal";
+import { AsyncButton } from "@/components/ui/AsyncButton";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -79,7 +80,7 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
       setActionError(json.error ?? "Error al cambiar estado");
       return;
     }
-    qc.invalidateQueries({ queryKey: ["owner-users"] });
+    await qc.invalidateQueries({ queryKey: ["owner-users"] });
     setConfirmDeactivate(null);
   };
 
@@ -89,7 +90,7 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
       setConfirmDeactivate(u);
       return;
     }
-    toggleActive(u);
+    return toggleActive(u);
   };
 
   const resetPassword = async (id: string, name: string) => {
@@ -222,7 +223,7 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             : <KeyRound className="w-3.5 h-3.5" />}
                         </button>
-                        <button
+                        <AsyncButton
                           onClick={() => handleToggleClick(u)}
                           disabled={isSelf}
                           title={isSelf ? "No podes desactivarte a vos mismo" : (u.active ? "Desactivar" : "Activar")}
@@ -232,7 +233,7 @@ export function UsuariosClient({ currentUserId }: { currentUserId: string }) {
                             !isSelf && !u.active && "text-green-700 border-green-300 hover:bg-green-50")}
                         >
                           {u.active ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                        </button>
+                        </AsyncButton>
                       </div>
                     </td>
                   </tr>

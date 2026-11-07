@@ -12,6 +12,7 @@ import { UserPermissionsPanel } from "@/components/users/user-permissions-panel"
 import { ResetPasswordResultModal, type ResetPasswordResult } from "@/components/users/reset-password-result-modal";
 import { ActionErrorModal } from "@/components/users/action-error-modal";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { AsyncButton } from "@/components/ui/AsyncButton";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 
@@ -102,7 +103,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: !user.active }),
     });
-    qc.invalidateQueries({ queryKey: ["admin-user", params.id] });
+    await qc.invalidateQueries({ queryKey: ["admin-user", params.id] });
     qc.invalidateQueries({ queryKey: ["admin-users"] });
   };
 
@@ -252,7 +253,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
                 : "Permite al usuario volver a iniciar sesión."}
             </p>
           </div>
-          <button onClick={toggleActive}
+          <AsyncButton onClick={toggleActive}
             className={cn("btn-secondary text-sm",
               user.active
                 ? "text-red-600 border-red-300 hover:bg-red-50"
@@ -261,7 +262,7 @@ export default function UsuarioDetailPage({ params }: { params: { id: string } }
               ? <><XCircle className="w-4 h-4" />Desactivar</>
               : <><CheckCircle2 className="w-4 h-4" />Activar</>
             }
-          </button>
+          </AsyncButton>
         </div>
       </div>
 

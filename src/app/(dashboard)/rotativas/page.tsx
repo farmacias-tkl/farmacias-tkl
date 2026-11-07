@@ -2,7 +2,7 @@
 import { parseCalendarDate, toLocalISODate } from "@/lib/dates/calendar";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import {
   Plus, RotateCcw, CheckCircle2, XCircle, AlertTriangle,
   ChevronDown, ChevronUp, Calendar, MapPin, Briefcase,
 } from "lucide-react";
+import { AsyncButton } from "@/components/ui/AsyncButton";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
@@ -68,6 +69,7 @@ export default function RotativasPage() {
       return res.json();
     },
     enabled: sessionReady,
+    placeholderData: keepPreviousData,
   });
 
   const { data: branchRes } = useQuery({
@@ -123,7 +125,7 @@ export default function RotativasPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus, notes }),
     });
-    qc.invalidateQueries({ queryKey: ["assignments"] });
+    await qc.invalidateQueries({ queryKey: ["assignments"] });
     setCancelId(null); setCancelNote("");
   };
 
@@ -318,10 +320,10 @@ export default function RotativasPage() {
               <button onClick={() => { setCancelId(null); setCancelNote(""); }} className="btn-secondary">
                 Volver
               </button>
-              <button onClick={() => updateStatus(cancelId, "CANCELLED", cancelNote || undefined)}
+              <AsyncButton onClick={() => updateStatus(cancelId, "CANCELLED", cancelNote || undefined)}
                 className="btn-primary bg-red-600 hover:bg-red-700">
                 Confirmar cancelacion
-              </button>
+              </AsyncButton>
             </div>
           </div>
         </div>
@@ -333,7 +335,7 @@ export default function RotativasPage() {
 function AssignmentCard({ assignment: a, canManage, onCancel, onComplete }: {
   assignment: any; canManage: boolean;
   onCancel:   (id: string) => void;
-  onComplete: (id: string) => void;
+  onComplete: (id: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[a.status] ?? STATUS_META.ACTIVE;
@@ -415,10 +417,10 @@ function AssignmentCard({ assignment: a, canManage, onCancel, onComplete }: {
           )}
           {canManage && a.status === "ACTIVE" && (
             <div className="flex gap-2 pt-1">
-              <button onClick={() => onComplete(a.id)}
+              <AsyncButton onClick={() => onComplete(a.id)}
                 className="btn-secondary text-xs py-1.5 px-3 text-green-700 border-green-300 hover:bg-green-50">
                 Marcar completada
-              </button>
+              </AsyncButton>
               <button onClick={() => onCancel(a.id)}
                 className="btn-secondary text-xs py-1.5 px-3 text-red-600 border-red-300 hover:bg-red-50">
                 Cancelar

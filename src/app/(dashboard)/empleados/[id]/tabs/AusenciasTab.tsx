@@ -56,7 +56,7 @@ export default function AusenciasTab({ employeeId }: { employeeId: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    qc.invalidateQueries({ queryKey: ["absences-tab", employeeId] });
+    await qc.invalidateQueries({ queryKey: ["absences-tab", employeeId] });
   };
 
   return (
