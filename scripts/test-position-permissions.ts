@@ -15,6 +15,13 @@ import {
   requirePermission,
   type UserWithPermissions,
 } from "../src/lib/permissions/position-permissions";
+import {
+  can as roleCan,
+  canAccessRoute,
+  canValidateVacationFor,
+  isVacationDetailApi,
+} from "../src/lib/permissions";
+import { vacationFilterWhere } from "../src/lib/vacations/list-where";
 
 let passed = 0;
 let failed = 0;
@@ -155,6 +162,29 @@ assert("requirePermission con branchId OK => null",
   requirePermission(cadeteTekiel, "vencidos.upload_remito", "tekiel-id") === null);
 assert("requirePermission con branchId WRONG => 403",
   requirePermission(cadeteTekiel, "vencidos.upload_remito", "galesa-id")?.status === 403);
+
+console.log("\n=== Detalle de vacaciones (/api/vacations/day y /validate) ===");
+for (const role of ["SUPERVISOR", "ADMIN", "OWNER", "HR", "BRANCH_MANAGER"] as const) {
+  assert(`${role} puede ver el detalle`, roleCan.viewVacationDetail(role) === true);
+  assert(`${role} valida empleados de su alcance`, canValidateVacationFor({ role, branchId: "tekiel-id" }, "tekiel-id") === true);
+}
+assert("MAINTENANCE no puede ver el detalle", roleCan.viewVacationDetail("MAINTENANCE") === false);
+assert("MAINTENANCE no valida", canValidateVacationFor({ role: "MAINTENANCE", branchId: "tekiel-id" }, "tekiel-id") === false);
+assert("SUPERVISOR valida cualquier sucursal", canValidateVacationFor({ role: "SUPERVISOR", branchId: null }, "galesa-id") === true);
+assert("HR valida cualquier sucursal", canValidateVacationFor({ role: "HR", branchId: null }, "galesa-id") === true);
+assert("encargado: otra sucursal => no", canValidateVacationFor({ role: "BRANCH_MANAGER", branchId: "tekiel-id" }, "galesa-id") === false);
+assert("encargado: empleado sin sucursal o inexistente => no", canValidateVacationFor({ role: "BRANCH_MANAGER", branchId: "tekiel-id" }, null) === false);
+assert("encargado sin sucursal => no, aunque el empleado tampoco tenga", canValidateVacationFor({ role: "BRANCH_MANAGER", branchId: null }, null) === false);
+for (const path of ["/api/vacations/day", "/api/vacations/validate"]) {
+  assert(`${path}: el middleware responde 403`, isVacationDetailApi(path) === true);
+  assert(`${path}: MAINTENANCE frenado también en la ruta`, canAccessRoute("MAINTENANCE", path) === false);
+  assert(`${path}: encargado pasa la ruta`, canAccessRoute("BRANCH_MANAGER", path) === true);
+}
+assert("el resto de las rutas conserva su respuesta", isVacationDetailApi("/api/vacations") === false && isVacationDetailApi("/api/vacations/day/x") === false);
+assert("día: encargado forzado a su sucursal aunque pida otra",
+  vacationFilterWhere(new URLSearchParams("branchId=galesa-id"), { role: "BRANCH_MANAGER", branchId: "tekiel-id" })?.branchId === "tekiel-id");
+assert("día: encargado sin sucursal no ve nada",
+  vacationFilterWhere(new URLSearchParams(""), { role: "BRANCH_MANAGER", branchId: null }) === null);
 
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);
 process.exit(failed === 0 ? 0 : 1);

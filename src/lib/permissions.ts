@@ -135,6 +135,24 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/sync":          ["OWNER","ADMIN","SUPERVISOR"],
 };
 
+/**
+ * Rutas de vacaciones que devuelven saldo y horario de una persona. Un rol sin
+ * acceso recibe 403 y no el redirect a /dashboard del middleware.
+ */
+export function isVacationDetailApi(pathname: string): boolean {
+  return pathname === "/api/vacations/day" || pathname === "/api/vacations/validate";
+}
+
+/** Validar una solicitud de un empleado: el encargado, solo los de su sucursal. */
+export function canValidateVacationFor(
+  user: { role: UserRole; branchId?: string | null },
+  employeeBranchId: string | null,
+): boolean {
+  if (!can.viewVacationDetail(user.role)) return false;
+  if (user.role !== "BRANCH_MANAGER") return true;
+  return !!user.branchId && employeeBranchId === user.branchId;
+}
+
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
   for (const [prefix, roles] of Object.entries(ROUTE_PERMISSIONS)) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) {
@@ -158,6 +176,8 @@ export const can = {
   reassignEmployee: (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
 
   // Vacaciones
+  // Saldo y horario de una persona (detalle del día, validar). Encargado/a: su sucursal.
+  viewVacationDetail: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER","HR","BRANCH_MANAGER"].includes(role),
   // RRHH (HR) solo ve: no crea, aprueba, rechaza, deshace, cancela ni cambia cobertura.
   createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
   // Aprobar, rechazar y deshacer la aprobación (decisión final de supervisión).

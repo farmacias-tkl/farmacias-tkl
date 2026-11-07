@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { canAccessRoute, canViewExecutive, canViewCallCenter } from "@/lib/permissions";
+import { canAccessRoute, canViewExecutive, canViewCallCenter, isVacationDetailApi } from "@/lib/permissions";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -103,6 +103,9 @@ export default auth((req: NextRequest & { auth: any }) => {
   }
 
   if (!canAccessRoute(role, pathname)) {
+    if (isVacationDetailApi(pathname)) {
+      return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
+    }
     const url = new URL("/dashboard", req.url);
     url.searchParams.set("error", "unauthorized");
     return NextResponse.redirect(url);
