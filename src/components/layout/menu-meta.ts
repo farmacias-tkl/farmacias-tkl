@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Users, Wrench, ClipboardList,
   MessageSquare, BellDot, Settings, MapPin, UserMinus, RotateCcw, Clock,
-  FileWarning, ShieldCheck, Briefcase, Crown, User,
+  FileWarning, ShieldCheck, Briefcase, Crown, User, Hourglass,
 } from "lucide-react";
 
 export const ROUTE_META: Record<string, { label: string; icon: React.ElementType }> = {
@@ -11,6 +11,7 @@ export const ROUTE_META: Record<string, { label: string; icon: React.ElementType
   "/ausencias":      { label: "Asistencia",        icon: UserMinus       },
   "/planes-accion":  { label: "Planes de accion",  icon: FileWarning     },
   "/horas-extras":   { label: "Horas extras",      icon: Clock           },
+  "/banco-horas":    { label: "Banco de horas",    icon: Hourglass       },
   "/vacaciones":     { label: "Vacaciones",        icon: CalendarDays    },
   "/rotativas":      { label: "Rotativas",         icon: RotateCcw       },
   "/mantenimiento":  { label: "Mantenimiento",     icon: Wrench          },

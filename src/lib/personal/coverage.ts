@@ -2,7 +2,8 @@
 // Cruces por horario real y disponibilidad de rotativos. Lógica pura.
 //
 // "Ausencia" = vacaciones activas (solicitada o aprobada), licencia (médica,
-// maternidad, especial) o ausencia por enfermedad.
+// maternidad, especial), ausencia por enfermedad o día/franja por banco de
+// horas (pedido o autorizado). Una franja ocupa solo esas horas del día.
 // Los tramos se resuelven por fecha (vigencia + semanas A/B) con schedule.ts.
 // =============================================================================
 
@@ -10,13 +11,15 @@ import { dateRangesOverlap, eachDay, toISODate, utcDay } from "./dates";
 import { fmtMinutes, scheduleAt, slotsOn, timesOverlap, type Schedule } from "./schedule";
 import { isRotativeZone, type PositionKey } from "./catalog";
 
-export type AbsenceKind = "SOLICITADA" | "APROBADA" | "LICENCIA" | "ENFERMEDAD";
+export type AbsenceKind = "SOLICITADA" | "APROBADA" | "LICENCIA" | "ENFERMEDAD" | "BANCO_PEDIDO" | "BANCO";
 
 export const ABSENCE_KIND_LABEL: Record<AbsenceKind, string> = {
   SOLICITADA: "vacaciones solicitadas",
   APROBADA: "vacaciones aprobadas",
   LICENCIA: "licencia",
   ENFERMEDAD: "ausente por enfermedad",
+  BANCO_PEDIDO: "banco de horas pedido",
+  BANCO: "banco de horas autorizado",
 };
 
 export interface PersonAbsence {
@@ -24,6 +27,18 @@ export interface PersonAbsence {
   kind: AbsenceKind;
   startDate: Date;
   endDate: Date;
+  /** Franja del día (minutos desde las 00:00). Sin franja = día entero. */
+  window?: { startMinute: number; endMinute: number } | null;
+}
+
+/** Recorta tramos a una franja horaria; sin franja los devuelve igual. */
+export function clipToWindow<T extends { startMinute: number; endMinute: number }>(
+  slots: T[], window: { startMinute: number; endMinute: number } | null | undefined,
+): T[] {
+  if (!window) return slots;
+  return slots
+    .map((s) => ({ ...s, startMinute: Math.max(s.startMinute, window.startMinute), endMinute: Math.min(s.endMinute, window.endMinute) }))
+    .filter((s) => s.endMinute > s.startMinute);
 }
 
 export interface NeededSlot {
@@ -113,7 +128,8 @@ export function findScheduleOverlaps(params: {
       if (!dateRangesOverlap(startDate, endDate, abs.startDate, abs.endDate)) continue;
       const from = utcDay(startDate) > utcDay(abs.startDate) ? startDate : abs.startDate;
       const to = utcDay(endDate) < utcDay(abs.endDate) ? endDate : abs.endDate;
-      const theirs = workedSlots(other.schedules, from, to);
+      // Con franja (banco de horas por unas horas) solo cuenta lo que cae dentro.
+      const theirs = clipToWindow(workedSlots(other.schedules, from, to), abs.window);
       // Por sucursal y día: turno de quien pide, minutos que se pisan y franjas.
       const byBranch = new Map<string, Map<string, { shift: number; overlap: number; ranges: Set<string> }>>();
       for (const a of mine) {
@@ -242,9 +258,11 @@ export function rotativeAvailability(params: {
     const busyDays: BusyDay[] = [];
     for (const day of coverDays) {
       const date = new Date(`${day}T00:00:00Z`);
-      const abs = c.absences.find((a) => dateRangesOverlap(a.startDate, a.endDate, date, date));
-      if (abs) { busyDays.push({ date: day, reason: ABSENCE_KIND_LABEL[abs.kind] }); continue; }
       const need = neededByDay.get(day)!;
+      // Ausente ese día; si es una franja, solo si pisa lo que hay que cubrir.
+      const abs = c.absences.find((a) => dateRangesOverlap(a.startDate, a.endDate, date, date)
+        && (!a.window || need.some((n) => timesOverlap(n, a.window!))));
+      if (abs) { busyDays.push({ date: day, reason: ABSENCE_KIND_LABEL[abs.kind] }); continue; }
       const clash = c.coverages.find((cov) => {
         if (cov.id === params.ignoreCoverageId) return false;
         if (!dateRangesOverlap(cov.startDate, cov.endDate, date, date)) return false;

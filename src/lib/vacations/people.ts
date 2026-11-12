@@ -1,6 +1,7 @@
 // =============================================================================
 // Helpers de datos de personas compartidos por validación y cobertura:
-// horarios, puestos (por catálogo) y ausencias (vacaciones activas + licencias).
+// horarios, puestos (por catálogo) y ausencias (vacaciones activas, licencias,
+// enfermedad y días o franjas por banco de horas).
 // =============================================================================
 
 import type { Prisma, PrismaClient, VacationStatus } from "@prisma/client";
@@ -26,6 +27,9 @@ export const LEAVE_ABSENCE_TYPES = ["MEDICAL_LEAVE", "MATERNITY_LEAVE", "SPECIAL
  * libre y para los cruces de superposición. Licencias + ausencia por enfermedad.
  */
 export const BUSY_ABSENCE_TYPES = [...LEAVE_ABSENCE_TYPES, "SICKNESS"] as const;
+
+/** Pedidos de banco de horas que ocupan a la persona: pedidos y autorizados. */
+export const ACTIVE_HOUR_BANK_STATUSES = ["PENDING", "APPROVED"] as const;
 
 export function vacationKind(status: VacationStatus): AbsenceKind {
   return status === "APPROVED" ? "APROBADA" : "SOLICITADA";
@@ -67,7 +71,7 @@ export function employeePositionKeys(e: {
     .filter((k): k is PositionKey => !!k);
 }
 
-/** Ausencias (vacaciones activas + licencias + enfermedad) de varias personas en un rango. */
+/** Ausencias (vacaciones activas, licencias, enfermedad y banco de horas) de varias personas en un rango. */
 export async function loadAbsences(
   db: Db,
   employeeIds: string[],
@@ -77,7 +81,7 @@ export async function loadAbsences(
 ): Promise<Map<string, PersonAbsence[]>> {
   const out = new Map<string, PersonAbsence[]>();
   if (employeeIds.length === 0) return out;
-  const [vacs, leaves] = await Promise.all([
+  const [vacs, leaves, bank] = await Promise.all([
     db.vacationRequest.findMany({
       where: {
         employeeId: { in: employeeIds },
@@ -97,6 +101,15 @@ export async function loadAbsences(
       },
       select: { id: true, employeeId: true, absenceType: true, startDate: true, endDate: true },
     }),
+    db.hourBankRequest.findMany({
+      where: {
+        employeeId: { in: employeeIds },
+        status: { in: [...ACTIVE_HOUR_BANK_STATUSES] },
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+      },
+      select: { id: true, employeeId: true, status: true, startDate: true, endDate: true, startMinute: true, endMinute: true },
+    }),
   ]);
   const push = (id: string, a: PersonAbsence) => out.set(id, [...(out.get(id) ?? []), a]);
   for (const v of vacs) push(v.employeeId, { id: v.id, kind: vacationKind(v.status), startDate: v.startDate, endDate: v.endDate });
@@ -104,6 +117,13 @@ export async function loadAbsences(
     push(l.employeeId, {
       id: l.id, kind: l.absenceType === "SICKNESS" ? "ENFERMEDAD" : "LICENCIA",
       startDate: l.startDate, endDate: l.endDate,
+    });
+  }
+  for (const b of bank) {
+    push(b.employeeId, {
+      id: b.id, kind: b.status === "APPROVED" ? "BANCO" : "BANCO_PEDIDO",
+      startDate: b.startDate, endDate: b.endDate,
+      window: b.startMinute !== null && b.endMinute !== null ? { startMinute: b.startMinute, endMinute: b.endMinute } : null,
     });
   }
   return out;

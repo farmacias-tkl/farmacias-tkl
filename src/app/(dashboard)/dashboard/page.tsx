@@ -13,6 +13,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { countVacationKpis } from "@/lib/vacations/kpis";
 import { KpiCard, KpiGrid } from "@/components/ui/Kpi";
+import { coverLabel, loadHourBankOn, windowLabel } from "@/lib/hour-bank/today";
 
 
 function ClockIcon(props: any) {
@@ -46,7 +47,9 @@ export default async function DashboardPage() {
   const showRotativas = canAccessRoute(role as UserRole, "/rotativas");
   const showBranches  = !isBranchManager && can.viewAllBranches(role as UserRole);
 
-  const [absencesHoy, totalEmployees, totalBranches, vacationKpis, rotativasHoy] = await Promise.all([
+  const showHourBank  = can.viewHourBank(role as UserRole);
+
+  const [absencesHoy, totalEmployees, totalBranches, vacationKpis, rotativasHoy, bancoHoy] = await Promise.all([
     // Todas las de hoy, sin tope: de acá salen los totales de las tarjetas.
     prisma.absenceRecord.findMany({
       where: absWhere,
@@ -78,6 +81,10 @@ export default async function DashboardPage() {
         OR: [{ endDate: null }, { endDate: { gte: today } }],
       },
     }),
+    // Banco de horas: días o franjas AUTORIZADOS que incluyen hoy. Encargado/a
+    // sin sucursal: no ve otras sucursales.
+    !showHourBank || (role === "BRANCH_MANAGER" && !branchId) ? []
+      : loadHourBankOn(prisma, today, { branchId: role === "BRANCH_MANAGER" ? branchId : null }),
   ]);
 
   // Desglose: ausencias puntuales vs licencias
@@ -90,7 +97,8 @@ export default async function DashboardPage() {
   // Vacaciones — cuando exista VacationRequest se agrega aquí
   const vacaciones: any[] = [];
 
-  const totalFuera      = absencesHoy.length; // + vacaciones.length cuando exista
+  const totalFuera      = absencesHoy.length + bancoHoy.length; // + vacaciones.length cuando exista
+  const ausentesHoy     = ausenciasPuntuales.length + bancoHoy.length;
   const criticalUncov   = absencesHoy.filter(a => a.employee.position.requiresCoverage);
   const sinRevisar      = absencesHoy.filter(a => a.status === "REPORTED").length;
   const upcomingModules = UPCOMING_MODULES
@@ -202,10 +210,12 @@ export default async function DashboardPage() {
           {/* Desglose fuera hoy */}
           <KpiCard
             label="Ausentes hoy"
-            value={ausenciasPuntuales.length}
-            sub={criticalUncov.length > 0 ? `${criticalUncov.length} critico${criticalUncov.length > 1 ? "s" : ""}` : ausenciasPuntuales.length === 0 ? "Sin ausencias" : "Sin criticos"}
+            value={ausentesHoy}
+            sub={criticalUncov.length > 0 ? `${criticalUncov.length} critico${criticalUncov.length > 1 ? "s" : ""}`
+              : ausentesHoy === 0 ? "Sin ausencias"
+              : bancoHoy.length > 0 ? `${bancoHoy.length} por banco de horas` : "Sin criticos"}
             icon={UserMinus}
-            tone={ausenciasPuntuales.length === 0 ? "green" : criticalUncov.length > 0 ? "red" : "orange"}
+            tone={ausentesHoy === 0 ? "green" : criticalUncov.length > 0 ? "red" : "orange"}
             href="/ausencias"
           />
           <KpiCard
@@ -257,7 +267,7 @@ export default async function DashboardPage() {
       )}
 
       {/* Detalle ausentes hoy */}
-      {absencesHoy.length > 0 && (
+      {totalFuera > 0 && (
         <section>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -298,6 +308,41 @@ export default async function DashboardPage() {
                   <tbody className="divide-y divide-gray-100">
                     {licencias.map(a => (
                       <AbsenceRow key={a.id} a={a} showBranch={!isBranchManager} isLeave />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Banco de horas: días o franjas autorizados */}
+          {bancoHoy.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-gray-400 mb-1.5 font-medium">
+                Banco de horas ({bancoHoy.length})
+              </p>
+              <div className="card overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-gray-100">
+                    {bancoHoy.map(b => (
+                      <tr key={b.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium text-gray-900 text-sm">{b.employee.firstName} {b.employee.lastName}</p>
+                          <p className="text-sm text-gray-500 sm:hidden">
+                            {b.employee.position.name}{!isBranchManager ? ` · ${b.branch.name}` : ""}
+                          </p>
+                          {coverLabel(b) && <p className="text-xs text-gray-500">Cubre: {coverLabel(b)}</p>}
+                        </td>
+                        <td className="px-4 py-2.5 hidden sm:table-cell text-sm text-gray-600">{b.employee.position.name}</td>
+                        {!isBranchManager && (
+                          <td className="px-4 py-2.5 text-sm text-gray-500 hidden md:table-cell">{b.branch.name}</td>
+                        )}
+                        <td className="px-4 py-2.5">
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">
+                            {windowLabel(b)}
+                          </span>
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>

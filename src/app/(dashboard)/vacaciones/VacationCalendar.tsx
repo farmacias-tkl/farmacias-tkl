@@ -41,6 +41,9 @@ const STATUS_DOT: Record<string, string> = {
   APPROVED:           "bg-green-500",
   REJECTED:           "bg-red-400",
   CANCELLED:          "bg-gray-400",
+  // Día o franja por banco de horas (no es una solicitud de vacaciones).
+  HOUR_BANK:          "bg-teal-500",
+  HOUR_BANK_PENDING:  "bg-teal-200 ring-1 ring-teal-400",
 };
 
 const STATUS_CHIP: Record<string, string> = {
@@ -49,7 +52,11 @@ const STATUS_CHIP: Record<string, string> = {
   APPROVED:           "bg-green-50 text-green-800 border-green-200",
   REJECTED:           "bg-red-50 text-red-700 border-red-200",
   CANCELLED:          "bg-gray-50 text-gray-500 border-gray-200",
+  HOUR_BANK:          "bg-teal-50 text-teal-800 border-teal-200",
+  HOUR_BANK_PENDING:  "bg-white text-teal-700 border-teal-300 border-dashed",
 };
+
+const isHourBank = (status: string) => status === "HOUR_BANK" || status === "HOUR_BANK_PENDING";
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
@@ -120,7 +127,7 @@ export default function VacationCalendar({
           );
           // Cobertura: cuántos APPROVED + pendientes activos
           const coverage = dayEvents.filter(e =>
-            e.status === "APPROVED" || e.status === "PENDING_SUPERVISOR" || e.status === "PENDING_RRHH"
+            e.status === "APPROVED" || e.status === "PENDING_SUPERVISOR" || e.status === "PENDING_RRHH" || isHourBank(e.status)
           ).length;
           const hasBlocking = dayEvents.some(e => e.conflictLevel === "BLOCKING");
 
@@ -206,7 +213,7 @@ export default function VacationCalendar({
                         e.conflictLevel === "BLOCKING" && "ring-1 ring-red-300",
                         e.status === "APPROVED" && e.approvedWithWarnings && "ring-1 ring-amber-400",
                       )}
-                      title={`${e.employeeNameSnapshot} — ${e.branchNameSnapshot} — ${e.positionNameSnapshot}${e.status === "APPROVED" && e.withoutCoverage ? " — sin cobertura" : ""}${e.status === "APPROVED" && e.approvedWithWarnings ? " — con advertencias" : ""}`}
+                      title={`${e.employeeNameSnapshot} — ${e.branchNameSnapshot} — ${e.positionNameSnapshot}${e.status === "APPROVED" && e.withoutCoverage ? " — sin cobertura" : ""}${e.status === "APPROVED" && e.approvedWithWarnings ? " — con advertencias" : ""}${e.status === "HOUR_BANK" ? " — banco de horas" : ""}${e.status === "HOUR_BANK_PENDING" ? " — banco de horas (pedido, sin autorizar)" : ""}`}
                     >
                       {e.status === "APPROVED" && e.withoutCoverage && (
                         <Users className="inline w-2.5 h-2.5 mr-0.5 text-red-600" aria-label="Sin cobertura" />
@@ -235,6 +242,10 @@ export default function VacationCalendar({
             {VACATION_STATUS_LABEL[k]}
           </span>
         ))}
+        <span className="inline-flex items-center gap-1">
+          <span className={cn("w-2 h-2 rounded-full", STATUS_DOT.HOUR_BANK)} />
+          Banco de horas
+        </span>
         <span className="inline-flex items-center gap-1">
           <span className="w-3 h-2 rounded bg-violet-100 ring-1 ring-violet-200" />
           Feriado

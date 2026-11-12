@@ -33,6 +33,7 @@ const BASE_COMMIT = "5c2ba5b";
 const GATE = "prisma/gates/2026-10-29-personal-real.sql";
 const GATE_PASSWORD_EVENT = "prisma/gates/2026-11-06-password-changed-event.sql";
 const GATE_HIDDEN_USER = "prisma/gates/2026-11-07-usuario-oculto-panel-direccion.sql";
+const GATE_HOUR_BANK = "prisma/gates/2026-11-12-banco-de-horas.sql";
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 const m = fs.readFileSync(".env", "utf8").match(/^DATABASE_URL\s*=\s*"?([^"\n]+?)"?\s*$/m);
@@ -143,6 +144,11 @@ async function main() {
     // Usuario oculto: solo la estructura. La marca exige el usuario real, que esta DB no tiene.
     for (const s of fs.readFileSync(GATE_HIDDEN_USER, "utf8").split(/\r?\n/).filter((l) => /^ALTER TABLE /.test(l))) {
       await db.$executeRawUnsafe(s.trim().replace(/;$/, ""));
+    }
+    // Banco de horas: el gate entero, sentencia por sentencia.
+    for (const s of fs.readFileSync(GATE_HOUR_BANK, "utf8").split(/\r?\n/).filter((l) => !l.trim().startsWith("--")).join("\n")
+      .split(";").map((x) => x.trim()).filter(Boolean)) {
+      await db.$executeRawUnsafe(s);
     }
 
     // ---------------------------------------------------------------- 3

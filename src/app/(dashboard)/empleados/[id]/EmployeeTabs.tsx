@@ -11,6 +11,7 @@ import HistorialSucursalesTab from "./tabs/HistorialSucursalesTab";
 import VacacionesTab from "./tabs/VacacionesTab";
 import HorarioTab from "./tabs/HorarioTab";
 import LegajoTab from "./tabs/LegajoTab";
+import BancoHorasTab from "./tabs/BancoHorasTab";
 import type { SerializedEmployee } from "./EmployeeHeader";
 
 const TABS = [
@@ -18,6 +19,7 @@ const TABS = [
   { id: "ausencias",    label: "Ausencias" },
   { id: "planes",       label: "Planes de acción" },
   { id: "horas-extras", label: "Horas extras" },
+  { id: "banco-horas",  label: "Banco de horas" },
   { id: "historial",    label: "Historial sucursales" },
   { id: "horario",      label: "Horario" },
   { id: "vacaciones",   label: "Vacaciones" },
@@ -30,6 +32,7 @@ type TabId = (typeof TABS)[number]["id"];
 const TAB_API: Partial<Record<TabId, string>> = {
   "planes":       "/api/action-plans",
   "horas-extras": "/api/overtime",
+  "banco-horas":  "/api/hour-bank",
 };
 
 interface Props {
@@ -102,6 +105,9 @@ export default function EmployeeTabs({ employee, canCreate }: Props) {
       )}
       {activeTab === "horas-extras" && (
         <HorasExtrasTab employeeId={employee.id} canCreate={!!role && can.createOvertime(role)} />
+      )}
+      {activeTab === "banco-horas" && (
+        <BancoHorasTab employeeId={employee.id} canAdjust={!!role && can.adjustHourBank(role)} />
       )}
       {activeTab === "historial" && (
         <HistorialSucursalesTab employeeId={employee.id} />

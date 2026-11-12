@@ -75,12 +75,12 @@ export function canAccessOwnerPanel(
 // /perfil aparece en todos los roles (al final, antes de logout)
 // ---------------------------------------------------------------------------
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
-  SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/alertas","/puestos","/owner","/perfil"],
-  BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/planes-accion","/tareas","/mantenimiento","/perfil"],
-  HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/perfil"],
+  SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/alertas","/puestos","/owner","/perfil"],
+  BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/perfil"],
+  HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/banco-horas","/planes-accion","/perfil"],
   MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
-  ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
+  ADMIN:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/perfil"],
 };
 
 /**
@@ -93,6 +93,7 @@ export const HIDDEN_MENU_ROUTES: readonly string[] = ["/tareas", "/mantenimiento
 /** La API de la que depende una pantalla, cuando una pantalla sin ella queda vacía. */
 const MENU_ROUTE_API: Record<string, string> = {
   "/horas-extras": "/api/overtime",
+  "/banco-horas":  "/api/hour-bank",
 };
 
 export function isMenuRouteHidden(route: string): boolean {
@@ -125,6 +126,9 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   // se cortan en cada handler con can.createActionPlan / can.createOvertime).
   "/planes-accion": ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/horas-extras":  ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  // Banco de horas: RRHH y Dirección solo leen (las escrituras se cortan en
+  // cada handler con can.requestHourBank / authorizeHourBank / adjustHourBank).
+  "/banco-horas":   ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/vacaciones":    ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/rotativas":     ["SUPERVISOR","HR","ADMIN"],
   "/mantenimiento": ["SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
@@ -155,6 +159,7 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/action-plans":  ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/action-plan-forms": ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
+  "/api/hour-bank":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
   "/api/admin":         ["ADMIN"],
   "/api/owner":         ["OWNER"],
@@ -247,7 +252,17 @@ export const can = {
 
   // Horas extras
   createOvertime:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  // Aprobar (eligiendo destino: Pagar o Banco de horas) y rechazar.
   approveOvertime: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+
+  // Banco de horas. Encargado/a: solo su sucursal. RRHH y Dirección solo leen.
+  viewHourBank:      (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
+  // Pedir un día o una franja contra el banco.
+  requestHourBank:   (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  // Autorizar o rechazar el pedido, y cancelar uno ya autorizado.
+  authorizeHourBank: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  // Saldo inicial, compensaciones y ajustes.
+  adjustHourBank:    (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
 
   // Mantenimiento
   viewAllTickets:     (role: UserRole) => ["SUPERVISOR","MAINTENANCE","OWNER","ADMIN"].includes(role),
