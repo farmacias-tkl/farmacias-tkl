@@ -384,6 +384,7 @@ export default function VacationDetailModal({
             <ApprovalPanel
               vacation={v}
               onApproved={async () => { await refetch(); onChanged(); }}
+              onEdited={async () => { await refetch(); onChanged(); }}
               onReject={() => startAction("supervisor-reject")}
             />
           )}

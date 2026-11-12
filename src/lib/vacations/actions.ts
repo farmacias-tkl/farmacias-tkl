@@ -90,10 +90,17 @@ export async function refundBalance(tx: Tx, v: Pick<VacationRequest, "id" | "emp
 // Cobertura
 // -----------------------------------------------------------------------------
 
-/** Pasa a CANCELLED las coberturas activas vinculadas a la solicitud. */
-export async function releaseCoverage(tx: Tx, vacationId: string): Promise<number> {
+/**
+ * Pasa a CANCELLED las coberturas activas vinculadas a la solicitud.
+ *
+ * replacing: se está eligiendo otra cobertura (o ninguna). Ahí también se
+ * anula la que alguien marcó "Completada" desde Rotativas: en una solicitud
+ * con fechas pasadas, cambiar la cobertura es corregir quién cubrió de verdad,
+ * y no pueden quedar dos coberturas para el mismo período.
+ */
+export async function releaseCoverage(tx: Tx, vacationId: string, opts: { replacing?: boolean } = {}): Promise<number> {
   const r = await tx.employeeBranchAssignment.updateMany({
-    where: { vacationRequestId: vacationId, status: "ACTIVE" },
+    where: { vacationRequestId: vacationId, status: opts.replacing ? { in: ["ACTIVE", "COMPLETED"] } : "ACTIVE" },
     data: { status: "CANCELLED" },
   });
   return r.count;
@@ -112,7 +119,7 @@ export async function setCoverage(
   rotativeEmployeeId: string | null,
   userId: string,
 ): Promise<{ ok: true; withoutCoverage: boolean; assignmentId: string | null } | { ok: false; error: string }> {
-  await releaseCoverage(tx, v.id);
+  await releaseCoverage(tx, v.id, { replacing: true });
   const [position, branch] = await Promise.all([
     tx.position.findUnique({ where: { id: v.positionId }, select: { name: true } }),
     tx.branch.findUnique({ where: { id: v.branchId }, select: { zone: true } }),
@@ -330,7 +337,9 @@ export async function changeCoverage(db: PrismaClient, p: {
   }
   return db.$transaction(async (tx) => {
     const before = await tx.employeeBranchAssignment.findFirst({
-      where: { vacationRequestId: v.id, status: "ACTIVE" }, select: { employeeId: true },
+      where: { vacationRequestId: v.id, status: { in: ["ACTIVE", "COMPLETED"] } },
+      orderBy: { createdAt: "desc" },
+      select: { employeeId: true },
     });
     const coverage = await setCoverage(tx, v, p.rotativeEmployeeId, p.userId);
     if (!coverage.ok) throw new CoverageError(coverage.error);
@@ -350,5 +359,111 @@ export async function changeCoverage(db: PrismaClient, p: {
   }).catch((e) => {
     if (e instanceof CoverageError) return fail(409, e.message);
     throw e;
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Editar fechas antes de aprobar
+// -----------------------------------------------------------------------------
+
+export interface DatesEditDetail {
+  /** Fechas tal como estaban antes de la edición. */
+  original: { startDate: string; endDate: string; days: number };
+  /** Fechas nuevas. */
+  updated: { startDate: string; endDate: string; days: number };
+}
+
+const dmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/** Texto del historial: "Fechas editadas: 01/12/2026 → 21/12/2026 (21 d) pasa a ...". */
+export function datesEditNote(d: DatesEditDetail): string {
+  const side = (x: DatesEditDetail["original"]) => `${dmy(x.startDate)} → ${dmy(x.endDate)} (${x.days} d)`;
+  return `Fechas editadas: ${side(d.original)} pasa a ${side(d.updated)}`;
+}
+
+/**
+ * Cambia desde/hasta (y la observación) de una solicitud todavía sin aprobar.
+ * Recalcula días, avisos y nivel de conflicto con las fechas nuevas; con un
+ * bloqueo no guarda. Si cambian las fechas deja las originales y las nuevas en
+ * AuditLog y una línea en el historial de la solicitud.
+ *
+ * CAS sobre estado y fechas: si otra persona la aprobó o la editó mientras
+ * tanto, responde 409 y no pisa nada.
+ */
+export async function editVacationDates(db: PrismaClient, p: {
+  id: string;
+  userId: string;
+  startDate?: Date;
+  endDate?: Date;
+  requesterNote?: string | null;
+}): Promise<ActionResult<VacationRequest> & { validation?: ValidationResult }> {
+  const v = await db.vacationRequest.findUnique({ where: { id: p.id } });
+  if (!v) return fail(404, "No encontrada");
+  if (v.status !== "PENDING_SUPERVISOR") {
+    return fail(409, `No se puede editar una solicitud en estado ${v.status}`);
+  }
+  const startDate = p.startDate ?? v.startDate;
+  const endDate = p.endDate ?? v.endDate;
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return fail(400, "Fecha inválida");
+  }
+
+  const validation = await validateVacationRequest(
+    { employeeId: v.employeeId, startDate, endDate, excludeRequestId: v.id }, db);
+  if (!validation.isValid) {
+    return fail(409, "La solicitud tiene conflictos bloqueantes", { validation });
+  }
+
+  const detail: DatesEditDetail = {
+    original: { startDate: toISODate(v.startDate), endDate: toISODate(v.endDate), days: v.daysCount },
+    updated: { startDate: toISODate(startDate), endDate: toISODate(endDate), days: validation.calculatedDays },
+  };
+  const datesChanged = detail.original.startDate !== detail.updated.startDate
+    || detail.original.endDate !== detail.updated.endDate;
+
+  return db.$transaction(async (tx) => {
+    const cas = await tx.vacationRequest.updateMany({
+      where: { id: v.id, status: "PENDING_SUPERVISOR", startDate: v.startDate, endDate: v.endDate },
+      data: {
+        startDate,
+        endDate,
+        ...(p.requesterNote !== undefined && { requesterNote: p.requesterNote }),
+        daysCount: validation.calculatedDays,
+        conflictLevel: validation.conflictLevel,
+        conflictReasons: (validation.warnings.length
+          ? { warnings: validation.warnings, ruleResults: validation.ruleResults }
+          : { ruleResults: validation.ruleResults }) as unknown as Prisma.InputJsonValue,
+      },
+    });
+    if (cas.count !== 1) return fail(409, "La solicitud cambió mientras se editaba. Volvé a abrirla.");
+
+    if (datesChanged) {
+      await tx.vacationStateHistory.create({
+        data: {
+          vacationId: v.id, fromStatus: "PENDING_SUPERVISOR", toStatus: "PENDING_SUPERVISOR",
+          changedByUserId: p.userId, note: datesEditNote(detail),
+        },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: p.userId,
+        action: "VACATION_REQUEST_EDITED",
+        entity: "VacationRequest",
+        entityId: v.id,
+        detail: {
+          // Compatibilidad con los registros anteriores: fechas resultantes arriba.
+          startDate: detail.updated.startDate,
+          endDate: detail.updated.endDate,
+          days: detail.updated.days,
+          conflictLevel: validation.conflictLevel,
+          datesChanged,
+          original: detail.original,
+          updated: detail.updated,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    const data = await tx.vacationRequest.findUniqueOrThrow({ where: { id: v.id } });
+    return { ok: true as const, data, validation };
   });
 }

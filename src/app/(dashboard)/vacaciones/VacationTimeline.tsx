@@ -1,5 +1,5 @@
 "use client";
-import { Plus, CheckCircle2, XCircle, Ban, Clock, ArrowRight } from "lucide-react";
+import { Plus, CheckCircle2, XCircle, Ban, Clock, ArrowRight, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { vacationStatusLabel } from "@/lib/vacations/status-labels";
 
@@ -71,7 +71,12 @@ export default function VacationTimeline({ createdAt, createdBy, requesterNote, 
 
       {/* Transiciones */}
       {ordered.map((h, idx) => {
-        const v = statusVisual(h.toStatus);
+        // Mismo estado de origen y destino: no es una transición, es una
+        // edición de fechas (la nota trae las originales y las nuevas).
+        const isEdit = h.fromStatus === h.toStatus;
+        const v = isEdit
+          ? { icon: CalendarClock, color: "text-indigo-600 bg-indigo-50 border-indigo-200", label: "Fechas editadas" }
+          : statusVisual(h.toStatus);
         const Icon = v.icon;
         const isLast = idx === ordered.length - 1;
         return (
@@ -84,8 +89,12 @@ export default function VacationTimeline({ createdAt, createdBy, requesterNote, 
             </div>
             <div className="flex-1 min-w-0 pb-2">
               <p className="text-xs text-gray-900 flex items-center gap-1.5 flex-wrap">
-                <span className="font-medium">{statusVisual(h.fromStatus).label}</span>
-                <ArrowRight className="w-3 h-3 text-gray-400" />
+                {!isEdit && (
+                  <>
+                    <span className="font-medium">{statusVisual(h.fromStatus).label}</span>
+                    <ArrowRight className="w-3 h-3 text-gray-400" />
+                  </>
+                )}
                 <span className="font-medium">{v.label}</span>
                 {h.changedBy?.name && (
                   <> · <span className="text-gray-600">{h.changedBy.name}</span></>

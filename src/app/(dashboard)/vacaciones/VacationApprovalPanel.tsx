@@ -6,7 +6,7 @@
 import { parseCalendarDate } from "@/lib/dates/calendar";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Loader2, XCircle, Users } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, Loader2, XCircle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface BalancePreviewView {
@@ -113,21 +113,28 @@ function WarningsBox({ validation }: { validation: any }) {
 }
 
 /** Lista de rotativos libres con selección (radio). value = employeeId o null (ninguno). */
-export function CoveragePicker({ vacationId, value, onChange }: {
+export function CoveragePicker({ vacationId, version, value, onChange }: {
   vacationId: string;
+  /** Cambia cuando cambian las fechas de la solicitud: obliga a recalcular quién está libre. */
+  version?: string;
   value: string | null;
   onChange: (id: string | null) => void;
 }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["vacation-coverage", vacationId],
+  const { data, isLoading, isFetching, isFetchedAfterMount } = useQuery({
+    queryKey: ["vacation-coverage", vacationId, version ?? ""],
     queryFn: async () => {
       const res = await fetch(`/api/vacations/${vacationId}/coverage`);
       if (!res.ok) throw new Error("No se pudieron cargar los rotativos");
       return res.json();
     },
+    // Quién es rotativo y quién está libre cambia fuera de esta pantalla (por
+    // ejemplo, al marcar a alguien como rotativo en su ficha): no usar la
+    // lista guardada, pedirla de nuevo cada vez que se abre.
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const d = data?.data;
-  if (isLoading) return <p className="text-xs text-gray-400">Buscando rotativos...</p>;
+  if (isLoading || (isFetching && !isFetchedAfterMount)) return <p className="text-xs text-gray-400">Buscando rotativos...</p>;
   if (!d?.applies) return <p className="text-xs text-gray-400">Esta solicitud no se cubre con rotativos.</p>;
   const list: any[] = d.availability ?? [];
 
@@ -179,34 +186,146 @@ export function CoveragePicker({ vacationId, value, onChange }: {
   );
 }
 
+const isoDay = (d: string | Date) => String(typeof d === "string" ? d : d.toISOString()).slice(0, 10);
+
+async function fetchValidation(v: any, startDate: string, endDate: string) {
+  const res = await fetch("/api/vacations/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ employeeId: v.employeeId, startDate, endDate, excludeRequestId: v.id }),
+  });
+  if (!res.ok) throw new Error("No se pudo validar");
+  return res.json();
+}
+
+/**
+ * Editar desde/hasta de una solicitud pendiente antes de aprobarla (por
+ * ejemplo, aprobar 14 de los 21 días pedidos). Muestra en vivo los días, el
+ * saldo y los avisos con las fechas nuevas; al guardar, el panel de aprobación
+ * recalcula todo (avisos y rotativos libres) con lo guardado.
+ */
+function EditDatesForm({ vacation: v, onSaved, onCancel }: {
+  vacation: any;
+  onSaved: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const origStart = isoDay(v.startDate);
+  const origEnd = isoDay(v.endDate);
+  const [start, setStart] = useState(origStart);
+  const [end, setEnd] = useState(origEnd);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const complete = !!start && !!end;
+  const inverted = complete && end < start;
+  const changed = start !== origStart || end !== origEnd;
+
+  const { data: valRes, isFetching } = useQuery({
+    queryKey: ["vacation-edit-validation", v.id, start, end],
+    queryFn: () => fetchValidation(v, start, end),
+    enabled: complete && !inverted && changed,
+  });
+  const validation = changed && !inverted ? valRes?.validation : null;
+  const blocked = validation?.conflictLevel === "BLOCKING";
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/vacations/${v.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startDate: start, endDate: end }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "No se pudieron guardar las fechas");
+      await onSaved();
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 px-3 py-3 space-y-3">
+      <p className="text-xs font-semibold text-gray-800">Editar fechas</p>
+      <p className="text-[11px] text-gray-600">
+        Pedido original: {fmtDay(origStart)} → {fmtDay(origEnd)} ({v.daysCount} d).
+        Queda registrado quién cambió las fechas y cuáles eran.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="edit-vac-start">Desde</label>
+          <input id="edit-vac-start" type="date" className="input" value={start} disabled={busy}
+            onChange={(e) => setStart(e.target.value)} />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-vac-end">Hasta</label>
+          <input id="edit-vac-end" type="date" className="input" value={end} min={start || undefined} disabled={busy}
+            onChange={(e) => setEnd(e.target.value)} />
+        </div>
+      </div>
+
+      {inverted && <p className="text-xs text-red-700">La fecha &quot;hasta&quot; no puede ser anterior a &quot;desde&quot;.</p>}
+      {changed && !inverted && complete && (
+        isFetching && !validation ? (
+          <p className="flex items-center gap-2 text-xs text-gray-400"><Loader2 className="w-4 h-4 animate-spin" />Calculando...</p>
+        ) : validation ? (
+          <div className="space-y-2">
+            <p className="text-xs text-gray-800">
+              Con estas fechas: <b>{validation.calculatedDays} día(s)</b> (antes {v.daysCount}).
+            </p>
+            <BalanceBox b={validation.balance} />
+            <WarningsBox validation={validation} />
+            {validation.rotativos?.applies && (
+              <p className="text-[11px] text-gray-500">
+                Rotativos libres todo el período: {validation.rotativos.freeAll} · libres algunos días: {validation.rotativos.partial}.
+                Se elige al aprobar.
+              </p>
+            )}
+          </div>
+        ) : null
+      )}
+
+      {error && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 justify-end">
+        <button type="button" onClick={onCancel} disabled={busy} className="btn-secondary text-xs py-1.5 px-3">
+          No cambiar
+        </button>
+        <button type="button" onClick={save}
+          disabled={busy || !changed || !complete || inverted || blocked || !validation}
+          className="btn-primary text-xs py-1.5 px-3">
+          {busy ? "Guardando..." : "Guardar fechas"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Panel de aprobación para PENDING_SUPERVISOR. */
-export function ApprovalPanel({ vacation: v, onApproved, onReject }: {
+export function ApprovalPanel({ vacation: v, onApproved, onReject, onEdited }: {
   vacation: any;
   onApproved: () => void;
   onReject: () => void;
+  /** Se guardaron fechas nuevas: recargar la solicitud. */
+  onEdited: () => void | Promise<void>;
 }) {
   const [rotative, setRotative] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { setRotative(null); setNote(""); setError(null); }, [v.id]);
+  const [editing, setEditing] = useState(false);
+  const datesKey = `${isoDay(v.startDate)}_${isoDay(v.endDate)}`;
+  useEffect(() => { setRotative(null); setNote(""); setError(null); setEditing(false); }, [v.id]);
+  // Fechas nuevas: el rotativo elegido puede no estar libre en el período nuevo.
+  useEffect(() => { setRotative(null); setError(null); }, [datesKey]);
 
   const { data: valRes, isLoading } = useQuery({
-    queryKey: ["vacation-approval-validation", v.id, v.updatedAt],
-    queryFn: async () => {
-      const res = await fetch("/api/vacations/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          employeeId: v.employeeId,
-          startDate: String(v.startDate).slice(0, 10),
-          endDate: String(v.endDate).slice(0, 10),
-          excludeRequestId: v.id,
-        }),
-      });
-      if (!res.ok) throw new Error("No se pudo validar");
-      return res.json();
-    },
+    queryKey: ["vacation-approval-validation", v.id, v.updatedAt, datesKey],
+    queryFn: () => fetchValidation(v, isoDay(v.startDate), isoDay(v.endDate)),
   });
   const validation = valRes?.validation;
   const hasBlocking = validation?.conflictLevel === "BLOCKING";
@@ -240,16 +359,34 @@ export function ApprovalPanel({ vacation: v, onApproved, onReject }: {
 
   return (
     <div className="space-y-4 border-t border-gray-100 pt-4">
-      <p className="text-xs font-semibold text-gray-800">Revisión antes de aprobar</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-800">Revisión antes de aprobar</p>
+        {!editing && (
+          <button type="button" onClick={() => { setEditing(true); setError(null); }} disabled={busy}
+            className="btn-secondary text-xs py-1.5 px-3">
+            <CalendarDays className="w-3.5 h-3.5" />Editar fechas
+          </button>
+        )}
+      </div>
+      {editing && (
+        <EditDatesForm
+          vacation={v}
+          onCancel={() => setEditing(false)}
+          onSaved={async () => { await onEdited(); setEditing(false); }}
+        />
+      )}
       <BalanceBox b={validation.balance} />
       <WarningsBox validation={validation} />
       {validation.rotativos?.applies && (
-        <CoveragePicker vacationId={v.id} value={rotative} onChange={setRotative} />
+        <CoveragePicker vacationId={v.id} version={datesKey} value={rotative} onChange={setRotative} />
       )}
       <div>
         <label className="label">Nota del supervisor (opcional)</label>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="input resize-none" disabled={busy} />
       </div>
+      {editing && (
+        <p className="text-[11px] text-gray-500">Guardá o descartá el cambio de fechas para poder aprobar.</p>
+      )}
       {hasWarnings && (
         <p className="text-[11px] text-amber-800">
           Hay advertencias: para aprobar hay que confirmar con <b>Aprobar igual</b>. Queda registrado con la lista de advertencias.
@@ -265,12 +402,12 @@ export function ApprovalPanel({ vacation: v, onApproved, onReject }: {
           <XCircle className="w-3.5 h-3.5" />Rechazar
         </button>
         {hasWarnings ? (
-          <button onClick={() => approve(true)} disabled={busy}
+          <button onClick={() => approve(true)} disabled={busy || editing}
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50">
             {busy ? "Procesando..." : "Aprobar igual"}
           </button>
         ) : (
-          <button onClick={() => approve(false)} disabled={busy || hasBlocking}
+          <button onClick={() => approve(false)} disabled={busy || hasBlocking || editing}
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 hover:bg-green-700 text-white disabled:opacity-50">
             {busy ? "Procesando..." : "Aprobar"}
           </button>

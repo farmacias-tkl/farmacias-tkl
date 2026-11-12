@@ -6,14 +6,15 @@
  *   - Solo PENDING_SUPERVISOR.
  *   - Recalcula validación. Si BLOCKING → rechaza.
  *   - Recalcula conflictLevel y conflictReasons.
+ *   - AuditLog con las fechas originales y las nuevas, y una línea en el
+ *     historial de la solicitud (lib/vacations/actions.ts → editVacationDates).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
-import { validateVacationRequest } from "@/lib/vacations/validation";
-import { Prisma } from "@prisma/client";
+import { editVacationDates } from "@/lib/vacations/actions";
 
 const patchSchema = z.object({
   startDate:     z.string().optional().transform(d => d ? new Date(d) : undefined),
@@ -95,7 +96,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -103,54 +104,19 @@ export async function PATCH(
       { status: 400 },
     );
   }
-  const data = parsed.data;
 
-  const startDate = data.startDate ?? vacation.startDate;
-  const endDate   = data.endDate   ?? vacation.endDate;
-
-  const validation = await validateVacationRequest({
-    employeeId: vacation.employeeId,
-    startDate,
-    endDate,
-    excludeRequestId: vacation.id,
+  const result = await editVacationDates(prisma, {
+    id: params.id,
+    userId: session!.user.id,
+    startDate: parsed.data.startDate,
+    endDate: parsed.data.endDate,
+    requesterNote: parsed.data.requesterNote,
   });
-  if (!validation.isValid) {
+  if (!result.ok) {
     return NextResponse.json(
-      { error: "La solicitud tiene conflictos bloqueantes", validation },
-      { status: 409 },
+      { error: result.error, ...(result.validation && { validation: result.validation }) },
+      { status: result.status },
     );
   }
-
-  const updated = await prisma.$transaction(async (tx) => {
-    const u = await tx.vacationRequest.update({
-      where: { id: params.id },
-      data: {
-        ...(data.startDate     !== undefined && { startDate: data.startDate }),
-        ...(data.endDate       !== undefined && { endDate:   data.endDate }),
-        ...(data.requesterNote !== undefined && { requesterNote: data.requesterNote }),
-        daysCount: validation.calculatedDays,
-        conflictLevel:   validation.conflictLevel,
-        conflictReasons: (validation.warnings.length
-          ? { warnings: validation.warnings, ruleResults: validation.ruleResults }
-          : { ruleResults: validation.ruleResults }) as unknown as Prisma.InputJsonValue,
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        userId:   session!.user.id,
-        action:   "VACATION_REQUEST_EDITED",
-        entity:   "VacationRequest",
-        entityId: params.id,
-        detail: {
-          startDate: startDate.toISOString().slice(0, 10),
-          endDate:   endDate.toISOString().slice(0, 10),
-          days:      validation.calculatedDays,
-          conflictLevel: validation.conflictLevel,
-        },
-      },
-    });
-    return u;
-  });
-
-  return NextResponse.json({ data: updated, validation });
+  return NextResponse.json({ data: result.data, validation: result.validation });
 }
