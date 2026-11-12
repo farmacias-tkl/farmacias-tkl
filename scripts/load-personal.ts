@@ -18,10 +18,21 @@
  * recarga (el dry-run lo informa como "frenado"), salvo con --force-saldos:
  * ahí se pisa el valor y queda un movimiento LOAD_ADJUST.
  *
+ * Cambios hechos en la plataforma: si un campo de una persona (rotativo, puesto,
+ * puesto secundario, DT, tareas adicionales, situación, horas, sucursal donde
+ * trabaja...) se editó desde la plataforma después de la última carga y la
+ * planilla dice otra cosa, NO se pisa: queda el valor de la plataforma y la
+ * vista previa lo lista como "conflicto". Lo mismo con la licencia de la
+ * columna situacion y con horarios.csv. Solo se pisa con --overwrite-ui-edits
+ * (en dry-run muestra qué pisaría). La carga recuerda lo que dejó sin pisar,
+ * así que sigue protegido en las cargas siguientes hasta que la planilla
+ * coincida o se use el flag.
+ *
  * Uso:
  *   npx dotenv-cli -e .env.neon -- npx tsx scripts/load-personal.ts --dir <carpeta>
  *   npx dotenv-cli -e .env.neon -- npx tsx scripts/load-personal.ts --dir <carpeta> --apply --host <host> --actor <email>
  *   (agregar --force-saldos, en dry-run y en apply, para recargar saldos con consumos)
+ *   (agregar --overwrite-ui-edits, en dry-run y en apply, para pisar lo editado en la plataforma)
  *
  * Código de salida: 0 ok · 1 hay errores en los archivos (no se escribió) · 2 uso incorrecto.
  */
@@ -29,22 +40,23 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildLoadPlan, formatPlanReport, type FileName } from "../src/lib/personal/load-plan";
 
-interface Args { dir: string; apply: boolean; forceBalances: boolean; host?: string; actor?: string }
+interface Args { dir: string; apply: boolean; forceBalances: boolean; overwriteUiEdits: boolean; host?: string; actor?: string }
 
 function usage(msg: string): never {
   console.error(`ERROR: ${msg}`);
-  console.error("Uso: npx tsx scripts/load-personal.ts --dir <carpeta> [--force-saldos] [--apply --host <host> --actor <email>]");
+  console.error("Uso: npx tsx scripts/load-personal.ts --dir <carpeta> [--force-saldos] [--overwrite-ui-edits] [--apply --host <host> --actor <email>]");
   process.exit(2);
 }
 
 export function parseArgs(argv: string[]): Args {
-  const a: Args = { dir: "", apply: false, forceBalances: false };
+  const a: Args = { dir: "", apply: false, forceBalances: false, overwriteUiEdits: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const val = () => argv[++i] ?? usage(`falta el valor de ${k}`);
     if (k === "--dir") a.dir = val();
     else if (k === "--apply") a.apply = true;
     else if (k === "--force-saldos") a.forceBalances = true;
+    else if (k === "--overwrite-ui-edits") a.overwriteUiEdits = true;
     else if (k === "--host") a.host = val();
     else if (k === "--actor") a.actor = val();
     else usage(`opción desconocida ${k}`);
@@ -80,7 +92,9 @@ async function main() {
   const { loadSnapshot, applyLoadPlan } = await import("../src/lib/personal/load-apply");
   const db = new PrismaClient();
   try {
-    const plan = buildLoadPlan(files, await loadSnapshot(db), { forceBalances: args.forceBalances });
+    const plan = buildLoadPlan(files, await loadSnapshot(db), {
+      forceBalances: args.forceBalances, overwriteUiEdits: args.overwriteUiEdits,
+    });
     console.log(formatPlanReport(plan));
     if (plan.errors.length > 0) {
       console.log("\nHay errores: no se escribe nada. Corregí los archivos y volvé a correr.");

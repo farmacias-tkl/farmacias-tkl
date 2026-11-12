@@ -8,6 +8,16 @@
 // Escribe por lotes (createMany, UPDATE ... FROM VALUES): la carga entera son
 // pocas decenas de consultas, para que la transacción no dependa de la
 // latencia a la base (cada ida y vuelta a Neon desde Argentina ~0,7 s).
+//
+// Cambios hechos en la plataforma (ui-edits.ts): loadSnapshot lee de AuditLog
+// qué se editó a mano después de la última carga; el plan no pisa esos campos
+// (salvo --overwrite-ui-edits) y applyLoadPlan deja en el AuditLog de la carga
+// qué dejó sin pisar (keptUiEdits) y qué pisó (overwrittenUiEdits).
+//
+// Horarios: hoy la plataforma no edita horarios. Cuando lo haga, tiene que
+// dejar un AuditLog con entity "WorkSchedule" y el empleado en
+// detail.employeeId (o el id del horario en entityId): con eso la carga deja
+// de crear encima el horario de la planilla.
 // =============================================================================
 
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -15,6 +25,69 @@ import { toISODate, utcDay, addDays } from "./dates";
 import { LEAVE_ABSENCE_TYPES } from "@/lib/vacations/people";
 import type { ScheduleWeekValue } from "./schedule";
 import type { DbSnapshot, LoadPlan } from "./load-plan";
+import { employeeUiEdits, type AuditRow, type UiEdit } from "./ui-edits";
+
+const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+
+/** Ediciones hechas en la plataforma después de la última carga (empleados, licencias, horarios). */
+async function loadUiEdits(db: PrismaClient): Promise<{ lastLoadAt: string | null; edits: UiEdit[] }> {
+  const lastLoad = await db.auditLog.findFirst({
+    where: { action: "PERSONAL_LOAD" }, orderBy: { createdAt: "desc" },
+    select: { action: true, entity: true, entityId: true, detail: true, createdAt: true },
+  });
+  const after = lastLoad ? { createdAt: { gt: lastLoad.createdAt } } : {};
+  const rows = await db.auditLog.findMany({
+    where: {
+      ...after,
+      OR: [
+        { entity: "Employee", action: { in: ["UPDATE", "ASSIGN_BRANCH"] } },
+        { entity: "AbsenceRecord" },
+        { entity: { in: ["WorkSchedule", "WorkScheduleSlot"] } },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { action: true, entity: true, entityId: true, detail: true, createdAt: true },
+  });
+  const { lastLoadAt, edits } = employeeUiEdits([...(lastLoad ? [lastLoad as AuditRow] : []), ...(rows as AuditRow[])]);
+
+  // Licencias cargadas o tocadas en la plataforma (la carga no deja AuditLog por licencia).
+  const absenceAudits = rows.filter((r) => r.entity === "AbsenceRecord" && r.entityId);
+  if (absenceAudits.length > 0) {
+    const records = await db.absenceRecord.findMany({
+      where: { id: { in: [...new Set(absenceAudits.map((r) => r.entityId!))] }, absenceType: { in: [...LEAVE_ABSENCE_TYPES] } },
+      select: { id: true, employeeId: true, startDate: true, endDate: true },
+    });
+    const byId = new Map(records.map((r) => [r.id, r]));
+    for (const a of absenceAudits) {
+      const rec = byId.get(a.entityId!);
+      if (!rec) continue;
+      edits.push({
+        employeeId: rec.employeeId, field: "situacion", at: a.createdAt.toISOString(),
+        range: { startDate: toISODate(rec.startDate), endDate: toISODate(rec.endDate) },
+      });
+    }
+  }
+
+  // Horarios editados en la plataforma.
+  const scheduleAudits = rows.filter((r) => r.entity === "WorkSchedule" || r.entity === "WorkScheduleSlot");
+  if (scheduleAudits.length > 0) {
+    const ids = [...new Set(scheduleAudits.map((r) => r.entityId).filter((x): x is string => !!x))];
+    const [schedules, slots] = await Promise.all([
+      db.workSchedule.findMany({ where: { id: { in: ids } }, select: { id: true, employeeId: true } }),
+      db.workScheduleSlot.findMany({ where: { id: { in: ids } }, select: { id: true, schedule: { select: { employeeId: true } } } }),
+    ]);
+    const owner = new Map<string, string>([
+      ...schedules.map((x) => [x.id, x.employeeId] as [string, string]),
+      ...slots.map((x) => [x.id, x.schedule.employeeId] as [string, string]),
+    ]);
+    for (const a of scheduleAudits) {
+      const fromDetail = isObject(a.detail) && typeof a.detail.employeeId === "string" ? a.detail.employeeId : null;
+      const employeeId = fromDetail ?? (a.entityId ? owner.get(a.entityId) : undefined);
+      if (employeeId) edits.push({ employeeId, field: "horario", at: a.createdAt.toISOString() });
+    }
+  }
+  return { lastLoadAt, edits };
+}
 
 const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
 
@@ -25,6 +98,7 @@ export async function loadSnapshot(db: PrismaClient): Promise<DbSnapshot> {
     db.employee.findMany({ where: { nameKey: { not: null }, contractBranchId: { not: null } } }),
   ]);
   const ids = employees.map((e) => e.id);
+  const ui = await loadUiEdits(db);
   const [schedules, balances, consumption, leaves] = await Promise.all([
     db.workSchedule.findMany({ where: { employeeId: { in: ids } }, include: { slots: true } }),
     db.vacationBalance.findMany({ where: { employeeId: { in: ids } } }),
@@ -72,6 +146,8 @@ export async function loadSnapshot(db: PrismaClient): Promise<DbSnapshot> {
       employeeId: l.employeeId, absenceType: l.absenceType,
       startDate: toISODate(l.startDate), endDate: toISODate(l.endDate),
     })),
+    lastLoadAt: ui.lastLoadAt,
+    uiEdits: ui.edits,
   };
 }
 
@@ -149,7 +225,7 @@ export async function applyLoadPlan(
       weeklyHours: e.data.weeklyHours,
       hireDate: e.data.hireDate ? d(e.data.hireDate) : null,
       extraTasks: e.data.extraTasks,
-      active: true,
+      active: e.data.active,
     });
 
     const existing = await tx.employee.findMany({
@@ -192,7 +268,7 @@ export async function applyLoadPlan(
           const x = dataOf(e);
           return Prisma.sql`(${e.existingId!}, ${x.firstName}, ${x.lastName}, ${x.currentBranchId}, ${x.positionId},
             ${x.secondaryPositionId}, ${x.isTechnicalDirector}, ${x.isRotating}, ${x.weeklyHours === null ? null : String(x.weeklyHours)},
-            ${ts(e.data.hireDate)}, ${x.extraTasks})`;
+            ${ts(e.data.hireDate)}, ${x.extraTasks}, ${x.active})`;
         });
         await tx.$executeRaw`
           UPDATE "Employee" AS e SET
@@ -200,9 +276,9 @@ export async function applyLoadPlan(
             "positionId" = v.position_id, "secondaryPositionId" = v.secondary_position_id,
             "isTechnicalDirector" = v.is_dt::boolean, "isRotating" = v.is_rotating::boolean,
             "weeklyHours" = v.weekly_hours::numeric(4,1), "hireDate" = v.hire_date::timestamp(3),
-            "extraTasks" = v.extra_tasks, active = true, "updatedAt" = now()
+            "extraTasks" = v.extra_tasks, active = v.active::boolean, "updatedAt" = now()
           FROM (VALUES ${Prisma.join(rows)}) AS v(id, first_name, last_name, current_branch_id, position_id,
-            secondary_position_id, is_dt, is_rotating, weekly_hours, hire_date, extra_tasks)
+            secondary_position_id, is_dt, is_rotating, weekly_hours, hire_date, extra_tasks, active)
           WHERE e.id = v.id`;
       }
       result.employeesUpdated = toUpdate.length;
@@ -349,7 +425,15 @@ export async function applyLoadPlan(
       await tx.auditLog.create({
         data: {
           userId: actor.userId, action: "PERSONAL_LOAD", entity: "Employee",
-          detail: result as unknown as Prisma.InputJsonValue,
+          detail: {
+            ...result,
+            // Lo que se editó en la plataforma y esta carga dejó sin pisar: la
+            // próxima carga lo sigue respetando (esta pasa a ser "la última").
+            keptUiEdits: plan.conflicts.filter((c) => !c.overwritten)
+              .map((c) => ({ employeeId: c.employeeId, field: c.field, at: c.editedAt, ...(c.range && { range: c.range }) })),
+            overwrittenUiEdits: plan.conflicts.filter((c) => c.overwritten)
+              .map((c) => ({ employeeId: c.employeeId, field: c.field, platform: c.platform, csv: c.csv, at: c.editedAt })),
+          } as unknown as Prisma.InputJsonValue,
         },
       });
     }
