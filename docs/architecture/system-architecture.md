@@ -181,13 +181,20 @@ se cambia el script.
 
 ### 7. PWA
 
-`public/manifest.json` + íconos generados desde `public/logo-source.jpeg`
-con `scripts/generate-pwa-icons.ts` (usa `sharp`).
+`public/manifest.json` + íconos generados desde `public/branding/logo-source.jpeg`
+con `scripts/generate-pwa-icons.ts` (usa `sharp`). El script ubica el círculo del
+logo midiendo sus píxeles y lo centra.
 
 Iconos:
-- `icon-192.png`
-- `icon-512.png`
-- `apple-touch-icon.png`
+- `icon-192.png`, `icon-512.png` — purpose `any` (logo al 90% del lienzo).
+- `icon-maskable-192.png`, `icon-maskable-512.png` — purpose `maskable`: logo al
+  72% del lienzo, dentro de la zona segura (círculo central del 80%), fondo blanco.
+  Android recorta estos con la forma del launcher.
+- `apple-touch-icon.png` (180) — se declara en `src/app/layout.tsx`, no en el manifest.
+
+`npm run generate:icons -- --check --preview=DIR` regenera, verifica centrado y
+zona segura, y escribe en `DIR` una simulación de máscaras (círculo, squircle,
+cuadrado redondeado).
 
 ---
 
