@@ -5,13 +5,16 @@ import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle, Calendar, MapPin, User as UserIcon, Briefcase, Clock,
   LogOut, ArrowLeft, CheckCircle2, XCircle, Ban, ClipboardCheck, Loader2,
-  Plus,
+  Plus, Undo2, UserMinus,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/utils";
 import { can } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
 import { TIME_EVENT_STATUS_META } from "./TimeEventCard";
+import { fmtMinutes, joinHM, splitMinutes } from "@/lib/time-events/duration";
+import { TIME_EVENT_TYPE_LABEL } from "@/lib/time-events/summary";
+import { DurationInput } from "@/components/ui/DurationInput";
 
 type ActionKind =
   | "authorize"
@@ -87,7 +90,7 @@ const ACTIONS: Record<ActionKind, ActionConfig> = {
     noteRequired: false,
     notePrompt: "Nota (opcional)",
     notePlaceholder: "Aclaración...",
-    confirmLabel: "Registrar minutos compensados",
+    confirmLabel: "Registrar compensación",
     variant: "compensate",
     needsAmount: true,
   },
@@ -118,15 +121,26 @@ export default function TimeEventDetailModal({
 }: Props) {
   const [view,  setView]  = useState<"detail" | ActionKind>("detail");
   const [note,  setNote]  = useState("");
-  const [amount, setAmount] = useState(""); // solo "compensate"
+  // Solo "compensate": tiempo compensado, en horas y minutos.
+  const [hh, setHh] = useState("");
+  const [mm, setMm] = useState("");
+  const setAmount = (minutes: number | "") => {
+    if (minutes === "") { setHh(""); setMm(""); return; }
+    const { hours, minutes: m } = splitMinutes(minutes);
+    setHh(hours ? String(hours) : ""); setMm(m ? String(m) : "");
+  };
+  // Deshacer una compensación: id de la fila que espera confirmación.
+  const [undoId, setUndoId] = useState<string | null>(null);
   const [compDate, setCompDate] = useState<string>(() => toLocalISODate(new Date()));
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) { setView("detail"); setNote(""); setAmount(""); setError(null); setBusy(false); }
+    if (!open) { setView("detail"); setNote(""); setAmount(""); setError(null); setBusy(false); setUndoId(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  useEffect(() => { setView("detail"); setNote(""); setAmount(""); setError(null); }, [eventId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setView("detail"); setNote(""); setAmount(""); setError(null); setUndoId(null); }, [eventId]);
 
   const { data: detailRes, isLoading, refetch } = useQuery({
     queryKey: ["time-event-detail", eventId],
@@ -169,7 +183,7 @@ export default function TimeEventDetailModal({
   const startAction = (kind: ActionKind) => {
     setView(kind);
     setNote("");
-    setAmount(kind === "compensate" && e ? String(e.minutesRemaining) : "");
+    setAmount(kind === "compensate" && e ? e.minutesRemaining : "");
     setCompDate(toLocalISODate(new Date()));
     setError(null);
   };
@@ -183,10 +197,10 @@ export default function TimeEventDetailModal({
 
     let body: any = {};
     if (currentAction.needsAmount) {
-      const n = parseInt(amount, 10);
-      if (isNaN(n) || n <= 0) { setError("Cantidad inválida."); return; }
+      const n = joinHM(hh, mm);
+      if (n === null || n <= 0) { setError("Indicá cuánto se compensó."); return; }
       if (n > e.minutesRemaining) {
-        setError(`No podés compensar más que el saldo pendiente (${e.minutesRemaining} min).`);
+        setError(`No podés compensar más que el saldo pendiente (${fmtMinutes(e.minutesRemaining)}).`);
         return;
       }
       body = { date: compDate, minutesCompensated: n, note: note.trim() || undefined };
@@ -213,16 +227,34 @@ export default function TimeEventDetailModal({
     }
   };
 
+  const undoCompensation = async (id: string) => {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/time-events/compensations/${id}`, { method: "DELETE" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "No se pudo deshacer");
+      setUndoId(null);
+      await refetch();
+      onChanged();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const meta = e ? (TIME_EVENT_STATUS_META[e.status] ?? TIME_EVENT_STATUS_META.PENDING_REVIEW) : null;
   const SI = meta?.icon;
   const isLate = e?.type === "LATE_ARRIVAL";
+  const isAbsence = e?.type === "ABSENCE";
+  const typeLabel = e ? (TIME_EVENT_TYPE_LABEL[e.type] ?? e.type) : "";
 
   return (
     <Modal
       open={open}
       onClose={() => { if (!busy) onClose(); }}
       size="xl"
-      title={e ? `${isLate ? "Llegada tarde" : "Retiro anticipado"} — ${e.employeeNameSnapshot}` : "Cargando..."}
+      title={e ? `${typeLabel} — ${e.employeeNameSnapshot}` : "Cargando..."}
       dismissOnBackdrop={view === "detail"}
     >
       {isLoading || !e ? (
@@ -240,7 +272,7 @@ export default function TimeEventDetailModal({
             <p className="text-xs text-gray-500">Acción:</p>
             <p className="text-sm font-semibold text-gray-900">{currentAction.label}</p>
             <p className="text-xs text-gray-600 mt-2">
-              {e.employeeNameSnapshot} · {e.branchNameSnapshot} · {fmtDate(e.date)} · {e.minutesOwed} min adeudados ({e.minutesRemaining} pendientes)
+              {e.employeeNameSnapshot} · {e.branchNameSnapshot} · {fmtDate(e.date)} · {fmtMinutes(e.minutesOwed)} adeudados ({fmtMinutes(e.minutesRemaining)} pendientes)
             </p>
             {currentAction.warningText && (
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mt-2">
@@ -252,17 +284,9 @@ export default function TimeEventDetailModal({
           {currentAction.needsAmount && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="label">Minutos compensados *</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={e.minutesRemaining}
-                  value={amount}
-                  onChange={(v) => setAmount(v.target.value)}
-                  className="input"
-                  disabled={busy}
-                />
-                <p className="text-[11px] text-gray-500 mt-0.5">Máximo: {e.minutesRemaining} min.</p>
+                <label className="label" htmlFor="te-comp-h">Tiempo compensado *</label>
+                <DurationInput id="te-comp-h" hours={hh} minutes={mm} onChange={(h, m) => { setHh(h); setMm(m); }} disabled={busy} />
+                <p className="text-[11px] text-gray-500 mt-0.5">Máximo: {fmtMinutes(e.minutesRemaining)}.</p>
               </div>
               <div>
                 <label className="label">Fecha de la compensación *</label>
@@ -331,7 +355,9 @@ export default function TimeEventDetailModal({
               </span>
             )}
             <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border bg-white">
-              {isLate
+              {isAbsence
+                ? <><UserMinus className="w-3.5 h-3.5 text-red-600" />Ausencia</>
+                : isLate
                 ? <><Clock  className="w-3.5 h-3.5 text-orange-600" />Llegada tarde</>
                 : <><LogOut className="w-3.5 h-3.5 text-violet-600" />Retiro anticipado</>}
             </span>
@@ -343,17 +369,23 @@ export default function TimeEventDetailModal({
             <Field icon={Briefcase} label="Puesto"   value={e.positionNameSnapshot} />
             <Field icon={MapPin}    label="Sucursal" value={e.branchNameSnapshot} />
             <Field icon={Calendar}  label="Fecha"    value={fmtDate(e.date)} />
-            <Field icon={Clock}     label={isLate ? "Esperada entrada" : "Esperada salida"} value={fmtTime(e.expectedTime)} />
-            <Field icon={Clock}     label={isLate ? "Real entrada" : "Real salida"} value={fmtTime(e.actualTime)} />
+            {isAbsence ? (
+              <Field icon={Clock} label="Horas de la ausencia" value={fmtMinutes(e.minutesOwed)} />
+            ) : (
+              <>
+                <Field icon={Clock} label={isLate ? "Esperada entrada" : "Esperada salida"} value={fmtTime(e.expectedTime)} />
+                <Field icon={Clock} label={isLate ? "Real entrada" : "Real salida"} value={fmtTime(e.actualTime)} />
+              </>
+            )}
           </div>
 
           {/* Saldo */}
           <div className="rounded-lg border border-gray-200 px-3 py-2.5">
             <p className="text-[10px] uppercase tracking-wide text-gray-400 font-medium">Saldo</p>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mt-1">
-              <span className="text-sm"><span className="font-semibold text-orange-700">{e.minutesOwed}</span> min adeudados</span>
-              <span className="text-sm"><span className="font-semibold text-indigo-700">{e.minutesCompensated}</span> compensados</span>
-              <span className="text-sm"><span className="font-semibold text-red-700">{e.minutesRemaining}</span> pendientes</span>
+              <span className="text-sm"><span className="font-semibold text-orange-700">{fmtMinutes(e.minutesOwed)}</span> adeudados</span>
+              <span className="text-sm"><span className="font-semibold text-indigo-700">{fmtMinutes(e.minutesCompensated)}</span> compensados</span>
+              <span className="text-sm"><span className="font-semibold text-red-700">{fmtMinutes(e.minutesRemaining)}</span> pendientes</span>
             </div>
           </div>
 
@@ -377,13 +409,29 @@ export default function TimeEventDetailModal({
               <p className="text-xs font-semibold text-gray-800 mb-2">Compensaciones registradas</p>
               <ul className="space-y-1.5">
                 {e.compensations.map((c: any) => (
-                  <li key={c.id} className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs flex items-center justify-between gap-3">
-                    <span className="font-medium text-indigo-700">+{c.minutesCompensated} min</span>
+                  <li key={c.id} className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className="font-medium text-indigo-700">+{fmtMinutes(c.minutesCompensated)}</span>
                     <span className="text-gray-500">{fmtDate(c.date)}</span>
                     <span className="text-gray-500 truncate">{c.registeredBy?.name ?? ""}</span>
+                    {canCompAdd && (e.status === "PARTIALLY_COMPENSATED" || e.status === "COMPENSATED") && (
+                      undoId === c.id ? (
+                        <span className="flex gap-1.5">
+                          <button type="button" disabled={busy} onClick={() => undoCompensation(c.id)}
+                            className="px-2 py-0.5 rounded-md text-xs font-medium bg-red-600 hover:bg-red-700 text-white disabled:opacity-50">
+                            {busy ? "..." : "Sí, deshacer"}
+                          </button>
+                          <button type="button" disabled={busy} onClick={() => setUndoId(null)} className="btn-secondary text-xs py-0.5 px-2">No</button>
+                        </span>
+                      ) : (
+                        <button type="button" disabled={busy} onClick={() => { setUndoId(c.id); setError(null); }} className="btn-secondary text-xs py-0.5 px-2">
+                          <Undo2 className="w-3 h-3" />Deshacer
+                        </button>
+                      )
+                    )}
                   </li>
                 ))}
               </ul>
+              {error && view === "detail" && <p className="text-xs text-red-700 mt-1.5">{error}</p>}
             </div>
           )}
 

@@ -6,6 +6,7 @@
 // =============================================================================
 
 import { eachDay } from "@/lib/personal/dates";
+import { fmtHoursAsHM } from "@/lib/time-events/duration";
 import { scheduleAt, slotsOn, type Schedule } from "@/lib/personal/schedule";
 
 export interface DayWindow {
@@ -29,10 +30,9 @@ export function sumHours(movements: Array<{ hours: unknown }>): number {
   return roundHours(movements.reduce((acc, m) => acc + toHours(m.hours), 0));
 }
 
-/** "7,5 h" · "-3 h" · "0 h". */
+/** Horas en pantalla, como horas y minutos: "7 h 30 min" · "-3 h" · "45 min" · "0 min". */
 export function fmtHours(h: number): string {
-  const n = roundHours(h);
-  return `${n.toLocaleString("es-AR", { maximumFractionDigits: 2 })} h`;
+  return fmtHoursAsHM(roundHours(h));
 }
 
 /** Problema de la franja, o null si está bien. Los dos null = día completo. */

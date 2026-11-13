@@ -34,6 +34,7 @@ const GATE = "prisma/gates/2026-10-29-personal-real.sql";
 const GATE_PASSWORD_EVENT = "prisma/gates/2026-11-06-password-changed-event.sql";
 const GATE_HIDDEN_USER = "prisma/gates/2026-11-07-usuario-oculto-panel-direccion.sql";
 const GATE_HOUR_BANK = "prisma/gates/2026-11-12-banco-de-horas.sql";
+const GATE_ASISTENCIA = "prisma/gates/2026-11-13-asistencia-ausencias-y-compensacion.sql";
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 const m = fs.readFileSync(".env", "utf8").match(/^DATABASE_URL\s*=\s*"?([^"\n]+?)"?\s*$/m);
@@ -148,6 +149,12 @@ async function main() {
     // Banco de horas: el gate entero, sentencia por sentencia.
     for (const s of fs.readFileSync(GATE_HOUR_BANK, "utf8").split(/\r?\n/).filter((l) => !l.trim().startsWith("--")).join("\n")
       .split(";").map((x) => x.trim()).filter(Boolean)) {
+      await db.$executeRawUnsafe(s);
+    }
+
+    // Asistencia (ausencias con deuda y compensación por persona): el gate entero.
+    for (const s of fs.readFileSync(GATE_ASISTENCIA, "utf8").split(/\r?\n/).filter((l) => !l.trim().startsWith("--")).join("\n")
+      .split(";").map((x) => x.trim()).filter((x) => x && x !== "BEGIN" && x !== "COMMIT")) {
       await db.$executeRawUnsafe(s);
     }
 

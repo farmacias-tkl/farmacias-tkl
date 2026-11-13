@@ -12,6 +12,8 @@ import {
 import { cn } from "@/lib/utils";
 import { can } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
+import PersonDebtPanel from "../../../ausencias/PersonDebtPanel";
+import TimeEventDetailModal from "../../../ausencias/TimeEventDetailModal";
 
 function ClockIcon(props: any) {
   return (
@@ -47,6 +49,10 @@ export default function AusenciasTab({ employeeId }: { employeeId: string }) {
     queryFn:  () => fetch(`/api/absences?employeeId=${employeeId}&limit=50`).then(r => r.json()),
   });
 
+  // Detalle de una deuda de Asistencia (llegada tarde, retiro u horas de una ausencia).
+  const [timeEventId, setTimeEventId] = useState<string | null>(null);
+  const role = session?.user?.role as UserRole | undefined;
+
   const absences = data?.data       ?? [];
   const total    = data?.meta?.total ?? 0;
 
@@ -61,6 +67,28 @@ export default function AusenciasTab({ employeeId }: { employeeId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Horas adeudadas: total de la persona, compensación y resolución */}
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold text-gray-700">Horas adeudadas</h3>
+        <PersonDebtPanel
+          employeeId={employeeId}
+          role={role}
+          onOpenEvent={(id) => setTimeEventId(id)}
+          onChanged={() => qc.invalidateQueries({ queryKey: ["absences-tab", employeeId] })}
+        />
+        <TimeEventDetailModal
+          open={!!timeEventId}
+          eventId={timeEventId}
+          role={role}
+          onClose={() => setTimeEventId(null)}
+          onChanged={() => {
+            qc.invalidateQueries({ queryKey: ["time-events-person"] });
+            qc.invalidateQueries({ queryKey: ["time-event-detail"] });
+            qc.invalidateQueries({ queryKey: ["hour-bank-balance"] });
+          }}
+        />
+      </div>
+
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">
           Asistencia y novedades

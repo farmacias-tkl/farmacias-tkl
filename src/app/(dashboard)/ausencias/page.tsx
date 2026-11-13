@@ -17,8 +17,11 @@ import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@prisma/client";
 import TimeEventFormPanel from "./TimeEventFormPanel";
+import { fmtMinutes } from "@/lib/time-events/duration";
 import TimeEventCard from "./TimeEventCard";
 import TimeEventDetailModal from "./TimeEventDetailModal";
+import PersonDebtPanel from "./PersonDebtPanel";
+import AbsenceDebtSection, { AbsenceDebtChip } from "./AbsenceDebtSection";
 import EmployeeBalanceSection from "./EmployeeBalanceSection";
 
 function ClockIcon(props: any) {
@@ -108,6 +111,8 @@ export default function AusenciasPage() {
   const [sectionTab,  setSectionTab]  = useState<"absences"|"time-events">("absences");
   // Detail modal para TimeEvent
   const [timeEventDetailId, setTimeEventDetailId] = useState<string | null>(null);
+  // Asistencia filtrada por una persona: muestra su resumen (total, compensación, resolver varias).
+  const [personFilter, setPersonFilter] = useState<{ id: string; name: string } | null>(null);
 
   // Estado del formulario fijo
   const [formBranchId,  setFormBranchId]  = useState(role === "BRANCH_MANAGER" ? (userBranchId ?? "") : "");
@@ -123,6 +128,7 @@ export default function AusenciasPage() {
   const sessionReady    = status === "authenticated";
   const canCreate       = role ? can.createAbsence(role) : false;
   const canJustify      = role ? can.justifyAbsence(role) : false;
+  const canResolveDebt  = role ? can.resolveTimeEvent(role) : false;
   const isBranchManager = role === "BRANCH_MANAGER";
 
   // Lista de ausencias
@@ -342,7 +348,7 @@ export default function AusenciasPage() {
             sectionTab === "time-events" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
           )}
         >
-          <LogOut className="w-3.5 h-3.5" />Llegadas tarde y retiros
+          <LogOut className="w-3.5 h-3.5" />Llegadas tarde, retiros y horas adeudadas
         </button>
       </div>
 
@@ -842,7 +848,15 @@ export default function AusenciasPage() {
         ) : (
           <div className="space-y-2">
             {absences.map((a: any) => (
-              <AbsenceCard key={a.id} absence={a} canJustify={canJustify} onUpdate={updateStatus} />
+              <AbsenceCard key={a.id} absence={a} canJustify={canJustify} onUpdate={updateStatus}
+                canResolveDebt={canResolveDebt}
+                onOpenEvent={(id) => setTimeEventDetailId(id)}
+                onDebtChanged={() => {
+                  qc.invalidateQueries({ queryKey: ["absences"] });
+                  qc.invalidateQueries({ queryKey: ["time-events"] });
+                  qc.invalidateQueries({ queryKey: ["time-events-balance"] });
+                  qc.invalidateQueries({ queryKey: ["time-events-person"] });
+                }} />
             ))}
           </div>
         )
@@ -851,14 +865,25 @@ export default function AusenciasPage() {
       {/* === VISTA: LLEGADAS TARDE Y RETIROS === */}
       {sectionTab === "time-events" && (
         <>
-          <EmployeeBalanceSection branchId={isBranchManager ? userBranchId ?? null : (branchFilter || null)} />
+          <EmployeeBalanceSection
+            branchId={isBranchManager ? userBranchId ?? null : (branchFilter || null)}
+            selectedId={personFilter?.id ?? null}
+            onSelect={(r) => setPersonFilter({ id: r.employeeId, name: r.employeeName })}
+          />
 
-          {timeEventsLoading ? (
+          {personFilter ? (
+            <PersonDebtPanel
+              employeeId={personFilter.id}
+              role={role}
+              onOpenEvent={(id) => setTimeEventDetailId(id)}
+              onClose={() => setPersonFilter(null)}
+            />
+          ) : timeEventsLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="card p-4 h-16 animate-pulse bg-gray-50" />)}</div>
           ) : (timeEventsRes?.data ?? []).length === 0 ? (
             <div className="card p-10 text-center">
               <LogOut className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-              <p className="text-sm text-gray-400">Sin llegadas tarde ni retiros con los filtros aplicados.</p>
+              <p className="text-sm text-gray-400">Sin llegadas tarde, retiros ni horas adeudadas con los filtros aplicados.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -879,15 +904,20 @@ export default function AusenciasPage() {
           qc.invalidateQueries({ queryKey: ["time-events"] });
           qc.invalidateQueries({ queryKey: ["time-events-balance"] });
           qc.invalidateQueries({ queryKey: ["time-event-detail"] });
+          qc.invalidateQueries({ queryKey: ["time-events-person"] });
+          qc.invalidateQueries({ queryKey: ["absences"] });
         }}
       />
     </div>
   );
 }
 
-function AbsenceCard({ absence: a, canJustify, onUpdate }: {
+function AbsenceCard({ absence: a, canJustify, onUpdate, canResolveDebt, onOpenEvent, onDebtChanged }: {
   absence: any; canJustify: boolean;
   onUpdate: (id: string, status: string) => Promise<void>;
+  canResolveDebt: boolean;
+  onOpenEvent: (id: string) => void;
+  onDebtChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[a.status] ?? STATUS_META.REPORTED;
@@ -927,6 +957,7 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
             <span>·</span>
             <span>{ABSENCE_TYPES.find(t => t.value === a.absenceType)?.label ?? a.absenceType}</span>
             {a.hasCertificate && <span className="text-blue-600 font-medium">Con certificado</span>}
+            <AbsenceDebtChip debt={a.timeEvent} />
           </div>
         </div>
         <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:shrink-0">
@@ -961,7 +992,7 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
               )}
               {typeof a.lateMinutes === "number" && (
                 <span className="font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded">
-                  {a.lateMinutes} min de demora
+                  {fmtMinutes(a.lateMinutes)} de demora
                 </span>
               )}
             </div>
@@ -970,6 +1001,7 @@ function AbsenceCard({ absence: a, canJustify, onUpdate }: {
             <p className="text-xs text-gray-600 mb-1">Observaciones: {a.reasonDetail}</p>
           )}
           {a.notes && <p className="text-xs text-gray-600 italic mb-3">Notas internas: {a.notes}</p>}
+          <AbsenceDebtSection absence={a} canResolve={canResolveDebt} onOpenEvent={onOpenEvent} onChanged={onDebtChanged} />
           {canJustify && a.status !== "CLOSED" && (
             <div className="flex flex-wrap gap-2">
               {a.status !== "JUSTIFIED" && (

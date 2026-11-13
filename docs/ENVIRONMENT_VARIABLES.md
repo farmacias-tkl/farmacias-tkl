@@ -324,7 +324,7 @@ Ver más en [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 |---|---|---|
 | `HOUR_BANK_TIME_EVENTS` | `true` (cualquier otro valor o ausente = apagado) | Los minutos de Asistencia que una persona todavía debe compensar (llegadas tarde o retiros resueltos "a compensar", menos lo ya compensado) restan de su saldo del banco de horas. |
 
-Apagado por defecto, a la espera de la decisión de Dirección. No escribe datos: el
+Apagado por defecto en el código; **activo en producción desde el 2026-11-13**. Lo que resta es exactamente lo "a compensar" que falta compensar (incluye las horas de una ausencia resuelta "a compensar"); lo que está pendiente de revisión no resta. No escribe datos: el
 descuento se calcula al mostrar el saldo, así que se puede activar o desactivar sin
 migrar nada (cambiar la variable en Vercel y redeploy). Lo enviado a descuento de
 sueldo, lo condonado y lo cancelado no resta. Ver `src/lib/hour-bank/config.ts`.

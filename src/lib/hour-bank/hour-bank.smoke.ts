@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 const TEST_DB = "tkl_hour_bank_smoke";
 const BASE_COMMIT = "acc42ac"; // main antes del banco de horas
 const GATE = "prisma/gates/2026-11-12-banco-de-horas.sql";
+const GATE_ASISTENCIA = "prisma/gates/2026-11-13-asistencia-ausencias-y-compensacion.sql";
 
 function abort(m: string): never { console.error("ABORT:", m); process.exit(1); }
 const m = fs.readFileSync(".env", "utf8").match(/^DATABASE_URL\s*=\s*"?([^"\n]+?)"?\s*$/m);
@@ -104,6 +105,11 @@ async function main() {
     await check("gate: se aplica tal cual", async () => {
       for (const s of statements) await db.$executeRawUnsafe(s);
     });
+    // Gates posteriores (solo agregan): sin ellos la base no llega a schema.prisma.
+    for (const s of fs.readFileSync(GATE_ASISTENCIA, "utf8").split(/\r?\n/).filter((l) => !l.trim().startsWith("--")).join("\n")
+      .split(";").map((x) => x.trim()).filter((x) => x && x !== "BEGIN" && x !== "COMMIT")) {
+      await db.$executeRawUnsafe(s);
+    }
     await check("migrate diff (DB con el gate aplicado → schema.prisma) da vacío", async () => {
       const out = run(`npx prisma migrate diff --from-url "${TEST_URL}" --to-schema-datamodel prisma/schema.prisma --script`);
       assert.match(out, /empty migration/i);

@@ -99,10 +99,18 @@ export async function PATCH(
   const expectedTime = data.expectedTime ?? ev.expectedTime;
   const actualTime   = data.actualTime   ?? ev.actualTime;
 
-  const timesOk = validateTimes(ev.type, expectedTime, actualTime);
-  if (!timesOk.valid) return NextResponse.json({ error: timesOk.error }, { status: 400 });
+  // Una deuda de ausencia no tiene hora esperada y real: sus horas se definen al resolver la ausencia.
+  if (ev.type === "ABSENCE" && (data.expectedTime || data.actualTime)) {
+    return NextResponse.json({ error: "Las horas de una ausencia no se editan desde acá." }, { status: 400 });
+  }
+  const isAbsence = ev.type === "ABSENCE";
+  if (!isAbsence) {
+    const timesOk = validateTimes(ev.type, expectedTime, actualTime);
+    if (!timesOk.valid) return NextResponse.json({ error: timesOk.error }, { status: 400 });
+  }
 
-  const newOwed      = calculateMinutesOwed(ev.type, expectedTime, actualTime);
+  // En una ausencia los minutos no salen de las horas esperada y real: se conservan.
+  const newOwed      = isAbsence ? ev.minutesOwed : calculateMinutesOwed(ev.type, expectedTime, actualTime);
   const newRemaining = computeRemaining(ev.status, newOwed, ev.minutesCompensated);
 
   const updated = await prisma.$transaction(async (tx) => {
