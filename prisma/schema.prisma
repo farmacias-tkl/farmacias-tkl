@@ -456,6 +456,9 @@ model AbsenceRecord {
 
   stateHistory AbsenceStateHistory[]
 
+  // Deuda de horas de esta ausencia (TimeEvent de tipo ABSENCE), si se resolvió.
+  timeEvent TimeEvent?
+
   @@index([employeeId])
   @@index([branchId])
   @@index([startDate, endDate])
@@ -1260,6 +1263,7 @@ model VacationStateHistory {
 enum TimeEventType {
   LATE_ARRIVAL
   EARLY_DEPARTURE
+  ABSENCE           // deuda de horas de una ausencia (ver TimeEvent.absenceRecordId)
 }
 
 enum TimeEventStatus {
@@ -1320,6 +1324,13 @@ model TimeEvent {
   reportedByUserId String
   reportedBy       User @relation("TimeEventReportedBy", fields: [reportedByUserId], references: [id])
 
+  // Solo type ABSENCE: la ausencia (pestaña Ausencias) que originó esta deuda.
+  // La ausencia sigue siendo la que cuenta en calendario, "Ausentes hoy" y
+  // cruces; este registro lleva las horas adeudadas y qué se hace con ellas.
+  // Única: una ausencia tiene a lo sumo una deuda vigente.
+  absenceRecordId String?        @unique
+  absenceRecord   AbsenceRecord? @relation(fields: [absenceRecordId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1349,8 +1360,14 @@ model TimeEventCompensation {
   note      String?
   createdAt DateTime @default(now())
 
+  // Compensación cargada "por persona": una sola carga se reparte entre varias
+  // deudas y genera una fila por deuda tocada; todas comparten este id.
+  // null = compensación cargada sobre un registro puntual.
+  batchId   String?
+
   @@index([timeEventId])
   @@index([date])
+  @@index([batchId])
 }
 
 model TimeEventStateHistory {

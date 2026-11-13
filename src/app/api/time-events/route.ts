@@ -12,6 +12,8 @@ import {
 } from "@/lib/time-events/validation";
 import type { Prisma } from "@prisma/client";
 
+// Las deudas de tipo ABSENCE no se crean acá: nacen al resolver una ausencia
+// (POST /api/absences/[id]/debt).
 const TIME_EVENT_TYPES = ["LATE_ARRIVAL", "EARLY_DEPARTURE"] as const;
 
 const createSchema = z.object({

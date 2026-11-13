@@ -2,9 +2,10 @@
 import { parseCalendarDate } from "@/lib/dates/calendar";
 import {
   Clock, LogOut, ChevronRight, CheckCircle2, XCircle, Ban,
-  AlertTriangle, ClipboardCheck, Hourglass,
+  AlertTriangle, ClipboardCheck, Hourglass, UserMinus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtMinutes } from "@/lib/time-events/duration";
 
 export const TIME_EVENT_STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
   PENDING_AUTHORIZATION:     { label: "Pend. autorización", color: "bg-amber-50 text-amber-800 border-amber-200",   icon: Hourglass },
@@ -38,6 +39,7 @@ export default function TimeEventCard({ event: e, onClick }: Props) {
   const meta = TIME_EVENT_STATUS_META[e.status] ?? TIME_EVENT_STATUS_META.PENDING_REVIEW;
   const SI = meta.icon;
   const isLate = e.type === "LATE_ARRIVAL";
+  const isAbsence = e.type === "ABSENCE";
 
   return (
     <button
@@ -58,7 +60,9 @@ export default function TimeEventCard({ event: e, onClick }: Props) {
         <div className="flex items-center gap-1.5 flex-wrap">
           <p className="text-sm font-semibold text-gray-900 truncate">{e.employeeNameSnapshot}</p>
           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-white">
-            {isLate
+            {isAbsence
+              ? <><UserMinus className="w-2.5 h-2.5 text-red-600" />Ausencia</>
+              : isLate
               ? <><Clock  className="w-2.5 h-2.5 text-orange-600" />Llegada tarde</>
               : <><LogOut className="w-2.5 h-2.5 text-violet-600" />Retiro anticipado</>}
           </span>
@@ -74,9 +78,11 @@ export default function TimeEventCard({ event: e, onClick }: Props) {
         <div className="flex items-center gap-x-2 gap-y-0.5 mt-1.5 flex-wrap text-xs text-gray-600">
           <span className="font-medium text-gray-800">{fmtDate(e.date)}</span>
           <span className="text-gray-400">·</span>
-          <span>esperada {fmtTime(e.expectedTime)} → real {fmtTime(e.actualTime)}</span>
+          {isAbsence
+            ? <span>Ausencia</span>
+            : <span>esperada {fmtTime(e.expectedTime)} → real {fmtTime(e.actualTime)}</span>}
           <span className="font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">
-            {e.minutesOwed} min
+            {fmtMinutes(e.minutesOwed)}
           </span>
         </div>
 
@@ -84,11 +90,11 @@ export default function TimeEventCard({ event: e, onClick }: Props) {
         <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 flex-wrap text-[11px] text-gray-500">
           {e.minutesRemaining > 0 && e.minutesCompensated > 0 && (
             <span className="text-indigo-700">
-              {e.minutesCompensated} / {e.minutesOwed} min compensados ({e.minutesRemaining} pendientes)
+              Compensado {fmtMinutes(e.minutesCompensated)} de {fmtMinutes(e.minutesOwed)} (falta {fmtMinutes(e.minutesRemaining)})
             </span>
           )}
           {e.minutesRemaining === 0 && e.minutesCompensated > 0 && e.status === "COMPENSATED" && (
-            <span className="text-green-700">{e.minutesCompensated} min compensados</span>
+            <span className="text-green-700">{fmtMinutes(e.minutesCompensated)} compensados</span>
           )}
           {e.reportedBy?.name && <span>Cargó: <span className="text-gray-700">{e.reportedBy.name}</span></span>}
           {e.authorizedBy?.name && <span>Autorizó: <span className="text-gray-700">{e.authorizedBy.name}</span></span>}

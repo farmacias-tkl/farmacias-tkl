@@ -58,7 +58,7 @@ console.log("\nSaldo");
   assert("sin movimientos: 0", sumHours([]) === 0);
   assert("sin errores de coma flotante (0,1 + 0,2)", sumHours([{ hours: 0.1 }, { hours: 0.2 }]) === 0.3);
   assert("redondea a centésimas", roundHours(1.005) === 1.01 && roundHours(2.3333) === 2.33 && toHours("7.50") === 7.5);
-  assert("formato", fmtHours(7.5) === "7,5 h" && fmtHours(-3) === "-3 h" && fmtHours(0) === "0 h");
+  assert("formato", fmtHours(7.5) === "7 h 30 min" && fmtHours(-3) === "-3 h" && fmtHours(0) === "0 min" && fmtHours(0.75) === "45 min");
 }
 
 console.log("\nFranja");

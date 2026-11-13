@@ -83,6 +83,8 @@ export async function GET(req: NextRequest) {
           },
         },
         branch: { select: { id: true, name: true } },
+        // Deuda de horas de la ausencia, si se resolvió (Asistencia, tipo ABSENCE).
+        timeEvent: { select: { id: true, status: true, minutesOwed: true, minutesCompensated: true, minutesRemaining: true } },
       },
       orderBy: { startDate: "desc" },
       skip: (page - 1) * limit,
