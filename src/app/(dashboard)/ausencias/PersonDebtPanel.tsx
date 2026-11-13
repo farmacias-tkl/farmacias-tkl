@@ -113,7 +113,7 @@ export default function PersonDebtPanel({ employeeId, role, onOpenEvent, onClose
   const max = totals?.toCompensate ?? 0;
   const openDebts = useMemo(() => events
     .filter((e) => (e.status === "APPROVED_FOR_COMPENSATION" || e.status === "PARTIALLY_COMPENSATED") && e.minutesRemaining > 0)
-    .map((e) => ({ id: e.id as string, date: new Date(e.date), createdAt: new Date(e.createdAt), minutesRemaining: e.minutesRemaining as number })),
+    .map((e) => ({ id: e.id as string, date: parseCalendarDate(e.date), createdAt: new Date(e.createdAt), minutesRemaining: e.minutesRemaining as number })),
   [events]);
   const preview = minutes && minutes > 0 ? allocateCompensation(openDebts, minutes) : null;
   const byId = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
