@@ -1,7 +1,8 @@
 -- Gate · Asistencia: ausencias con deuda y compensación por persona · 2026-11-13
 --
--- PREPARADO, NO APLICADO. Se aplica solo por gate: branch de respaldo en Neon,
--- verificación previa y posterior, y recién después se sube el código.
+-- APLICADO en producción el 2026-11-13, con branch de respaldo en Neon
+-- (respaldo-pre-asistencia-13-11) y verificación previa y posterior, antes de
+-- subir el código.
 --
 -- Generado sin conexión a ninguna base con:
 --   npx prisma migrate diff \

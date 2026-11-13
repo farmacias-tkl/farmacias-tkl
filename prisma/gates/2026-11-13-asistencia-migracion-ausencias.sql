@@ -1,9 +1,10 @@
 -- Migración de datos · Ausencias cargadas como llegada tarde · 2026-11-13
 --
--- PREPARADA, NO APLICADA. Va DESPUÉS de
+-- APLICADA en producción el 2026-11-13, después de
 -- 2026-11-13-asistencia-ausencias-y-compensacion.sql (necesita el tipo ABSENCE
--- y la columna TimeEvent.absenceRecordId), con branch de respaldo y reporte de
--- antes y después.
+-- y la columna TimeEvent.absenceRecordId), con branch de respaldo
+-- (respaldo-pre-asistencia-13-11). Resultado: 2 ausencias creadas, 2 registros
+-- pasados a tipo ABSENCE con los mismos minutos y estado, 2 filas de AuditLog.
 --
 -- Qué registros toca: los TimeEvent cargados desde el mail de RRHH (id que
 -- empieza con "temail") que en realidad son ausencias de día completo: se
