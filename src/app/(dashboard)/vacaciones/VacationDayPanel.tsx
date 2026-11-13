@@ -81,6 +81,7 @@ export default function VacationDayPanel({ date, filters, detailOpen, onClose, o
         </header>
 
         <div className="overflow-y-auto flex-1 px-4 sm:px-5 py-4 space-y-3">
+          <HourBankDaySection date={date} filters={filters} />
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
@@ -236,5 +237,41 @@ function Mark({ className, icon: Icon, children }: { className: string; icon: an
     <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border", className)}>
       <Icon className="w-3 h-3" />{children}
     </span>
+  );
+}
+
+/** Días o franjas por banco de horas de ese día (pedidos y autorizados). */
+function HourBankDaySection({ date, filters }: { date: string; filters: string }) {
+  const { data } = useQuery({
+    queryKey: ["hour-bank-day", date, filters],
+    queryFn: async () => {
+      const src = new URLSearchParams(filters);
+      const p = new URLSearchParams({ active: "true", date, limit: "200" });
+      for (const k of ["branchId", "employeeId"]) if (src.get(k)) p.set(k, src.get(k)!);
+      const res = await fetch(`/api/hour-bank/requests?${p}`);
+      // Sin acceso al banco de horas: la sección simplemente no aparece.
+      if (!res.ok) return { data: [] };
+      return res.json();
+    },
+  });
+  const rows: any[] = data?.data ?? [];
+  if (rows.length === 0) return null;
+  const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  return (
+    <div className="rounded-lg border border-teal-200 bg-teal-50/50 px-3 py-2.5 space-y-1.5">
+      <p className="text-xs font-semibold text-teal-900">Banco de horas ({rows.length})</p>
+      {rows.map((r) => (
+        <div key={r.id} className="text-xs text-teal-900">
+          <span className="font-medium">{r.employeeNameSnapshot}</span>
+          <span className="text-teal-700"> · {r.positionNameSnapshot} · {r.branchNameSnapshot}</span>
+          <br />
+          <span className="text-teal-700">
+            {r.startMinute !== null && r.endMinute !== null ? `${hm(r.startMinute)}–${hm(r.endMinute)}` : "Día completo"}
+            {" · "}{r.status === "APPROVED" ? "autorizado" : "pedido, sin autorizar"}
+            {r.coveredBy && ` · cubre ${r.coveredBy.firstName} ${r.coveredBy.lastName}`}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }

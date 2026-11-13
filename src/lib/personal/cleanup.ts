@@ -68,6 +68,9 @@ export async function planCleanup(db: PrismaClient): Promise<CleanupPlan> {
     ActionPlan: await db.actionPlan.count({ where: { employeeId: E } }),
     AbsenceStateHistory: await db.absenceStateHistory.count({ where: { absence: { employeeId: E } } }),
     AbsenceRecord: await db.absenceRecord.count({ where: { employeeId: E } }),
+    // Banco de horas: antes que las horas extra (el movimiento apunta a la hora extra).
+    HourBankMovement: await db.hourBankMovement.count({ where: { employeeId: E } }),
+    HourBankRequest: await db.hourBankRequest.count({ where: { employeeId: E } }),
     OvertimeRecord: await db.overtimeRecord.count({ where: { employeeId: E } }),
     TimeEventCompensation: await db.timeEventCompensation.count({ where: { timeEvent: { employeeId: E } } }),
     TimeEventStateHistory: await db.timeEventStateHistory.count({ where: { timeEvent: { employeeId: E } } }),
@@ -99,6 +102,8 @@ export async function applyCleanup(db: PrismaClient, plan: CleanupPlan): Promise
     await run("ActionPlan", tx.actionPlan.deleteMany({ where: { employeeId: E } }));
     await run("AbsenceStateHistory", tx.absenceStateHistory.deleteMany({ where: { absence: { employeeId: E } } }));
     await run("AbsenceRecord", tx.absenceRecord.deleteMany({ where: { employeeId: E } }));
+    await run("HourBankMovement", tx.hourBankMovement.deleteMany({ where: { employeeId: E } }));
+    await run("HourBankRequest", tx.hourBankRequest.deleteMany({ where: { employeeId: E } }));
     await run("OvertimeRecord", tx.overtimeRecord.deleteMany({ where: { employeeId: E } }));
     await run("TimeEventCompensation", tx.timeEventCompensation.deleteMany({ where: { timeEvent: { employeeId: E } } }));
     await run("TimeEventStateHistory", tx.timeEventStateHistory.deleteMany({ where: { timeEvent: { employeeId: E } } }));

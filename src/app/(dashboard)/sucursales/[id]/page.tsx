@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KpiCard, KpiGrid } from "@/components/ui/Kpi";
+import { coverLabel, loadHourBankOn, windowLabel } from "@/lib/hour-bank/today";
 
 // Badge de tipo de ausencia
 const ABSENCE_TYPE_META: Record<string, { label: string; color: string }> = {
@@ -74,6 +75,9 @@ export default async function SucursalDetailPage({
 
   if (!branch) notFound();
 
+  // Banco de horas: días o franjas autorizados que incluyen hoy.
+  const bancoHoy = await loadHourBankOn(prisma, today, { branchId: branch.id });
+
   // Encargados solo ven su sucursal
   if (
     session.user.role === "BRANCH_MANAGER" &&
@@ -88,7 +92,7 @@ export default async function SucursalDetailPage({
   );
 
   const dotacion     = branch.employees.length;
-  const ausentes     = branch.absenceRecords.length;
+  const ausentes     = branch.absenceRecords.length + bancoHoy.length;
   const disponibles  = dotacion - ausentes;
   const dotPct       = dotacion > 0 ? Math.round((disponibles / dotacion) * 100) : 100;
   const dotEstado    = dotPct >= 80 ? "OK" : dotPct >= 60 ? "Justa" : "Crítica";
@@ -233,6 +237,23 @@ export default async function SucursalDetailPage({
                   </div>
                 );
               })}
+              {bancoHoy.map(b => (
+                <div key={b.id} className="card p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {b.employee.firstName} {b.employee.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">{b.employee.position.name}</p>
+                      {coverLabel(b) && <p className="text-xs text-gray-400 mt-0.5">Cubre: {coverLabel(b)}</p>}
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-teal-50 text-teal-700">Banco de horas</span>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{windowLabel(b)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

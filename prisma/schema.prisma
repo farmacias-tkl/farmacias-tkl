@@ -108,6 +108,12 @@ enum OvertimeStatus {
   REJECTED
 }
 
+// Destino de una hora extra aprobada: se decide caso por caso al aprobar.
+enum OvertimeDestination {
+  PAY  // se paga
+  BANK // suma al banco de horas de la persona
+}
+
 enum OvertimeReason {
   ABSENCE_COVERAGE
   VACATION_COVERAGE
@@ -150,6 +156,7 @@ model Branch {
   coseguros            CoseguroDaily[]
   vacationRequests     VacationRequest[]
   timeEvents           TimeEvent[]
+  hourBankRequests     HourBankRequest[]
 
   // Control de Cajas (Administración) — back-relations
   cashBoxSheets         CashBoxSheet[]         @relation("CashBoxSheetBranch")
@@ -248,6 +255,9 @@ model Employee {
   workSchedules     WorkSchedule[]
   vacationBalances  VacationBalance[]
   vacationBalanceMovements VacationBalanceMovement[]
+  hourBankRequests  HourBankRequest[]  @relation("HourBankRequestEmployee")
+  hourBankCoverages HourBankRequest[]  @relation("HourBankRequestCoveredBy")
+  hourBankMovements HourBankMovement[]
 
   @@unique([nameKey, contractBranchId])
   @@index([currentBranchId])
@@ -545,14 +555,124 @@ model OvertimeRecord {
   status           OvertimeStatus @default(REPORTED)
   notes            String?
   rejectionReason  String?
+  // Se elige al aprobar. Null = sin decidir (reportada, rechazada o aprobada
+  // antes de que existiera el banco de horas).
+  destination      OvertimeDestination?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  hourBankMovement HourBankMovement?
 
   @@unique([employeeId, date])
   @@index([employeeId])
   @@index([branchId])
   @@index([date])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// BANCO DE HORAS
+//
+// El banco se lleva en HORAS y no vence. El saldo de una persona es la suma de
+// sus HourBankMovement (hours con signo); puede quedar en negativo. No hay
+// saldo guardado aparte: se calcula, así no puede desfasarse de los movimientos.
+//
+//   Suman:  hora extra aprobada con destino BANK (OVERTIME), compensación
+//           (COMPENSATION), saldo inicial (INITIAL), ajuste a favor (ADJUST).
+//   Restan: día o franja tomada (TAKEN), ajuste en contra (ADJUST).
+//   TAKEN_REVERSAL devuelve las horas de un pedido aprobado que se canceló.
+//
+// HourBankRequest = día(s) completo(s) o franja de un día que la persona se
+// toma contra su banco. Se pide (encargado/a o supervisión) y lo autoriza
+// supervisión; recién autorizado descuenta. Registra quién cubre y cuántas
+// horas descuenta (por defecto, las del turno de esos días según el horario).
+// ---------------------------------------------------------------------------
+enum HourBankRequestStatus {
+  PENDING   // pedido, espera la autorización de supervisión
+  APPROVED  // autorizado: descuenta del banco
+  REJECTED
+  CANCELLED
+}
+
+enum HourBankMovementType {
+  INITIAL        // saldo inicial cargado por supervisión
+  OVERTIME       // hora extra aprobada con destino BANK
+  COMPENSATION   // compensación a favor (por ejemplo, un feriado trabajado)
+  TAKEN          // día o franja tomada (pedido autorizado)
+  TAKEN_REVERSAL // se canceló un pedido ya autorizado: vuelven las horas
+  ADJUST         // corrección manual, con signo
+}
+
+model HourBankRequest {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation("HourBankRequestEmployee", fields: [employeeId], references: [id])
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id])
+
+  // Snapshots históricos — se llenan al crear, nunca se actualizan.
+  employeeNameSnapshot String
+  branchNameSnapshot   String
+  positionNameSnapshot String
+
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  // Franja (solo cuando startDate = endDate), en minutos desde las 00:00.
+  // Los dos null = día(s) completo(s).
+  startMinute Int?
+  endMinute   Int?
+
+  // Horas que descuenta del banco. scheduleHours = las que salían del horario
+  // al pedirlo (null si no tenía horario): sirve para ver si se editaron.
+  hours         Decimal  @db.Decimal(6, 2)
+  scheduleHours Decimal? @db.Decimal(6, 2)
+
+  status HourBankRequestStatus @default(PENDING)
+
+  // Quién cubre: una persona del plantel y/o una aclaración libre.
+  coveredByEmployeeId String?
+  coveredBy           Employee? @relation("HourBankRequestCoveredBy", fields: [coveredByEmployeeId], references: [id])
+  coverageNote        String?
+
+  requestedByUserId String
+  requestedBy       User      @relation("HourBankRequestedBy", fields: [requestedByUserId], references: [id])
+  requesterNote     String?
+  decidedByUserId   String?
+  decidedBy         User?     @relation("HourBankDecidedBy", fields: [decidedByUserId], references: [id])
+  decidedAt         DateTime?
+  decisionNote      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  movements HourBankMovement[]
+
+  @@index([employeeId])
+  @@index([branchId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model HourBankMovement {
+  id         String               @id @default(cuid())
+  employeeId String
+  employee   Employee             @relation(fields: [employeeId], references: [id])
+  hours      Decimal              @db.Decimal(7, 2) // con signo
+  type       HourBankMovementType
+
+  // Una hora extra suma al banco una sola vez.
+  overtimeRecordId  String?          @unique
+  overtimeRecord    OvertimeRecord?  @relation(fields: [overtimeRecordId], references: [id])
+  hourBankRequestId String?
+  hourBankRequest   HourBankRequest? @relation(fields: [hourBankRequestId], references: [id])
+
+  userId    String? // snapshot sin FK (como VacationBalanceMovement)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([employeeId, createdAt])
+  @@index([hourBankRequestId])
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +710,8 @@ model User {
   timeEventCompsRegistered        TimeEventCompensation[]   @relation("TimeEventCompRegisteredBy")
   timeEventCompsAuthorized        TimeEventCompensation[]   @relation("TimeEventCompAuthorizedBy")
   timeEventStateChanges           TimeEventStateHistory[]   @relation("TimeEventStateChangedBy")
+  hourBankRequested HourBankRequest[] @relation("HourBankRequestedBy")
+  hourBankDecided   HourBankRequest[] @relation("HourBankDecidedBy")
 
   // Call Center — dominio conversacional (Sprint 1).
   // assignedConversations = dueño-vivo (SetNull por default al borrar el User).

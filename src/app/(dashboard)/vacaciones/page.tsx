@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, CalendarDays, CalendarRange, List, LayoutGrid } from "lucide-react";
 import { can } from "@/lib/permissions";
@@ -28,6 +29,7 @@ export default function VacacionesPage() {
   const { data: session, status } = useSession();
   const qc   = useQueryClient();
   const role = session?.user?.role as UserRole;
+  const router = useRouter();
   const userBranchId = session?.user?.branchId;
 
   const [showForm,    setShowForm]    = useState(false);
@@ -131,8 +133,46 @@ export default function VacacionesPage() {
   });
   const calLoading = calFirstLoad || calChanging;
 
+  // Días o franjas por banco de horas del mismo rango: también son gente
+  // afuera. No se mezclan cuando hay un filtro propio de vacaciones (estado,
+  // marcas o indicador), porque no tienen esos estados.
+  const showHourBank = !!role && can.viewHourBank(role) && !statusFilter && !flagFilter && !kpiFilter;
+  const { data: bankRes } = useQuery({
+    queryKey: ["hour-bank-cal", { branch: effectiveBranchId, emp: empFilter?.id, from: toLocalISODate(calendarRange.from), to: toLocalISODate(calendarRange.to) }],
+    queryFn: async () => {
+      const p = new URLSearchParams({ active: "true", limit: "200" });
+      p.set("from", toLocalISODate(calendarRange.from));
+      p.set("to",   toLocalISODate(calendarRange.to));
+      if (effectiveBranchId) p.set("branchId", effectiveBranchId);
+      if (empFilter?.id)     p.set("employeeId", empFilter.id);
+      const res = await fetch(`/api/hour-bank/requests?${p}`);
+      if (!res.ok) throw new Error("Error al cargar el banco de horas");
+      return res.json();
+    },
+    enabled: sessionReady && viewMode !== "list" && showHourBank,
+    placeholderData: keepPreviousData,
+  });
+
   const listData = listRes?.data ?? [];
-  const calData  = calRes?.data  ?? [];
+  const calData  = useMemo(() => [
+    ...(calRes?.data ?? []),
+    ...(showHourBank ? (bankRes?.data ?? []) : []).map((r: any) => ({
+      id: `hb:${r.id}`,
+      employeeNameSnapshot: r.employeeNameSnapshot,
+      branchNameSnapshot: r.branchNameSnapshot,
+      positionNameSnapshot: r.positionNameSnapshot,
+      status: r.status === "APPROVED" ? "HOUR_BANK" : "HOUR_BANK_PENDING",
+      conflictLevel: "NONE",
+      startDate: r.startDate,
+      endDate: r.endDate,
+    })),
+  ], [calRes, bankRes, showHourBank]);
+
+  // Un día por banco de horas no tiene ficha de vacaciones: va a su pantalla.
+  const openEvent = (id: string) => {
+    if (id.startsWith("hb:")) router.push("/banco-horas");
+    else setDetailId(id);
+  };
 
   const reload = () => {
     qc.invalidateQueries({ queryKey: ["vacations-list"] });
@@ -262,7 +302,7 @@ export default function VacacionesPage() {
           date={agendaDate}
           loading={calLoading}
           onDateChange={setAgendaDate}
-          onEventClick={setDetailId}
+          onEventClick={openEvent}
           onDayClick={setDayPanel}
         />
       ) : (
@@ -276,7 +316,7 @@ export default function VacacionesPage() {
             events={calData}
             initialDate={calendarMonth}
             onMonthChange={setCalendarMonth}
-            onEventClick={(id) => setDetailId(id)}
+            onEventClick={openEvent}
             onDayClick={setDayPanel}
             rrhhStep={rrhhStep}
           />

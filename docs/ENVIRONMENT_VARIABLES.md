@@ -317,3 +317,14 @@ Path('.env.neon').write_bytes(content.encode('utf-8'))
 ```
 
 Ver más en [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
+
+## Banco de horas
+
+| Variable | Valor | Efecto |
+|---|---|---|
+| `HOUR_BANK_TIME_EVENTS` | `true` (cualquier otro valor o ausente = apagado) | Los minutos de Asistencia que una persona todavía debe compensar (llegadas tarde o retiros resueltos "a compensar", menos lo ya compensado) restan de su saldo del banco de horas. |
+
+Apagado por defecto, a la espera de la decisión de Dirección. No escribe datos: el
+descuento se calcula al mostrar el saldo, así que se puede activar o desactivar sin
+migrar nada (cambiar la variable en Vercel y redeploy). Lo enviado a descuento de
+sueldo, lo condonado y lo cancelado no resta. Ver `src/lib/hour-bank/config.ts`.

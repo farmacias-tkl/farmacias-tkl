@@ -29,6 +29,8 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   REJECTED: { label: "Rechazada",  color: "bg-red-50 text-red-800 border-red-200",         icon: XCircle },
 };
 
+const DESTINATION_LABEL: Record<string, string> = { PAY: "Se paga", BANK: "Al banco de horas" };
+
 const today = toLocalISODate(new Date());
 
 const createSchema = z.object({
@@ -57,6 +59,7 @@ export default function HorasExtrasPage() {
   const sessionReady    = status === "authenticated";
   const isBranchManager = role === "BRANCH_MANAGER";
   const canCreate       = role ? can.createOvertime(role) : false;
+  const canApprove      = role ? can.approveOvertime(role) : false;
 
   const { data: overtimeData, isLoading } = useQuery({
     queryKey: ["overtime", { branchFilter, statusFilter }],
@@ -262,7 +265,12 @@ export default function HorasExtrasPage() {
       ) : (
         <div className="space-y-2">
           {records.map((r: any) => (
-            <OvertimeCard key={r.id} record={r} />
+            <OvertimeCard key={r.id} record={r} canApprove={canApprove}
+              onChanged={() => {
+                qc.invalidateQueries({ queryKey: ["overtime"] });
+                qc.invalidateQueries({ queryKey: ["hour-bank-balance"] });
+                qc.invalidateQueries({ queryKey: ["hour-bank-balances"] });
+              }} />
           ))}
         </div>
       )}
@@ -270,12 +278,44 @@ export default function HorasExtrasPage() {
   );
 }
 
-function OvertimeCard({ record: r }: { record: any }) {
+function OvertimeCard({ record: r, canApprove, onChanged }: { record: any; canApprove: boolean; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [mode, setMode] = useState<null | "approve" | "reject" | "change">(null);
+  const [destination, setDestination] = useState<"" | "PAY" | "BANK">("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const meta = STATUS_META[r.status] ?? STATUS_META.REPORTED;
   const SI   = meta.icon;
   const date = parseCalendarDate(r.date).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
   const hasDetail = r.notes || r.rejectionReason;
+  // Aprobada antes de que existiera el destino: falta decidirlo.
+  const needsDestination = r.status === "APPROVED" && !r.destination;
+  // Aprobada con destino: supervisión puede pasarla de Pagar a Banco o al revés.
+  const canChange = r.status === "APPROVED" && !!r.destination;
+  const other: "PAY" | "BANK" = r.destination === "BANK" ? "PAY" : "BANK";
+
+  const act = async () => {
+    setBusy(true); setError(null);
+    try {
+      const body = mode === "reject"
+        ? { action: "reject", rejectionReason: reason.trim() }
+        : mode === "change"
+        ? { action: "set-destination", destination: other }
+        : { action: needsDestination ? "set-destination" : "approve", destination };
+      const res = await fetch(`/api/overtime/${r.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "No se pudo guardar");
+      setMode(null); setReason(""); setDestination("");
+      onChanged();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="card overflow-hidden">
@@ -296,7 +336,15 @@ function OvertimeCard({ record: r }: { record: any }) {
             <span>{OVERTIME_REASONS.find(or => or.value === r.reason)?.label ?? r.reason}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {r.status === "APPROVED" && (
+            <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full border",
+              r.destination === "BANK" ? "bg-teal-50 text-teal-800 border-teal-200"
+                : r.destination === "PAY" ? "bg-blue-50 text-blue-800 border-blue-200"
+                : "bg-amber-50 text-amber-800 border-amber-200")}>
+              {r.destination ? DESTINATION_LABEL[r.destination] : "Sin destino"}
+            </span>
+          )}
           <span className={cn("inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border", meta.color)}>
             <SI className="w-3 h-3" />{meta.label}
           </span>
@@ -314,6 +362,77 @@ function OvertimeCard({ record: r }: { record: any }) {
           {r.rejectionReason && (
             <p className="text-xs text-red-600 mt-1">Motivo de rechazo: {r.rejectionReason}</p>
           )}
+        </div>
+      )}
+
+      {canApprove && mode === null && (r.status === "REPORTED" || needsDestination) && (
+        <div className="px-4 pb-3 flex flex-wrap gap-2 justify-end">
+          {r.status === "REPORTED" && (
+            <button onClick={() => { setMode("reject"); setError(null); }}
+              className="btn-secondary text-xs py-1.5 px-3 text-red-600 border-red-300 hover:bg-red-50">
+              Rechazar
+            </button>
+          )}
+          <button onClick={() => { setMode("approve"); setError(null); }}
+            className="px-3 py-1.5 rounded-md text-xs font-medium bg-green-600 hover:bg-green-700 text-white">
+            {needsDestination ? "Definir destino" : "Aprobar"}
+          </button>
+        </div>
+      )}
+
+      {canApprove && mode === null && canChange && (
+        <div className="px-4 pb-3 flex justify-end">
+          <button onClick={() => { setMode("change"); setError(null); }} className="btn-secondary text-xs py-1.5 px-3">
+            Cambiar destino
+          </button>
+        </div>
+      )}
+
+      {canApprove && mode !== null && (
+        <div className="px-4 pb-3 pt-3 border-t border-gray-100 bg-gray-50/50 space-y-3">
+          {mode === "change" ? (
+            <div>
+              <p className="text-sm text-gray-800">
+                Pasar estas {r.hours} hs de <strong>{DESTINATION_LABEL[r.destination]}</strong> a <strong>{DESTINATION_LABEL[other]}</strong>.
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {other === "PAY"
+                  ? "Se restan del banco de horas de la persona. Si ya las usó, el saldo queda en negativo."
+                  : "Se suman al banco de horas de la persona."}
+              </p>
+            </div>
+          ) : mode === "approve" ? (
+            <div>
+              <p className="label">Destino de estas {r.hours} hs</p>
+              <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" checked={destination === "PAY"} onChange={() => setDestination("PAY")} disabled={busy} />
+                  Pagar
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" checked={destination === "BANK"} onChange={() => setDestination("BANK")} disabled={busy} />
+                  Banco de horas
+                </label>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                Se decide en cada caso. Con Banco de horas, se suman al saldo de la persona.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="label">Motivo del rechazo (obligatorio)</label>
+              <textarea className="input resize-none" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} />
+            </div>
+          )}
+          {error && <p className="text-sm text-red-700">{error}</p>}
+          <div className="flex flex-wrap gap-2 justify-end">
+            <button onClick={() => { setMode(null); setError(null); }} disabled={busy} className="btn-secondary text-xs py-1.5 px-3">Volver</button>
+            <button onClick={act} disabled={busy || (mode === "change" ? false : mode === "approve" ? !destination : !reason.trim())}
+              className={cn("px-3 py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-50",
+                mode === "reject" ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700")}>
+              {busy ? "Procesando..." : mode === "reject" ? "Rechazar" : mode === "change" ? `Pasar a ${DESTINATION_LABEL[other]}` : needsDestination ? "Guardar destino" : "Aprobar"}
+            </button>
+          </div>
         </div>
       )}
     </div>

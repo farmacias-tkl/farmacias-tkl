@@ -23,6 +23,12 @@ interface Props {
   onDayClick: (iso: string) => void;
 }
 
+// Día o franja por banco de horas: no es una solicitud de vacaciones.
+const HOUR_BANK_META: Record<string, { label: string; color: string }> = {
+  HOUR_BANK:         { label: "Banco de horas", color: "bg-teal-50 text-teal-800 border-teal-200" },
+  HOUR_BANK_PENDING: { label: "Banco de horas (pedido)", color: "bg-white text-teal-700 border-teal-300 border-dashed" },
+};
+
 const fmtDay = (d: Date) => d.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "short" });
 const fmtShort = (d: Date) => d.toLocaleDateString("es-AR", { day: "numeric", month: "short" });
 
@@ -67,7 +73,7 @@ export default function VacationAgenda({ events, date, loading, onDateChange, on
             ) : (
               <ul className="divide-y divide-gray-100">
                 {d.events.map((e) => {
-                  const meta = STATUS_META[e.status] ?? STATUS_META.PENDING_SUPERVISOR;
+                  const meta = HOUR_BANK_META[e.status] ?? STATUS_META[e.status] ?? STATUS_META.PENDING_SUPERVISOR;
                   return (
                     <li key={e.id}>
                       <button type="button" onClick={() => onEventClick(e.id)} className="w-full px-4 py-2 text-left">

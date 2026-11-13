@@ -15,7 +15,7 @@ import type { OtherPerson } from "@/lib/personal/coverage";
 import { evaluateVacationRules, type ValidationResult } from "./rules";
 import { loadRotativeOptions } from "./coverage-data";
 import {
-  ACTIVE_VACATION_STATUSES, BUSY_ABSENCE_TYPES, employeePositionKeys, loadAbsences,
+  ACTIVE_HOUR_BANK_STATUSES, ACTIVE_VACATION_STATUSES, BUSY_ABSENCE_TYPES, employeePositionKeys, loadAbsences,
   scheduleInclude, toSchedule, type Db,
 } from "./people";
 
@@ -94,7 +94,8 @@ export async function validateVacationRequest(
     }));
 
   // Personas para el cruce por horario: mismo puesto (principal o secundario),
-  // con vacaciones activas, licencia o ausencia por enfermedad superpuestas.
+  // con vacaciones activas, licencia, ausencia por enfermedad o día por banco
+  // de horas superpuestos.
   let others: OtherPerson[] = [];
   if (positionKey) {
     const leaveIds = (await db.absenceRecord.findMany({
@@ -106,7 +107,16 @@ export async function validateVacationRequest(
       },
       select: { employeeId: true },
     })).map((a) => a.employeeId);
-    const ids = [...new Set([...otherVacations.map((v) => v.employeeId), ...leaveIds])];
+    const bankIds = (await db.hourBankRequest.findMany({
+      where: {
+        status: { in: [...ACTIVE_HOUR_BANK_STATUSES] },
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+        employeeId: { not: employee.id },
+      },
+      select: { employeeId: true },
+    })).map((b) => b.employeeId);
+    const ids = [...new Set([...otherVacations.map((v) => v.employeeId), ...leaveIds, ...bankIds])];
     if (ids.length > 0) {
       const people = await db.employee.findMany({
         where: { id: { in: ids } },

@@ -308,5 +308,36 @@ console.log("\n=== Usuario oculto en el Panel de Dirección ===");
   assert("ADMIN no entra al Panel de Dirección", routeDecision("ADMIN", "/owner/usuarios") === "redirect" && routeDecision("ADMIN", "/api/owner/users") === "forbidden");
 }
 
+// ---------------------------------------------------------------------------
+// Banco de horas: piden encargados (su sucursal) y supervisión; autoriza
+// supervisión; RRHH y Dirección solo leen; Mantenimiento no entra.
+// ---------------------------------------------------------------------------
+console.log("\nBanco de horas");
+{
+  for (const role of ["SUPERVISOR", "BRANCH_MANAGER", "HR", "OWNER", "ADMIN"] as const) {
+    assert(`${role} ve Banco de horas en el menú`, visibleMenu(role).includes("/banco-horas"));
+    assert(`${role} entra a la pantalla y a la API`, routeDecision(role, "/banco-horas") === "allow"
+      && routeDecision(role, "/api/hour-bank/requests") === "allow" && roleCan.viewHourBank(role));
+  }
+  assert("Mantenimiento no lo ve ni entra", !visibleMenu("MAINTENANCE").includes("/banco-horas")
+    && routeDecision("MAINTENANCE", "/banco-horas") === "redirect"
+    && routeDecision("MAINTENANCE", "/api/hour-bank/balance") === "forbidden" && !roleCan.viewHourBank("MAINTENANCE"));
+  for (const role of ["SUPERVISOR", "ADMIN"] as const) {
+    assert(`${role} pide, autoriza y carga saldo inicial`, roleCan.requestHourBank(role)
+      && roleCan.authorizeHourBank(role) && roleCan.adjustHourBank(role));
+  }
+  assert("encargado pide pero no autoriza ni carga saldos", roleCan.requestHourBank("BRANCH_MANAGER")
+    && !roleCan.authorizeHourBank("BRANCH_MANAGER") && !roleCan.adjustHourBank("BRANCH_MANAGER"));
+  for (const role of ["HR", "OWNER"] as const) {
+    assert(`${role} solo lee: no pide, no autoriza, no carga saldos`, !roleCan.requestHourBank(role)
+      && !roleCan.authorizeHourBank(role) && !roleCan.adjustHourBank(role));
+    assert(`${role} tampoco aprueba horas extras (ni elige destino)`, !roleCan.approveOvertime(role));
+  }
+  assert("encargado: la lista se fuerza a su sucursal aunque pida otra", listBranchScope({ role: "BRANCH_MANAGER", branchId: "b1" }, "b2") === "b1");
+  assert("encargado: no ve el saldo de alguien de otra sucursal", !canSeeBranchRecord({ role: "BRANCH_MANAGER", branchId: "b1" }, "b2"));
+  assert("RRHH y Dirección leen el saldo de cualquier sucursal", canSeeBranchRecord({ role: "HR", branchId: null }, "b2")
+    && canSeeBranchRecord({ role: "OWNER", branchId: null }, "b2"));
+}
+
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);
 process.exit(failed === 0 ? 0 : 1);
