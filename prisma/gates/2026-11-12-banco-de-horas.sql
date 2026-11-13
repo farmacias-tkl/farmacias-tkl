@@ -1,8 +1,9 @@
 -- Gate · Banco de horas y días compensatorios · 2026-11-12
 --
--- PREPARADO, NO APLICADO. Se aplica solo por gate: branch de respaldo en Neon,
--- host-check, dry-run con `prisma migrate diff`, scan destructivo y OK explícito
--- de Daniel.
+-- APLICADO en producción el 2026-11-12, con el OK de Daniel. Branch de respaldo
+-- en Neon creada justo antes: respaldo-pre-banco-horas-12-11. Verificado después:
+-- 3 enums, 2 tablas vacías, la columna nullable, 9 índices y 8 FK. No volver a
+-- correrlo sobre producción (los CREATE fallarían: ya existe todo).
 --
 -- Generado sin conexión a ninguna base con:
 --   npx prisma migrate diff \

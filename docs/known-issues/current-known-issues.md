@@ -53,19 +53,19 @@ tocó (deuda separada).
 
 1. **DC-3** — pendiente.
 2. ⚠️ **OWNER absoluto** — pendiente.
-3. ✅ **OVERTIME-1** — aprobación real de horas extras: hecha en la rama `feat/banco-horas` (entra con el gate del banco de horas). Detalle abajo.
+3. ✅ **OVERTIME-1** — aprobación real de horas extras: hecha (gate del banco de horas aplicado el 2026-11-12). Detalle abajo.
 4. 🔒 **Sidebar hardening** — `name.charAt(0)` sin guard. Detalle abajo.
 5. ⚠️ **DC-4 gap** — audit fuera de `$transaction` en `POST /api/absences`. Detalle abajo.
 
-### ✅ OVERTIME-1 — Aprobación real de horas extras — HECHA (rama `feat/banco-horas`)
+### ✅ OVERTIME-1 — Aprobación real de horas extras — HECHA
 
 `PATCH /api/overtime/[id]` (supervisión): `approve` exige el destino (`PAY` o `BANK`,
 se decide caso por caso), `reject` exige motivo y `set-destination` cubre las horas
 extra que quedaron aprobadas sin destino y también cambia el destino de una ya aprobada (Pagar ↔ Banco; de Banco a Pagar resta lo sumado con un movimiento de ajuste, audit `OVERTIME_DESTINATION_CHANGED`). Cambio de estado con CAS y `auditLog` dentro
 del `$transaction` (`src/lib/hour-bank/actions.ts`). Con destino `BANK` suma al banco
 de horas de la persona, una sola vez (`HourBankMovement.overtimeRecordId` es único).
-Depende de la columna `OvertimeRecord.destination`: se despliega después de aplicar
-`prisma/gates/2026-11-12-banco-de-horas.sql`.
+Depende de la columna `OvertimeRecord.destination`: gate
+`prisma/gates/2026-11-12-banco-de-horas.sql`, aplicado el 2026-11-12.
 
 ### 🔒 Sidebar — `name.charAt(0)` sin guard (hardening, no bug vivo)
 
