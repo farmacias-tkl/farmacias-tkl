@@ -43,7 +43,7 @@ function ChangePasswordForm() {
     const json = await res.json();
 
     if (!res.ok) {
-      setError(json.error || "Error al cambiar la contrasena");
+      setError(json.error || "Error al cambiar la contraseña");
       setLoading(false);
       return;
     }
@@ -86,13 +86,13 @@ function ChangePasswordForm() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f4f5f7" }}>
       <div style={{ background: "white", padding: "2rem", borderRadius: "1rem", width: "100%", maxWidth: "420px", border: "1px solid #e3e6ea" }}>
-        <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginBottom: "0.5rem" }}>Cambia tu contrasena</h1>
+        <h1 style={{ fontSize: "1.2rem", fontWeight: 600, marginBottom: "0.5rem" }}>Cambiá tu contraseña</h1>
         <p style={{ fontSize: "0.85rem", color: "#6b7280", marginBottom: "1.5rem" }}>Obligatorio en el primer ingreso.</p>
 
         <form onSubmit={handleSubmit(onSubmit)} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 500, display: "block", marginBottom: "0.25rem" }}>
-              Contrasena actual
+              Contraseña actual
             </label>
             <input {...register("currentPassword")} type="password"
               style={{ width: "100%", padding: "0.5rem 0.75rem", border: "1px solid #d1d5db", borderRadius: "0.5rem", boxSizing: "border-box" }} />
@@ -101,7 +101,7 @@ function ChangePasswordForm() {
 
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 500, display: "block", marginBottom: "0.25rem" }}>
-              Nueva contrasena
+              Nueva contraseña
             </label>
             <input {...register("newPassword")} type="password"
               style={{ width: "100%", padding: "0.5rem 0.75rem", border: "1px solid #d1d5db", borderRadius: "0.5rem", boxSizing: "border-box" }} />
@@ -110,7 +110,7 @@ function ChangePasswordForm() {
 
           <div>
             <label style={{ fontSize: "0.8rem", fontWeight: 500, display: "block", marginBottom: "0.25rem" }}>
-              Confirmar contrasena
+              Confirmar contraseña
             </label>
             <input {...register("confirmPassword")} type="password"
               style={{ width: "100%", padding: "0.5rem 0.75rem", border: "1px solid #d1d5db", borderRadius: "0.5rem", boxSizing: "border-box" }} />
@@ -125,7 +125,7 @@ function ChangePasswordForm() {
 
           <button type="submit" disabled={loading}
             style={{ padding: "0.75rem", background: "#1d4ed8", color: "white", border: "none", borderRadius: "0.5rem", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
-            {loading ? "Guardando..." : "Guardar contrasena"}
+            {loading ? "Guardando..." : "Guardar contraseña"}
           </button>
         </form>
       </div>

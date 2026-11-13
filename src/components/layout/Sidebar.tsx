@@ -30,7 +30,7 @@ export function Sidebar({ user }: SidebarProps) {
         <div className="flex h-14 items-center justify-between px-4 border-b border-[#2d3548]">
           <div>
             <span className="text-white font-semibold text-sm tracking-wide">Farmacias TKL</span>
-            <span className="block text-[11px] text-slate-400 mt-0.5">Supervision operativa</span>
+            <span className="block text-[11px] text-slate-400 mt-0.5">Supervisión operativa</span>
           </div>
         </div>
 

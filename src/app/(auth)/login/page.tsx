@@ -6,12 +6,12 @@ import { signIn, getSession } from "next-auth/react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, Lock, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
-  email:    emailField("Email invalido"),
-  password: z.string().min(1, "Contrasena obligatoria"),
+  email:    emailField("Email inválido"),
+  password: z.string().min(1, "Contraseña obligatoria"),
 });
 type F = z.infer<typeof schema>;
 
@@ -34,7 +34,7 @@ function LoginForm() {
 
     const result = await signIn("credentials", { ...data, redirect: false });
     if (result?.error) {
-      setServerErr("Email o contrasena incorrectos");
+      setServerErr("Email o contraseña incorrectos");
       return;
     }
 
@@ -50,11 +50,21 @@ function LoginForm() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600 mb-4">
-            <Lock className="w-6 h-6 text-white" />
+          {/* Mismo logo que los íconos de la app (public/icon-512.png, lo genera
+              scripts/generate-pwa-icons.ts). 512 px de origen: nítido en pantallas 3x. */}
+          <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-3xl bg-white shadow-sm ring-1 ring-gray-200 sm:h-28 sm:w-28">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/icon-512.png"
+              alt="Farmacias TKL"
+              width={512}
+              height={512}
+              decoding="async"
+              className="h-20 w-20 sm:h-24 sm:w-24"
+            />
           </div>
           <h1 className="text-xl font-bold text-gray-900">Farmacias TKL</h1>
-          <p className="text-sm text-gray-500 mt-1">Supervision operativa</p>
+          <p className="text-sm text-gray-500 mt-1">Supervisión operativa</p>
         </div>
 
         <div className="card p-6">
@@ -74,7 +84,7 @@ function LoginForm() {
             </div>
 
             <div>
-              <label className="label">Contrasena</label>
+              <label className="label">Contraseña</label>
               <div className="relative">
                 <input
                   {...register("password")}
