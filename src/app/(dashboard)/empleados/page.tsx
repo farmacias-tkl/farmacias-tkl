@@ -69,9 +69,10 @@ export default function EmpleadosPage() {
   if (filterKey !== lastFilterKey) { setLastFilterKey(filterKey); setPage(1); }
 
   const sessionReady    = status === "authenticated";
-  const isOwner         = role === "OWNER";
   const isBranchManager = role === "BRANCH_MANAGER";
   const canCreate       = role ? can.manageEmployees(role) : false;
+  // Solo lectura: quien no puede gestionar empleados.
+  const isOwner         = !!role && !canCreate;
 
   const { data: empData, isLoading: empLoading, error: empError } = useQuery({
     queryKey: ["employees", { search, branchFilter, contractFilter, posFilter, showInactive, role, userBranchId, page }],

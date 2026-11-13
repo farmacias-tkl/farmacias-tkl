@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/permissions";
+import { can, requireAuth } from "@/lib/permissions";
 import { z } from "zod";
 import {
   calculateMinutesOwed, computeRemaining, validateTimes,
@@ -81,8 +81,7 @@ export async function PATCH(
 
   const isOwner = ev.reportedByUserId === session!.user.id;
   const role    = session!.user.role;
-  const isAdmin = role === "ADMIN" || role === "SUPERVISOR";
-  if (!isOwner && !isAdmin) {
+  if (!can.editTimeEvent(role, isOwner)) {
     return NextResponse.json({ error: "Solo quien registró el evento o un admin puede editar" }, { status: 403 });
   }
   if (role === "BRANCH_MANAGER" && ev.branchId !== session!.user.branchId) {

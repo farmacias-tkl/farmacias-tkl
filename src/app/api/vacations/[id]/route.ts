@@ -83,7 +83,7 @@ export async function PATCH(
 
   // Solo el solicitante o un admin/supervisor
   const isOwner   = vacation.requestedByUserId === session!.user.id;
-  const isAdmin   = session!.user.role === "ADMIN" || session!.user.role === "SUPERVISOR";
+  const isAdmin   = ["ADMIN", "SUPERVISOR", "OWNER"].includes(session!.user.role);
   if (!isOwner && !isAdmin) {
     return NextResponse.json({ error: "Solo el solicitante o un admin puede editar" }, { status: 403 });
   }

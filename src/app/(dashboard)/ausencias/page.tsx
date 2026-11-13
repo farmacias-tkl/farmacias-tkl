@@ -129,6 +129,8 @@ export default function AusenciasPage() {
   const canCreate       = role ? can.createAbsence(role) : false;
   const canJustify      = role ? can.justifyAbsence(role) : false;
   const canResolveDebt  = role ? can.resolveTimeEvent(role) : false;
+  // RRHH registra ausencias pero no llegadas tarde ni retiros: va directo al form de ausencia.
+  const canCreateTimeEvent = role ? can.createTimeEvent(role) : false;
   const isBranchManager = role === "BRANCH_MANAGER";
 
   // Lista de ausencias
@@ -320,7 +322,7 @@ export default function AusenciasPage() {
             onClick={() => {
               setShowForm(v => {
                 const next = !v;
-                if (next) setFlow(null);
+                if (next) setFlow(canCreateTimeEvent ? null : "absence");
                 return next;
               });
             }}
@@ -403,6 +405,7 @@ export default function AusenciasPage() {
                 <button
                   type="button"
                   onClick={() => setFlow("lateness")}
+                  hidden={!canCreateTimeEvent}
                   className="text-left rounded-xl border-2 border-gray-200 hover:border-orange-400 hover:bg-orange-50/40 active:bg-orange-50 transition-colors p-4 group">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="rounded-lg bg-orange-50 group-hover:bg-orange-100 p-2">
@@ -431,6 +434,7 @@ export default function AusenciasPage() {
               <button
                 type="button"
                 onClick={() => setFlow(null)}
+                hidden={!canCreateTimeEvent}
                 className="text-xs text-gray-500 hover:text-gray-800 underline"
                 aria-label="Cambiar tipo de evento">
                 ← Cambiar

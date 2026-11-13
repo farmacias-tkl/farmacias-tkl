@@ -133,7 +133,7 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3">
           <Eye className="w-4 h-4 text-slate-400 shrink-0" />
           <p className="text-sm text-slate-600">
-            Acceso operativo ampliado. Podes ver todo, crear ausencias y reportar tickets.
+            Acceso completo: podés ver y operar todas las secciones.
           </p>
         </div>
       )}

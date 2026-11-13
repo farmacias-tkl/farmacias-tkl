@@ -76,7 +76,7 @@ export function canAccessOwnerPanel(
 // ---------------------------------------------------------------------------
 export const MENU_BY_ROLE: Record<UserRole, string[]> = {
   SUPERVISOR:     ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/perfil"],
-  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/alertas","/puestos","/owner","/perfil"],
+  OWNER:          ["/dashboard","/sucursales","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/whatsapp","/alertas","/admin","/admin/usuarios","/puestos","/owner","/perfil"],
   BRANCH_MANAGER: ["/dashboard","/empleados","/ausencias","/vacaciones","/horas-extras","/banco-horas","/planes-accion","/tareas","/mantenimiento","/perfil"],
   HR:             ["/dashboard","/empleados","/ausencias","/vacaciones","/rotativas","/horas-extras","/banco-horas","/planes-accion","/perfil"],
   MAINTENANCE:    ["/dashboard","/mantenimiento","/perfil"],
@@ -122,22 +122,22 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/sucursales":    ["SUPERVISOR","OWNER","ADMIN"],
   "/empleados":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/ausencias":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  // Planes de acción y horas extras: RRHH y Dirección solo leen (las escrituras
+  // Planes de acción y horas extras: RRHH solo lee (las escrituras
   // se cortan en cada handler con can.createActionPlan / can.createOvertime).
   "/planes-accion": ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/horas-extras":  ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  // Banco de horas: RRHH y Dirección solo leen (las escrituras se cortan en
+  // Banco de horas: RRHH solo lee (las escrituras se cortan en
   // cada handler con can.requestHourBank / authorizeHourBank / adjustHourBank).
   "/banco-horas":   ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/vacaciones":    ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/rotativas":     ["SUPERVISOR","HR","ADMIN"],
+  "/rotativas":     ["SUPERVISOR","HR","OWNER","ADMIN"],
   "/mantenimiento": ["SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"],
   "/tareas":        ["SUPERVISOR","BRANCH_MANAGER","OWNER","ADMIN"],
-  "/whatsapp":      ["SUPERVISOR","ADMIN"],
+  "/whatsapp":      ["SUPERVISOR","OWNER","ADMIN"],
   "/alertas":       ["SUPERVISOR","OWNER","ADMIN"],
   "/puestos":       ["ADMIN","OWNER"],
-  "/admin":         ["ADMIN"],
-  "/admin/usuarios":["ADMIN"],
+  "/admin":         ["ADMIN","OWNER"],
+  "/admin/usuarios":["ADMIN","OWNER"],
   "/owner":         ["OWNER"],
   "/owner/usuarios":["OWNER"],
   "/perfil":        ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"],
@@ -160,8 +160,8 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   "/api/action-plan-forms": ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/overtime":      ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
   "/api/hour-bank":     ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"],
-  "/api/assignments":   ["SUPERVISOR","HR","ADMIN"],
-  "/api/admin":         ["ADMIN"],
+  "/api/assignments":   ["SUPERVISOR","HR","OWNER","ADMIN"],
+  "/api/admin":         ["ADMIN","OWNER"],
   "/api/owner":         ["OWNER"],
   "/api/permissions":   ["OWNER","ADMIN"],
   // Permisos por usuario (refactor permisos-por-usuario, Fase 2C-B). Árbol neutral
@@ -191,7 +191,7 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
   if (pathname.startsWith("/api/")) {
     return ["SUPERVISOR","BRANCH_MANAGER","HR","MAINTENANCE","OWNER","ADMIN"].includes(role);
   }
-  return role === "ADMIN";
+  return role === "ADMIN" || role === "OWNER";
 }
 
 /**
@@ -204,33 +204,36 @@ export function routeDecision(role: UserRole, pathname: string): "allow" | "forb
   return pathname.startsWith("/api/") ? "forbidden" : "redirect";
 }
 
+// Regla: Dirección (OWNER) tiene el máximo nivel. Toda acción que pueda
+// Administrador (ADMIN) o Supervisión (SUPERVISOR) la puede OWNER; lo controla
+// src/lib/permissions-owner.test.ts, que falla si un permiso nuevo se lo olvida.
 export const can = {
   // Sucursales
   viewAllBranches:  (role: UserRole) => ["SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
-  manageBranches:   (role: UserRole) => role === "ADMIN",
+  manageBranches:   (role: UserRole) => role === "ADMIN" || role === "OWNER",
 
   // Empleados
   viewAllEmployees: (role: UserRole) => ["SUPERVISOR","HR","OWNER","ADMIN"].includes(role),
-  manageEmployees:  (role: UserRole) => ["SUPERVISOR","HR","BRANCH_MANAGER","ADMIN"].includes(role),
-  reassignEmployee: (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
+  manageEmployees:  (role: UserRole) => ["SUPERVISOR","HR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
+  reassignEmployee: (role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
 
   // Vacaciones
   // Saldo y horario de una persona (detalle del día, validar). Encargado/a: su sucursal.
   viewVacationDetail: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER","HR","BRANCH_MANAGER"].includes(role),
   // RRHH (HR) solo ve: no crea, aprueba, rechaza, deshace, cancela ni cambia cobertura.
-  createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  createVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
   // Aprobar, rechazar y deshacer la aprobación (decisión final de supervisión).
-  approveVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  approveVacation: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
   // Paso 2 (solo con VACATIONS_RRHH_STEP=true). RRHH (HR) solo revisa: ve lista,
   // calendario, detalle y saldos, pero no aprueba, rechaza, deshace ni cambia
   // la cobertura; por eso HR no está acá ni en approveVacation.
-  confirmVacation: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  confirmVacation: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
   // Cambiar o quitar el rotativo de una solicitud (también desde Rotativas).
-  changeVacationCoverage: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  cancelVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  changeVacationCoverage: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
+  cancelVacation:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
   // Cancelar una ya aprobada (reversión excepcional, motivo obligatorio). Encargado/a no.
   cancelApprovedVacation: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
-  manageCoverage:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN"].includes(role),
+  manageCoverage:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
 
   // Ausencias
   createAbsence:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
@@ -239,59 +242,62 @@ export const can = {
 
   // Asistencia y novedades (TimeEvent)
   viewAttendance:    (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
-  createTimeEvent:   (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","ADMIN"].includes(role),
+  // RRHH (HR) solo ve: no carga, no autoriza, no resuelve ni compensa.
+  createTimeEvent:   (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
   // Autoriza un retiro anticipado (operativo, PENDING_AUTHORIZATION → PENDING_REVIEW)
-  authorizeTimeEvent:(role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
+  authorizeTimeEvent:(role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
   // Decide cómo se resuelve la deuda (compensación, payroll, condonar)
-  resolveTimeEvent:  (role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
+  resolveTimeEvent:  (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
   // Registra una compensación
-  addCompensation:   (role: UserRole) => ["SUPERVISOR","HR","ADMIN","OWNER"].includes(role),
+  addCompensation:   (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
+  // Corrige un registro todavía abierto: supervisión siempre; el encargado solo
+  // el que cargó él (y de su sucursal, que se valida en la API).
+  editTimeEvent:     (role: UserRole, isReporter: boolean) =>
+    ["SUPERVISOR","ADMIN","OWNER"].includes(role) || (role === "BRANCH_MANAGER" && isReporter),
 
   // Planes de acción
-  createActionPlan: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  createActionPlan: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
 
   // Horas extras
-  createOvertime:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  createOvertime:  (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
   // Aprobar (eligiendo destino: Pagar o Banco de horas) y rechazar.
-  approveOvertime: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  approveOvertime: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
 
-  // Banco de horas. Encargado/a: solo su sucursal. RRHH y Dirección solo leen.
+  // Banco de horas. Encargado/a: solo su sucursal. RRHH solo lee.
   viewHourBank:      (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","HR","OWNER","ADMIN"].includes(role),
   // Pedir un día o una franja contra el banco.
-  requestHourBank:   (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  requestHourBank:   (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
   // Autorizar o rechazar el pedido, y cancelar uno ya autorizado.
-  authorizeHourBank: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  authorizeHourBank: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
   // Saldo inicial, compensaciones y ajustes.
-  adjustHourBank:    (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  adjustHourBank:    (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
 
   // Mantenimiento
   viewAllTickets:     (role: UserRole) => ["SUPERVISOR","MAINTENANCE","OWNER","ADMIN"].includes(role),
   createTicket:       (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","MAINTENANCE","OWNER","ADMIN"].includes(role),
-  assignTicket:       (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  updateTicketStatus: (role: UserRole) => ["SUPERVISOR","MAINTENANCE","ADMIN"].includes(role),
+  assignTicket:       (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
+  updateTicketStatus: (role: UserRole) => ["SUPERVISOR","MAINTENANCE","ADMIN","OWNER"].includes(role),
 
   // Tareas
-  createTask:       (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  updateTaskStatus: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN"].includes(role),
+  createTask:       (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
+  updateTaskStatus: (role: UserRole) => ["SUPERVISOR","BRANCH_MANAGER","ADMIN","OWNER"].includes(role),
 
   // WhatsApp
-  accessWhatsApp: (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
+  accessWhatsApp: (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
 
   // Comentarios internos
-  viewInternalComments: (role: UserRole) => role !== "OWNER",
+  viewInternalComments: (_role: UserRole) => true,
 
   // Admin — gestión de usuarios
-  manageUsers:     (role: UserRole) => role === "ADMIN",
+  manageUsers:     (role: UserRole) => role === "ADMIN" || role === "OWNER",
   managePositions: (role: UserRole) => role === "ADMIN" || role === "OWNER",
   // Asignar/revocar permisos operativos a puestos. OWNER + ADMIN por ahora.
   // Si Direccion en el futuro pide restringir solo a OWNER, cambiar 1 linea.
   managePositionPermissions: (role: UserRole) => role === "ADMIN" || role === "OWNER",
-  viewAuditLog:    (role: UserRole) => role === "ADMIN",
+  viewAuditLog:    (role: UserRole) => role === "ADMIN" || role === "OWNER",
 
   // Helpers
-  isFullAccess:           (role: UserRole) => ["SUPERVISOR","ADMIN"].includes(role),
-  isReadOnlyInEmployees:  (role: UserRole) => role === "OWNER",
-  isReadOnlyInBranches:   (role: UserRole) => role === "OWNER",
+  isFullAccess:           (role: UserRole) => ["SUPERVISOR","ADMIN","OWNER"].includes(role),
 };
 
 export function requireCan(
