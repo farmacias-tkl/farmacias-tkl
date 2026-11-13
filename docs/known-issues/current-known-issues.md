@@ -61,7 +61,7 @@ tocó (deuda separada).
 
 `PATCH /api/overtime/[id]` (supervisión): `approve` exige el destino (`PAY` o `BANK`,
 se decide caso por caso), `reject` exige motivo y `set-destination` cubre las horas
-extra que quedaron aprobadas sin destino. Cambio de estado con CAS y `auditLog` dentro
+extra que quedaron aprobadas sin destino y también cambia el destino de una ya aprobada (Pagar ↔ Banco; de Banco a Pagar resta lo sumado con un movimiento de ajuste, audit `OVERTIME_DESTINATION_CHANGED`). Cambio de estado con CAS y `auditLog` dentro
 del `$transaction` (`src/lib/hour-bank/actions.ts`). Con destino `BANK` suma al banco
 de horas de la persona, una sola vez (`HourBankMovement.overtimeRecordId` es único).
 Depende de la columna `OvertimeRecord.destination`: se despliega después de aplicar

@@ -280,7 +280,7 @@ export default function HorasExtrasPage() {
 
 function OvertimeCard({ record: r, canApprove, onChanged }: { record: any; canApprove: boolean; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
-  const [mode, setMode] = useState<null | "approve" | "reject">(null);
+  const [mode, setMode] = useState<null | "approve" | "reject" | "change">(null);
   const [destination, setDestination] = useState<"" | "PAY" | "BANK">("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -291,12 +291,17 @@ function OvertimeCard({ record: r, canApprove, onChanged }: { record: any; canAp
   const hasDetail = r.notes || r.rejectionReason;
   // Aprobada antes de que existiera el destino: falta decidirlo.
   const needsDestination = r.status === "APPROVED" && !r.destination;
+  // Aprobada con destino: supervisión puede pasarla de Pagar a Banco o al revés.
+  const canChange = r.status === "APPROVED" && !!r.destination;
+  const other: "PAY" | "BANK" = r.destination === "BANK" ? "PAY" : "BANK";
 
   const act = async () => {
     setBusy(true); setError(null);
     try {
       const body = mode === "reject"
         ? { action: "reject", rejectionReason: reason.trim() }
+        : mode === "change"
+        ? { action: "set-destination", destination: other }
         : { action: needsDestination ? "set-destination" : "approve", destination };
       const res = await fetch(`/api/overtime/${r.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -375,9 +380,28 @@ function OvertimeCard({ record: r, canApprove, onChanged }: { record: any; canAp
         </div>
       )}
 
+      {canApprove && mode === null && canChange && (
+        <div className="px-4 pb-3 flex justify-end">
+          <button onClick={() => { setMode("change"); setError(null); }} className="btn-secondary text-xs py-1.5 px-3">
+            Cambiar destino
+          </button>
+        </div>
+      )}
+
       {canApprove && mode !== null && (
         <div className="px-4 pb-3 pt-3 border-t border-gray-100 bg-gray-50/50 space-y-3">
-          {mode === "approve" ? (
+          {mode === "change" ? (
+            <div>
+              <p className="text-sm text-gray-800">
+                Pasar estas {r.hours} hs de <strong>{DESTINATION_LABEL[r.destination]}</strong> a <strong>{DESTINATION_LABEL[other]}</strong>.
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {other === "PAY"
+                  ? "Se restan del banco de horas de la persona. Si ya las usó, el saldo queda en negativo."
+                  : "Se suman al banco de horas de la persona."}
+              </p>
+            </div>
+          ) : mode === "approve" ? (
             <div>
               <p className="label">Destino de estas {r.hours} hs</p>
               <div className="flex flex-wrap gap-4 text-sm text-gray-700">
@@ -403,10 +427,10 @@ function OvertimeCard({ record: r, canApprove, onChanged }: { record: any; canAp
           {error && <p className="text-sm text-red-700">{error}</p>}
           <div className="flex flex-wrap gap-2 justify-end">
             <button onClick={() => { setMode(null); setError(null); }} disabled={busy} className="btn-secondary text-xs py-1.5 px-3">Volver</button>
-            <button onClick={act} disabled={busy || (mode === "approve" ? !destination : !reason.trim())}
+            <button onClick={act} disabled={busy || (mode === "change" ? false : mode === "approve" ? !destination : !reason.trim())}
               className={cn("px-3 py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-50",
-                mode === "approve" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700")}>
-              {busy ? "Procesando..." : mode === "reject" ? "Rechazar" : needsDestination ? "Guardar destino" : "Aprobar"}
+                mode === "reject" ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700")}>
+              {busy ? "Procesando..." : mode === "reject" ? "Rechazar" : mode === "change" ? `Pasar a ${DESTINATION_LABEL[other]}` : needsDestination ? "Guardar destino" : "Aprobar"}
             </button>
           </div>
         </div>

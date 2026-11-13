@@ -169,6 +169,43 @@ async function main() {
       assert.equal(again.ok, false);
       assert.equal(await balance("ana"), 7);
     });
+    await check("cambiar destino Banco → Pagar: resta lo sumado, deja el historial y registra el cambio", async () => {
+      const r = await actions.setOvertimeDestination(db, SUP, { id: "ot-vieja", destination: "PAY" });
+      assert.ok(r.ok, !r.ok ? r.error : "");
+      assert.equal((await db.overtimeRecord.findUniqueOrThrow({ where: { id: "ot-vieja" } })).destination, "PAY");
+      assert.equal(await balance("ana"), 4);
+      assert.equal(await db.hourBankMovement.count({ where: { overtimeRecordId: "ot-vieja" } }), 0);
+      const mvs = await db.hourBankMovement.findMany({ where: { employeeId: "ana", note: { contains: "pasaron" } }, orderBy: { createdAt: "asc" } });
+      assert.deepEqual(mvs.map((m) => `${m.type} ${Number(m.hours)}`), ["OVERTIME 3", "ADJUST -3"]);
+      const a = await db.auditLog.findFirstOrThrow({ where: { action: "OVERTIME_DESTINATION_CHANGED", entityId: "ot-vieja" } });
+      const d = a.detail as any;
+      assert.equal(`${a.userId} ${d.from} ${d.to} ${d.bankDelta} ${d.balanceBefore} ${d.balanceAfter}`, "sup BANK PAY -3 7 4");
+    });
+    await check("cambiar destino Pagar → Banco: suma; ida y vuelta no duplica", async () => {
+      const r = await actions.setOvertimeDestination(db, SUP, { id: "ot-vieja", destination: "BANK" });
+      assert.ok(r.ok, !r.ok ? r.error : "");
+      assert.equal(await balance("ana"), 7);
+      assert.equal(await db.hourBankMovement.count({ where: { overtimeRecordId: "ot-vieja" } }), 1);
+      const same = await actions.setOvertimeDestination(db, SUP, { id: "ot-vieja", destination: "BANK" });
+      assert.equal(same.ok, false);
+      assert.equal(await balance("ana"), 7);
+    });
+    await check("dos cambios simultáneos Banco → Pagar: gana uno, resta una vez", async () => {
+      const rs = await Promise.all([
+        actions.setOvertimeDestination(db, SUP, { id: "ot-vieja", destination: "PAY" }),
+        actions.setOvertimeDestination(db, SUP, { id: "ot-vieja", destination: "PAY" }),
+      ]);
+      assert.equal(rs.filter((x) => x.ok).length, 1);
+      assert.equal(await balance("ana"), 4);
+      // Queda como estaba para el resto de la prueba.
+      assert.ok((await actions.setOvertimeDestination(db, SUP, { id: "ot-vieja", destination: "BANK" })).ok);
+      assert.equal(await balance("ana"), 7);
+    });
+    await check("no se cambia el destino de una reportada ni de una rechazada", async () => {
+      const r = await actions.setOvertimeDestination(db, SUP, { id: "ot3", destination: "BANK" });
+      assert.equal(r.ok, false);
+      if (!r.ok) assert.equal(r.status, 409);
+    });
     await check("dos aprobaciones simultáneas con destino Banco: gana una, suma una vez", async () => {
       await db.overtimeRecord.create({ data: { id: "ot4", employeeId: "beto", branchId: "bA", reportedByUserId: "encA", date: D("2027-01-14"), hours: 2, reason: "OTHER" } });
       const rs = await Promise.all([
@@ -322,7 +359,8 @@ async function main() {
     await check("ficha: movimientos del más nuevo al más viejo y el saldo es su suma", async () => {
       const b = await actions.loadBalance(db, "ana");
       assert.deepEqual(b.movements.map((x) => `${x.type}:${Number(x.hours)}`),
-        ["TAKEN_REVERSAL:3", "TAKEN:-3", "TAKEN:-6", "OVERTIME:3", "OVERTIME:4"]);
+        // Incluye los dos ida y vuelta de destino (Banco → Pagar → Banco) de la hora extra vieja.
+        ["TAKEN_REVERSAL:3", "TAKEN:-3", "TAKEN:-6", "OVERTIME:3", "ADJUST:-3", "OVERTIME:3", "ADJUST:-3", "OVERTIME:3", "OVERTIME:4"]);
       assert.equal(b.balance, 1);
       assert.equal(b.movementsBalance, 1);
     });

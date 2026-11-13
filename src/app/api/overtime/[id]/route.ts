@@ -5,7 +5,7 @@
  *       banco de horas de la persona.
  *   { action: "reject", rejectionReason }
  *   { action: "set-destination", destination }
- *       Para una hora extra que quedó aprobada sin destino.
+ *       Para una hora extra aprobada: define el destino si no tenía, o lo cambia (Pagar ↔ Banco) ajustando el banco de horas.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";

@@ -10,7 +10,8 @@
 //   decideRequest     supervisión autoriza (descuenta: movimiento TAKEN) o rechaza
 //   cancelRequest     cancela; si estaba autorizado devuelve las horas
 //   decideOvertime    aprueba una hora extra con destino Pagar o Banco, o la rechaza
-//   setOvertimeDestination   destino de una hora extra aprobada sin destino
+//   setOvertimeDestination   destino de una hora extra aprobada: lo define si no tenía,
+//                            o lo cambia (Pagar ↔ Banco) ajustando el saldo
 //   addMovement       saldo inicial, compensación o ajuste (supervisión)
 //   loadBalance       saldo y movimientos de una persona
 // =============================================================================
@@ -426,13 +427,25 @@ export async function decideOvertime(db: PrismaClient, actor: Actor, p: {
   });
 }
 
-/** Destino de una hora extra que quedó aprobada sin destino (anterior al banco de horas). */
+/**
+ * Destino de una hora extra aprobada.
+ *
+ *  - Sin destino (aprobada antes del banco de horas): lo define.
+ *  - Con destino: lo cambia, Pagar ↔ Banco.
+ *      Pagar → Banco: suma las horas al banco, como al aprobar.
+ *      Banco → Pagar: resta lo que había sumado. El movimiento original no se
+ *      borra: queda en el historial, suelto de la hora extra (así, si después
+ *      vuelve a Banco, el nuevo movimiento puede apuntarla: `overtimeRecordId`
+ *      es único), y se agrega un movimiento de ajuste por el mismo importe en
+ *      negativo. El saldo puede quedar en negativo si esas horas ya se usaron.
+ */
 export async function setOvertimeDestination(db: PrismaClient, actor: Actor, p: { id: string; destination: "PAY" | "BANK" }): Promise<Result<OvertimeRecord>> {
   if (p.destination !== "PAY" && p.destination !== "BANK") return fail(400, "Destino inválido.");
   const o = await db.overtimeRecord.findUnique({ where: { id: p.id } });
   if (!o) return fail(404, "No encontrado");
   if (o.status !== "APPROVED") return fail(409, "El destino se define en horas extra aprobadas.");
-  if (o.destination) return fail(409, "Esta hora extra ya tiene destino.");
+  if (o.destination === p.destination) return fail(409, "Esta hora extra ya tiene ese destino.");
+  if (o.destination) return changeOvertimeDestination(db, actor, o, p.destination);
   return db.$transaction(async (tx) => {
     const cas = await tx.overtimeRecord.updateMany({
       where: { id: o.id, status: "APPROVED", destination: null },
@@ -444,6 +457,50 @@ export async function setOvertimeDestination(db: PrismaClient, actor: Actor, p: 
       data: {
         userId: actor.id, action: "OVERTIME_DESTINATION_SET", entity: "OvertimeRecord", entityId: o.id,
         detail: { destination: p.destination, hours: toHours(o.hours), date: toISODate(o.date) },
+      },
+    });
+    return { ok: true as const, data: await tx.overtimeRecord.findUniqueOrThrow({ where: { id: o.id } }) };
+  });
+}
+
+async function changeOvertimeDestination(db: PrismaClient, actor: Actor, o: OvertimeRecord, to: "PAY" | "BANK"): Promise<Result<OvertimeRecord>> {
+  const from = o.destination!;
+  const day = toISODate(o.date);
+  return db.$transaction(async (tx) => {
+    // CAS sobre el destino anterior: dos cambios simultáneos no ajustan dos veces.
+    const cas = await tx.overtimeRecord.updateMany({
+      where: { id: o.id, status: "APPROVED", destination: from },
+      data: { destination: to },
+    });
+    if (cas.count !== 1) return fail(409, "El registro cambió mientras se guardaba el destino.");
+    const before = await balanceOf(tx, o.employeeId);
+    let delta = 0;
+    if (to === "BANK") {
+      await creditOvertime(tx, o, actor.id);
+      delta = toHours(o.hours);
+    } else {
+      const credited = await tx.hourBankMovement.findUnique({ where: { overtimeRecordId: o.id } });
+      if (credited) {
+        delta = -toHours(credited.hours);
+        await tx.hourBankMovement.update({
+          where: { id: credited.id },
+          data: { overtimeRecordId: null, note: `Horas extra del ${day} (después pasaron a Pagar)` },
+        });
+        await tx.hourBankMovement.create({
+          data: {
+            employeeId: o.employeeId, hours: delta, type: "ADJUST", userId: actor.id,
+            note: `Horas extra del ${day}: pasaron de Banco a Pagar`,
+          },
+        });
+      }
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: actor.id, action: "OVERTIME_DESTINATION_CHANGED", entity: "OvertimeRecord", entityId: o.id,
+        detail: {
+          from, to, hours: toHours(o.hours), date: day, employeeId: o.employeeId,
+          bankDelta: delta, balanceBefore: before, balanceAfter: roundHours(before + delta),
+        },
       },
     });
     return { ok: true as const, data: await tx.overtimeRecord.findUniqueOrThrow({ where: { id: o.id } }) };
