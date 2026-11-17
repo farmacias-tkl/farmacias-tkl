@@ -24,7 +24,7 @@ export const POSITION_CATALOG = [
 export type PositionKey = (typeof POSITION_CATALOG)[number]["key"];
 
 /** Puestos que se cubren con rotativos (adenda D). */
-export const ROTATIVE_COVERAGE_KEYS: readonly PositionKey[] = ["CADETERIA", "CAJERO", "MAESTRANZA"];
+export const ROTATIVE_COVERAGE_KEYS: readonly PositionKey[] = ["CADETERIA", "CAJERO", "MAESTRANZA", "PERFUMERIA"];
 
 export function normalizeLabel(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();

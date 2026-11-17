@@ -243,6 +243,9 @@ console.log("\nRotativos libres");
 assert("cobertura con rotativos: Cajero/a en CABA sí; en PROVINCIA o sin zona no; Encargado/a no",
   coveredByRotatives("CAJERO", "CABA") && coveredByRotatives("MAESTRANZA", "caba") && !coveredByRotatives("CAJERO", "PROVINCIA")
   && !coveredByRotatives("CAJERO", null) && !coveredByRotatives("ENCARGADO", "CABA"));
+assert("cobertura con rotativos: Perfumería en CABA sí; en PROVINCIA o sin zona no",
+  coveredByRotatives("PERFUMERIA", "CABA") && !coveredByRotatives("PERFUMERIA", "PROVINCIA") && !coveredByRotatives("PERFUMERIA", null));
+assert("Atención al cliente no lleva rotativos (se cubre por su puesto secundario, si lo tiene)", !coveredByRotatives("ATENCION", "CABA"));
 const needed = workedSlots([sched(weekdays(8, 14))], D("2026-11-02"), D("2026-11-15"));
 const cand = (over: Partial<RotativeCandidate>): RotativeCandidate => ({
   employeeId: "r1", name: "Rotativo Uno", positionKeys: ["CAJERO"], zone: "CABA", weeklyHours: 45,
@@ -251,6 +254,16 @@ const cand = (over: Partial<RotativeCandidate>): RotativeCandidate => ({
 const avail = (candidates: RotativeCandidate[]) => rotativeAvailability({
   positionKey: "CAJERO", startDate: D("2026-11-02"), endDate: D("2026-11-15"), needed, candidates,
 });
+{
+  // Cobertura por mismo puesto: cada rotativa solo se propone para su puesto.
+  const rotPerf = cand({ employeeId: "rp", name: "Rotativa Perfumería", positionKeys: ["PERFUMERIA"] });
+  const rotCaja = cand({ employeeId: "rc", name: "Rotativa Caja", positionKeys: ["CAJERO"] });
+  const forKey = (positionKey: "PERFUMERIA" | "CAJERO") => rotativeAvailability({
+    positionKey, startDate: D("2026-11-02"), endDate: D("2026-11-15"), needed, candidates: [rotPerf, rotCaja],
+  }).map((x) => x.employeeId);
+  assert("perfumería: se propone la rotativa de perfumería y no la de caja", JSON.stringify(forKey("PERFUMERIA")) === '["rp"]');
+  assert("una cajera no recibe la rotativa de perfumería", JSON.stringify(forKey("CAJERO")) === '["rc"]');
+}
 {
   const a = avail([cand({})]);
   assert("libre todo el período", a.length === 1 && a[0].freeAll && a[0].freeDays.length === 10);

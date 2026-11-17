@@ -8,6 +8,9 @@
  *  B. "Cambiar cobertura" en una solicitud APROBADA cuyas fechas YA PASARON,
  *     con una persona que se marcó como rotativa después de la aprobación.
  *
+ *  C. Rotativa de perfumería: se propone solo para perfumería y solo en CABA,
+ *     y cubre el puesto secundario de quien tiene otro puesto principal.
+ *
  *   npx tsx src/lib/vacations/edit-and-coverage.smoke.ts
  */
 import fs from "node:fs";
@@ -39,7 +42,7 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 async function main() {
   const { PrismaClient } = await import("@prisma/client");
   const actions = await import("./actions");
-  const { loadRotativeOptions } = await import("./coverage-data");
+  const { loadCoverPositions, loadRotativeOptions } = await import("./coverage-data");
   const adminExec = async (sql: string) => {
     const a = new PrismaClient({ datasources: { db: { url: adminUrl.toString() } } });
     try { await a.$executeRawUnsafe(sql); } finally { await a.$disconnect(); }
@@ -233,6 +236,83 @@ async function main() {
       const r = await actions.changeCoverage(db, { id: "pasada2", userId: "u1", rotativeEmployeeId: "cubre" });
       assert.equal(r.ok, false);
       assert.ok((await actions.changeCoverage(db, { id: "pasada2", userId: "u1", rotativeEmployeeId: "rot" })).ok);
+    });
+
+    // ------------------------------------------------------------------ C
+    await db.branch.create({ data: { id: "bP", name: "Sucursal Provincia", zone: "PROVINCIA" } });
+    await db.position.createMany({ data: [{ id: "perf", name: "Perfumería" }, { id: "ate", name: "Representante de Atención al Cliente" }] });
+    await emp("rotperf", { isRotating: true, positionId: "perf" });
+    await emp("perfCaba", { positionId: "perf" });
+    await emp("perfProv", { positionId: "perf", currentBranchId: "bP" });
+    await emp("ateSec", { positionId: "ate", secondaryPositionId: "perf" });
+    await emp("ateSola", { positionId: "ate" });
+    for (const id of ["perfCaba", "perfProv", "ateSec", "ateSola"]) {
+      await db.workSchedule.create({ data: {
+        employeeId: id, validFrom: D("2026-01-01"),
+        slots: { create: [1, 2, 3, 4, 5].map((d) => ({ dayOfWeek: d, slot: 1, startMinute: 480, endMinute: 840, branchId: id === "perfProv" ? "bP" : "bA" })) },
+      } });
+    }
+    const perfOptions = (employeeId: string, branchId: string, positionKey: "PERFUMERIA" | "CAJERO" = "PERFUMERIA") => loadRotativeOptions(db, {
+      employeeId, positionKey, branchId, startDate: D("2027-03-01"), endDate: D("2027-03-07"),
+    });
+    const names = (o: Awaited<ReturnType<typeof perfOptions>>) => o.availability.map((a) => a.employeeId).sort();
+
+    await check("perfumería en CABA: se propone la rotativa de perfumería (y no las de caja)", async () => {
+      const o = await perfOptions("perfCaba", "bA");
+      assert.equal(o.applies, true);
+      assert.deepEqual(names(o), ["rotperf"]);
+    });
+    await check("perfumería en PROVINCIA: no se proponen rotativas", async () => {
+      const o = await perfOptions("perfProv", "bP");
+      assert.equal(o.applies, false);
+      assert.deepEqual(names(o), []);
+    });
+    await check("una cajera no recibe la rotativa de perfumería", async () => {
+      const o = await perfOptions("pide", "bA", "CAJERO");
+      assert.equal(o.applies, true);
+      assert.equal(names(o).includes("rotperf"), false);
+      assert.ok(names(o).length > 0);
+    });
+
+    const reqRow = (id: string, employeeId: string, positionId: string, positionName: string, extra: Record<string, unknown> = {}) =>
+      db.vacationRequest.create({ data: {
+        id, employeeId, branchId: "bA", positionId,
+        employeeNameSnapshot: `Nombre${employeeId} Prueba`, branchNameSnapshot: "Sucursal A", positionNameSnapshot: positionName,
+        startDate: D("2027-03-01"), endDate: D("2027-03-07"), daysCount: 7, requestedByUserId: "u1", status: "APPROVED", ...extra,
+      } as any });
+    await reqRow("vSec", "ateSec", "ate", "Representante de Atención al Cliente");
+    await reqRow("vSola", "ateSola", "ate", "Representante de Atención al Cliente");
+
+    await check("puesto secundario: Atención + Perfumería ofrece cubrir Perfumería; Atención sola, nada", async () => {
+      const c = await loadCoverPositions(db, { employeeId: "ateSec", positionId: "ate" });
+      assert.deepEqual(c.map((x) => [x.id, x.key, x.secondary]), [["perf", "PERFUMERIA", true]]);
+      assert.deepEqual(await loadCoverPositions(db, { employeeId: "ateSola", positionId: "ate" }), []);
+    });
+    await check("puesto secundario: la rotativa de perfumería la cubre y queda asignada como Perfumería", async () => {
+      const r = await actions.changeCoverage(db, { id: "vSec", userId: "u1", rotativeEmployeeId: "rotperf", coverPositionId: "perf" });
+      assert.ok(r.ok, !r.ok ? r.error : "");
+      const a = await db.employeeBranchAssignment.findFirstOrThrow({ where: { vacationRequestId: "vSec", status: "ACTIVE" } });
+      assert.deepEqual([a.employeeId, a.positionId], ["rotperf", "perf"]);
+    });
+    await check("puesto secundario: sin indicar el puesto también cubre el secundario (el principal no lleva rotativos)", async () => {
+      const r = await actions.changeCoverage(db, { id: "vSec", userId: "u1", rotativeEmployeeId: "rotperf" });
+      assert.ok(r.ok, !r.ok ? r.error : "");
+      const a = await db.employeeBranchAssignment.findFirstOrThrow({ where: { vacationRequestId: "vSec", status: "ACTIVE" } });
+      assert.equal(a.positionId, "perf");
+    });
+    await check("puesto secundario: una rotativa de caja no la puede cubrir, ni se acepta un puesto que no es suyo", async () => {
+      const caja = await actions.changeCoverage(db, { id: "vSec", userId: "u1", rotativeEmployeeId: "rot", coverPositionId: "perf" });
+      assert.equal(caja.ok, false);
+      const ajeno = await actions.changeCoverage(db, { id: "vSec", userId: "u1", rotativeEmployeeId: "rot", coverPositionId: "caj" });
+      assert.equal(ajeno.ok, false);
+      const sola = await actions.changeCoverage(db, { id: "vSola", userId: "u1", rotativeEmployeeId: "rotperf" });
+      assert.equal(sola.ok, false);
+    });
+    await check("puesto secundario: al quitar la rotativa no queda \"sin cobertura\" (eso sigue al puesto principal)", async () => {
+      assert.ok((await actions.changeCoverage(db, { id: "vSec", userId: "u1", rotativeEmployeeId: "rotperf", coverPositionId: "perf" })).ok);
+      const r = await actions.changeCoverage(db, { id: "vSec", userId: "u1", rotativeEmployeeId: null });
+      assert.ok(r.ok);
+      assert.equal((await db.vacationRequest.findUniqueOrThrow({ where: { id: "vSec" } })).withoutCoverage, false);
     });
   } finally {
     await db.$disconnect();

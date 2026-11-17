@@ -113,17 +113,23 @@ function WarningsBox({ validation }: { validation: any }) {
 }
 
 /** Lista de rotativos libres con selección (radio). value = employeeId o null (ninguno). */
-export function CoveragePicker({ vacationId, version, value, onChange }: {
+export function CoveragePicker({ vacationId, version, value, onChange, coverPositionId, onCoverPositionChange, hideIfNotApplicable }: {
   vacationId: string;
   /** Cambia cuando cambian las fechas de la solicitud: obliga a recalcular quién está libre. */
   version?: string;
   value: string | null;
   onChange: (id: string | null) => void;
+  /** Puesto a cubrir elegido (el de la solicitud o el secundario); null = el que propone el sistema. */
+  coverPositionId?: string | null;
+  onCoverPositionChange?: (id: string) => void;
+  /** En la aprobación: si la solicitud no se cubre con rotativos, no mostrar nada. */
+  hideIfNotApplicable?: boolean;
 }) {
   const { data, isLoading, isFetching, isFetchedAfterMount } = useQuery({
-    queryKey: ["vacation-coverage", vacationId, version ?? ""],
+    queryKey: ["vacation-coverage", vacationId, version ?? "", coverPositionId ?? ""],
     queryFn: async () => {
-      const res = await fetch(`/api/vacations/${vacationId}/coverage`);
+      const q = coverPositionId ? `?positionId=${encodeURIComponent(coverPositionId)}` : "";
+      const res = await fetch(`/api/vacations/${vacationId}/coverage${q}`);
       if (!res.ok) throw new Error("No se pudieron cargar los rotativos");
       return res.json();
     },
@@ -135,8 +141,10 @@ export function CoveragePicker({ vacationId, version, value, onChange }: {
   });
   const d = data?.data;
   if (isLoading || (isFetching && !isFetchedAfterMount)) return <p className="text-xs text-gray-400">Buscando rotativos...</p>;
-  if (!d?.applies) return <p className="text-xs text-gray-400">Esta solicitud no se cubre con rotativos.</p>;
+  if (!d?.applies) return hideIfNotApplicable ? null : <p className="text-xs text-gray-400">Esta solicitud no se cubre con rotativos.</p>;
   const list: any[] = d.availability ?? [];
+  const coverPositions: any[] = d.coverPositions ?? [];
+  const cover = coverPositions.find((c) => c.id === d.coverPositionId);
 
   return (
     <div className="space-y-2">
@@ -144,6 +152,24 @@ export function CoveragePicker({ vacationId, version, value, onChange }: {
         <Users className="w-3.5 h-3.5 text-gray-400" />Rotativos que pueden cubrir
         {d.requestZone && <span className="font-normal text-gray-500">· zona {d.requestZone}</span>}
       </p>
+      {coverPositions.length > 1 && onCoverPositionChange ? (
+        <div>
+          <label className="label">Puesto a cubrir</label>
+          <select
+            className="input"
+            value={d.coverPositionId ?? ""}
+            onChange={(e) => onCoverPositionChange(e.target.value)}
+          >
+            {coverPositions.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.secondary ? " (puesto secundario)" : ""}</option>
+            ))}
+          </select>
+        </div>
+      ) : cover && (
+        <p className="text-[11px] text-gray-500">
+          Puesto a cubrir: {cover.name}{cover.secondary ? " (puesto secundario)" : ""}
+        </p>
+      )}
       {d.current && (
         <p className="text-[11px] text-gray-500">
           Cobertura actual: {d.current.employee.firstName} {d.current.employee.lastName}
@@ -152,7 +178,7 @@ export function CoveragePicker({ vacationId, version, value, onChange }: {
       <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-64 overflow-y-auto">
         <label className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer">
           <input type="radio" checked={value === null} onChange={() => onChange(null)} />
-          <span className="text-gray-700">Ninguno (queda <b>sin cobertura</b>)</span>
+          <span className="text-gray-700">Ninguno{d.flagsWithoutCoverage !== false && <> (queda <b>sin cobertura</b>)</>}</span>
         </label>
         {list.length === 0 && (
           <p className="px-3 py-2 text-xs text-gray-400">No hay rotativos libres en la zona.</p>
@@ -314,6 +340,7 @@ export function ApprovalPanel({ vacation: v, onApproved, onReject, onEdited }: {
   onEdited: () => void | Promise<void>;
 }) {
   const [rotative, setRotative] = useState<string | null>(null);
+  const [coverPos, setCoverPos] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -341,6 +368,7 @@ export function ApprovalPanel({ vacation: v, onApproved, onReject, onEdited }: {
           ...(note.trim() && { note: note.trim() }),
           confirmWarnings,
           rotativeEmployeeId: rotative,
+          ...(coverPos && { coverPositionId: coverPos }),
         }),
       });
       const json = await res.json();
@@ -377,9 +405,12 @@ export function ApprovalPanel({ vacation: v, onApproved, onReject, onEdited }: {
       )}
       <BalanceBox b={validation.balance} />
       <WarningsBox validation={validation} />
-      {validation.rotativos?.applies && (
-        <CoveragePicker vacationId={v.id} version={datesKey} value={rotative} onChange={setRotative} />
-      )}
+      {/* También cuando solo el puesto secundario lleva rotativos (el aviso de arriba sigue al principal). */}
+      <CoveragePicker
+        vacationId={v.id} version={datesKey} value={rotative} onChange={setRotative}
+        coverPositionId={coverPos} onCoverPositionChange={(id) => { setCoverPos(id); setRotative(null); }}
+        hideIfNotApplicable
+      />
       <div>
         <label className="label">Nota del supervisor (opcional)</label>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="input resize-none" disabled={busy} />
@@ -425,6 +456,7 @@ export function ChangeCoveragePanel({ vacation: v, onDone, onBack }: {
 }) {
   const currentId: string | null = v.coverages?.find((c: any) => c.status === "ACTIVE")?.employeeId ?? null;
   const [rotative, setRotative] = useState<string | null>(currentId);
+  const [coverPos, setCoverPos] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -434,7 +466,7 @@ export function ChangeCoveragePanel({ vacation: v, onDone, onBack }: {
       const res = await fetch(`/api/vacations/${v.id}/coverage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rotativeEmployeeId: rotative }),
+        body: JSON.stringify({ rotativeEmployeeId: rotative, ...(coverPos && { coverPositionId: coverPos }) }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "No se pudo cambiar la cobertura");
@@ -448,11 +480,14 @@ export function ChangeCoveragePanel({ vacation: v, onDone, onBack }: {
 
   return (
     <div className="space-y-4">
-      <CoveragePicker vacationId={v.id} value={rotative} onChange={setRotative} />
+      <CoveragePicker
+        vacationId={v.id} value={rotative} onChange={setRotative}
+        coverPositionId={coverPos} onCoverPositionChange={(id) => { setCoverPos(id); setRotative(null); }}
+      />
       {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="form-actions flex gap-2 justify-end">
         <button onClick={onBack} disabled={busy} className="btn-secondary">Volver</button>
-        <button onClick={save} disabled={busy || rotative === currentId} className="btn-primary">
+        <button onClick={save} disabled={busy || (rotative === currentId && coverPos === null)} className="btn-primary">
           {busy ? "Guardando..." : rotative ? "Guardar cobertura" : "Quitar cobertura"}
         </button>
       </div>

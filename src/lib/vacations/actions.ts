@@ -21,7 +21,7 @@ import { planConsumption, planRefund } from "@/lib/personal/balance";
 import { coveredByRotatives, positionKeyOf } from "@/lib/personal/catalog";
 import { toISODate } from "@/lib/personal/dates";
 import { isRrhhStepEnabled } from "./config";
-import { loadRotativeOptions } from "./coverage-data";
+import { loadCoverPositions, loadRotativeOptions, pickCoverPosition } from "./coverage-data";
 import { validateVacationRequest, type ValidationResult } from "./validation";
 import { warningMessages } from "./rules";
 
@@ -112,12 +112,18 @@ type CoverageTarget = Pick<VacationRequest, "id" | "employeeId" | "branchId" | "
  * Deja la solicitud con ese rotativo (o sin ninguno). Libera la cobertura
  * anterior. El rotativo tiene que estar libre al menos un día del período.
  * Devuelve el valor de withoutCoverage que corresponde.
+ *
+ * coverPositionId: qué puesto de la persona se cubre (el de la solicitud, o
+ * su puesto secundario). Sin indicarlo se cubre el de la solicitud y, si ese
+ * no lleva rotativos, el secundario que sí lleve. "Sin cobertura" sigue
+ * dependiendo solo del puesto de la solicitud.
  */
 export async function setCoverage(
   tx: Tx,
   v: CoverageTarget,
   rotativeEmployeeId: string | null,
   userId: string,
+  coverPositionId?: string | null,
 ): Promise<{ ok: true; withoutCoverage: boolean; assignmentId: string | null } | { ok: false; error: string }> {
   await releaseCoverage(tx, v.id, { replacing: true });
   const [position, branch] = await Promise.all([
@@ -128,11 +134,22 @@ export async function setCoverage(
   // "Sin cobertura" solo donde se cubre con rotativos (puesto de cobertura en zona CABA).
   const usesRotatives = coveredByRotatives(key, branch?.zone);
   if (!rotativeEmployeeId) return { ok: true, withoutCoverage: usesRotatives, assignmentId: null };
-  if (!key) return { ok: false, error: "El puesto de la solicitud no es del catálogo: no se puede elegir rotativo." };
-  if (!usesRotatives) return { ok: false, error: "Esta solicitud no se cubre con rotativos (puesto o zona de la sucursal)." };
+  const cover = pickCoverPosition(await loadCoverPositions(tx, v), coverPositionId);
+  if (!cover) {
+    return {
+      ok: false,
+      error: coverPositionId
+        ? "El puesto a cubrir no es de la persona o no se cubre con rotativos."
+        : !key ? "El puesto de la solicitud no es del catálogo: no se puede elegir rotativo."
+        : "Esta solicitud no se cubre con rotativos (puesto o zona de la sucursal).",
+    };
+  }
+  if (!coveredByRotatives(cover.key, branch?.zone)) {
+    return { ok: false, error: "Esta solicitud no se cubre con rotativos (puesto o zona de la sucursal)." };
+  }
 
   const options = await loadRotativeOptions(tx, {
-    employeeId: v.employeeId, positionKey: key, branchId: v.branchId,
+    employeeId: v.employeeId, positionKey: cover.key, branchId: v.branchId,
     startDate: v.startDate, endDate: v.endDate, excludeRequestId: v.id,
   });
   const chosen = options.availability.find((r) => r.employeeId === rotativeEmployeeId);
@@ -142,7 +159,7 @@ export async function setCoverage(
     data: {
       employeeId: rotativeEmployeeId,
       branchId: v.branchId,
-      positionId: v.positionId,
+      positionId: cover.id,
       type: "TEMPORARY_COVERAGE",
       status: "ACTIVE",
       startDate: v.startDate,
@@ -176,6 +193,8 @@ export async function approveVacation(db: PrismaClient, p: {
   confirmWarnings?: boolean;
   /** Rotativo elegido; null/undefined = ninguno. */
   rotativeEmployeeId?: string | null;
+  /** Puesto que cubre el rotativo (el de la solicitud o el secundario de la persona). */
+  coverPositionId?: string | null;
 }): Promise<ActionResult> {
   const v = await db.vacationRequest.findUnique({ where: { id: p.id } });
   if (!v) return fail(404, "No encontrada");
@@ -206,7 +225,7 @@ export async function approveVacation(db: PrismaClient, p: {
     });
     if (cas.count !== 1) return fail(409, "La solicitud cambió de estado mientras se aprobaba");
 
-    const coverage = await setCoverage(tx, v, p.rotativeEmployeeId ?? null, p.userId);
+    const coverage = await setCoverage(tx, v, p.rotativeEmployeeId ?? null, p.userId, p.coverPositionId);
     if (!coverage.ok) throw new CoverageError(coverage.error);
 
     const consumed = rrhh ? null : await consumeBalance(tx, v, p.userId);
@@ -329,6 +348,7 @@ export async function changeCoverage(db: PrismaClient, p: {
   id: string;
   userId: string;
   rotativeEmployeeId: string | null;
+  coverPositionId?: string | null;
 }): Promise<ActionResult> {
   const v = await db.vacationRequest.findUnique({ where: { id: p.id } });
   if (!v) return fail(404, "No encontrada");
@@ -341,7 +361,7 @@ export async function changeCoverage(db: PrismaClient, p: {
       orderBy: { createdAt: "desc" },
       select: { employeeId: true },
     });
-    const coverage = await setCoverage(tx, v, p.rotativeEmployeeId, p.userId);
+    const coverage = await setCoverage(tx, v, p.rotativeEmployeeId, p.userId, p.coverPositionId);
     if (!coverage.ok) throw new CoverageError(coverage.error);
     const u = await tx.vacationRequest.update({ where: { id: v.id }, data: { withoutCoverage: coverage.withoutCoverage } });
     await tx.auditLog.create({
@@ -350,6 +370,7 @@ export async function changeCoverage(db: PrismaClient, p: {
         detail: {
           from: before?.employeeId ?? null,
           to: p.rotativeEmployeeId,
+          coverPositionId: p.coverPositionId ?? null,
           assignmentId: coverage.assignmentId,
           period: `${toISODate(v.startDate)} → ${toISODate(v.endDate)}`,
         },

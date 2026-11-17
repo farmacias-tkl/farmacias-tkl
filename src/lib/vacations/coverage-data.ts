@@ -13,7 +13,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { toISODate } from "@/lib/personal/dates";
-import { coveredByRotatives, type PositionKey } from "@/lib/personal/catalog";
+import { coveredByRotatives, positionKeyOf, usesRotativeCoverage, type PositionKey } from "@/lib/personal/catalog";
 import {
   rotativeAvailability, workedSlots,
   type NeededSlot, type RotativeAvailability, type RotativeCoverage,
@@ -41,6 +41,48 @@ export function parseCoverageSlots(json: Prisma.JsonValue | null): NeededSlot[] 
 /** Tramos que hay que cubrir: el horario real de quien se va en el período. */
 export async function loadNeededSlots(db: Db, employeeId: string, startDate: Date, endDate: Date): Promise<NeededSlot[]> {
   return workedSlots(await loadSchedules(db, employeeId), startDate, endDate);
+}
+
+/** Un puesto de quien se va que se cubre con rotativos. */
+export interface CoverPosition {
+  id: string;
+  name: string;
+  key: PositionKey;
+  /** true: es el puesto secundario de la persona (no el de la solicitud ni su principal). */
+  secondary: boolean;
+}
+
+/**
+ * Puestos que se pueden cubrir en una solicitud: el de la solicitud, y el
+ * principal y el secundario de la persona, quedándose con los que llevan
+ * cobertura con rotativos. Primero el de la solicitud. Una rotativa cubre un
+ * solo puesto por solicitud: cuál, lo elige supervisión al aprobar.
+ */
+export async function loadCoverPositions(db: Db, v: { employeeId: string; positionId: string }): Promise<CoverPosition[]> {
+  const emp = await db.employee.findUnique({
+    where: { id: v.employeeId }, select: { positionId: true, secondaryPositionId: true },
+  });
+  const ids = [v.positionId, emp?.positionId, emp?.secondaryPositionId]
+    .filter((x, i, a): x is string => !!x && a.indexOf(x) === i);
+  const rows = await db.position.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+  const out: CoverPosition[] = [];
+  for (const id of ids) {
+    const row = rows.find((r) => r.id === id);
+    const key = positionKeyOf(row?.name);
+    if (!row || !key || !usesRotativeCoverage(key)) continue;
+    if (out.some((o) => o.key === key)) continue;
+    out.push({
+      id, name: row.name, key,
+      secondary: id !== v.positionId && id !== emp?.positionId && id === emp?.secondaryPositionId,
+    });
+  }
+  return out;
+}
+
+/** El puesto a cubrir: el pedido si es válido; si no, el primero (el de la solicitud). */
+export function pickCoverPosition(choices: CoverPosition[], requestedId?: string | null): CoverPosition | null {
+  if (requestedId) return choices.find((c) => c.id === requestedId) ?? null;
+  return choices[0] ?? null;
 }
 
 export interface RotativeOptions {
