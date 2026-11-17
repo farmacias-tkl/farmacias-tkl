@@ -28,6 +28,7 @@ const schema = z.object({
   note:               z.string().optional(),
   confirmWarnings:    z.boolean().optional(),
   rotativeEmployeeId: z.string().min(1).nullable().optional(),
+  coverPositionId:    z.string().min(1).nullable().optional(),
 });
 
 export async function POST(
@@ -50,6 +51,7 @@ export async function POST(
     note: parsed.data.note,
     confirmWarnings: parsed.data.confirmWarnings,
     rotativeEmployeeId: parsed.data.rotativeEmployeeId ?? null,
+    coverPositionId: parsed.data.coverPositionId ?? null,
   });
   if (!result.ok) {
     return NextResponse.json(
