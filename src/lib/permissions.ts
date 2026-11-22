@@ -105,6 +105,24 @@ export function canConfigureCallCenterMetrics(u: { role: UserRole } | null | und
   return !!u && CALL_CENTER_METRICS_CONFIG_ROLES.includes(u.role);
 }
 
+/** Ruta de entrada de la plataforma operativa: adonde lleva "Volver a la plataforma". */
+export const PLATFORM_HOME_ROUTE = "/dashboard";
+
+/**
+ * ¿Se le muestra "Volver a la plataforma" dentro de Call Center?
+ * A todo el que entra a la bandeja Y puede entrar a la plataforma operativa. Hoy los seis
+ * roles tienen /dashboard, así que lo ve cualquiera que entre a la bandeja (por jerarquía o
+ * por el flag callCenterAccess). La segunda condición lo deja preparado: si algún día
+ * existe un rol sin acceso a /dashboard, a ese usuario no se le ofrece un enlace que lo
+ * rebotaría.
+ */
+export function canSeePlatformLinkFromCallCenter(
+  u: { role: UserRole; callCenterAccess?: boolean | null } | null | undefined,
+): boolean {
+  if (!u) return false;
+  return canViewCallCenter(u) && canAccessRoute(u.role, PLATFORM_HOME_ROUTE);
+}
+
 /** ¿Puede acceder al panel /owner? Solo OWNER. */
 export function canAccessOwnerPanel(
   u: { role: UserRole } | null | undefined,
