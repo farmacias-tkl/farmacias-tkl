@@ -22,7 +22,8 @@ import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
 import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
-import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload } from "./now-types";
+import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress } from "./now-types";
+import { loadProgress } from "./progress";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -44,6 +45,7 @@ export interface NowExtras {
   accounts: readonly ConfigAccount[];
   /** Marcas del último bloque de las abiertas, para clasificar las antiguas. null si no se pudieron leer. */
   openBlocks: readonly ClosedBlockRow[] | null;
+  progress: NowProgress | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -82,7 +84,7 @@ export function toNowPayload(
   const waiting = open.filter((it) => it.waitHours <= windowHours);
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
-  const { history, today, closed, wait, accounts, openBlocks } = extras;
+  const { history, today, closed, wait, accounts, openBlocks, progress } = extras;
   const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
   // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
   const staleItems = stale.map((it) => {
@@ -131,6 +133,7 @@ export function toNowPayload(
     closedUnanswered: closed
       ? { days: closed.days, total: closed.total, question: closed.question, order: closed.order, attachment: closed.attachment, items: closed.items.slice(0, maxRows) }
       : null,
+    progress,
     quality: {
       freshness: {
         lastWebhookAt: freshness.lastWebhookAt ? freshness.lastWebhookAt.toISOString() : null,
@@ -196,6 +199,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   ]);
   const wait = waitContext(versions, now);
   const accounts = configForDay(versions, arDayISO(now))?.data.accounts ?? [];
+  const progress = await loadProgress(now, versions, wait?.ops ?? null).catch(() => null);
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -213,7 +217,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }
