@@ -16,6 +16,9 @@
  *
  * Una conversación con dos cuentas cuenta para las dos y una sola vez en el total.
  *
+ * Las cuentas marcadas como de sistema en la configuración vigente no son operadores: si
+ * escriben, van en un grupo aparte y no suman en los totales del equipo.
+ *
  * buildAccountsReport es PURO. Las dos funciones load* son de solo lectura y no traen
  * teléfono, nombre ni texto.
  */
@@ -23,7 +26,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, isWithinHours, utcTimestampParam, type DayRanges } from "./business-time";
 import { configForDay, type ConfigVersion } from "./config";
-import type { ConfigAccount } from "./config-schema";
+import { isSystemAccount, type ConfigAccount } from "./config-schema";
 import { publicHours, operatorHours } from "./schedule";
 import { distribution, type Distribution, type EntryFact } from "./attention";
 
@@ -79,6 +82,8 @@ export interface AccountReportRow {
 export interface AccountsReport {
   generatedAt: Date;
   accounts: AccountReportRow[];
+  /** Cuentas de sistema con mensajes en el período: aparte, fuera de los totales del equipo. */
+  systemAccounts: AccountReportRow[];
   team: {
     /** Cada conversación una sola vez, aunque hayan participado varias cuentas. */
     conversations: number;
@@ -131,6 +136,14 @@ export function buildAccountsReport(
     return a;
   };
 
+  // Configuración vigente al corte: de ahí salen el alias y el estado de cada cuenta.
+  const current = configForDay(opts.versions, arDayISO(opts.now));
+  const configured = new Map<string, ConfigAccount>((current?.data.accounts ?? []).map((c) => [c.externalId, c]));
+  const isSystem = (account: string | null) => {
+    const cfg = account ? configured.get(account) : undefined;
+    return !!cfg && isSystemAccount(cfg);
+  };
+
   const accountsByConversation = new Map<string, Set<string>>();
   let teamNotes = 0;
 
@@ -140,10 +153,13 @@ export function buildAccountsReport(
     a.days.add(day);
     if (!a.first || m.sentAt < a.first) a.first = m.sentAt;
     if (!a.last || m.sentAt > a.last) a.last = m.sentAt;
-    if (m.isPrivate) { a.privateNotes++; teamNotes++; }
+    const system = isSystem(m.account);
+    if (m.isPrivate) { a.privateNotes++; if (!system) teamNotes++; }
     else {
       a.publicMessages++;
       a.conversations.add(m.conversationId);
+    }
+    if (!m.isPrivate && !system) {
       const set = accountsByConversation.get(m.conversationId) ?? new Set<string>();
       set.add(m.account ?? KEY_NULL);
       accountsByConversation.set(m.conversationId, set);
@@ -158,7 +174,7 @@ export function buildAccountsReport(
   const teamFirst: number[] = [];
   for (const f of input.facts) {
     if (f.clockMinutes === null) continue;
-    teamFirst.push(f.clockMinutes);
+    if (!isSystem(f.firstHumanAccount)) teamFirst.push(f.clockMinutes);
     get(f.firstHumanAccount).firstResponses.push(f.clockMinutes);
   }
 
@@ -167,15 +183,11 @@ export function buildAccountsReport(
   for (const b of input.followups) {
     if (!b.respondedAt) { followupsUnanswered++; continue; }
     const minutes = Math.max(0, (b.respondedAt.getTime() - b.startedAt.getTime()) / MS_MIN);
-    teamFollowups.push(minutes);
+    if (!isSystem(b.account)) teamFollowups.push(minutes);
     get(b.account).followups.push(minutes);
   }
 
-  // Configuración vigente al corte: de ahí salen el alias y el estado de cada cuenta.
-  const current = configForDay(opts.versions, arDayISO(opts.now));
-  const configured = new Map<string, ConfigAccount>((current?.data.accounts ?? []).map((c) => [c.externalId, c]));
-
-  const accounts: AccountReportRow[] = [...byKey.entries()].map(([key, a]) => {
+  const all: AccountReportRow[] = [...byKey.entries()].map(([key, a]) => {
     const account = key === KEY_NULL ? null : key;
     const cfg = account ? configured.get(account) : undefined;
     return {
@@ -199,16 +211,20 @@ export function buildAccountsReport(
     };
   });
   // Orden estable por número de cuenta: NO por demora ni por volumen (sin ranking).
-  accounts.sort((x, y) => (x.account ?? "￿").localeCompare(y.account ?? "￿", "es", { numeric: true }));
+  all.sort((x, y) => (x.account ?? "￿").localeCompare(y.account ?? "￿", "es", { numeric: true }));
 
-  const seen = new Set(accounts.map((a) => a.account));
+  const accounts = all.filter((a) => !isSystem(a.account));
+  const systemAccounts = all.filter((a) => isSystem(a.account));
+
+  const seen = new Set(all.map((a) => a.account));
   const activeWithoutMessages = [...configured.values()]
-    .filter((c) => c.active && !c.historical && !seen.has(c.externalId))
+    .filter((c) => c.active && !c.historical && !isSystemAccount(c) && !seen.has(c.externalId))
     .map((c) => ({ account: c.externalId, alias: c.alias, borrowed: c.borrowed }));
 
   return {
     generatedAt: opts.now,
     accounts,
+    systemAccounts,
     team: {
       conversations: accountsByConversation.size,
       conversationsWithSeveralAccounts: [...accountsByConversation.values()].filter((s) => s.size > 1).length,
