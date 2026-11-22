@@ -69,3 +69,9 @@ estructura2.txt
 
 # Claude Code settings (pueden contener credenciales)
 .claude/settings.local.json
+
+# Documentos de trabajo locales (no publicar)
+/Claude outputs/
+
+# Material de trabajo local de otro proyecto (no publicar)
+/scripts/motoria-probes/
