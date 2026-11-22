@@ -107,6 +107,17 @@ function Report({ data }: { data: AccountsPayload }) {
         </ul>
       )}
 
+      {data.systemAccounts.length > 0 && (
+        <>
+          <h2 className="mt-6 text-sm font-semibold text-gray-800">
+            Cuentas del sistema<span className="ml-2 text-xs font-normal text-gray-500">no son operadores y no suman en el equipo</span>
+          </h2>
+          <ul className="mt-2 grid gap-3 lg:grid-cols-2">
+            {data.systemAccounts.map((a) => <AccountCard key={a.account ?? "sin-cuenta"} a={a} />)}
+          </ul>
+        </>
+      )}
+
       {data.activeWithoutMessages.length > 0 && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3">
           <h2 className="text-sm font-semibold text-gray-800">Cuentas activas sin mensajes en el período</h2>

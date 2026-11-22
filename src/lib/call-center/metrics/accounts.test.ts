@@ -156,5 +156,23 @@ test("el informe no lleva nombres de personas: solo número de cuenta y alias", 
   assert.ok(!/userName|employee|displayName|phone/i.test(Object.keys(r.accounts[0]).join(",")));
 });
 
+test("cuenta de sistema: si escribe va en un grupo aparte y no suma en el equipo ni en las activas sin mensajes", () => {
+  const withSystem: ConfigVersion[] = [{ ...versions[0], data: { ...versions[0].data, accounts: [acc("9001"), acc("9009", { system: true }), acc("9008", { system: true })] } }];
+  const r = build({
+    messages: [msg("9001", "c1", "2026-03-02T10:00"), msg("9009", "c1", "2026-03-02T10:30"), msg("9009", "c2", "2026-03-02T11:00"), msg("9009", "c2", "2026-03-02T11:05", true)],
+    followups: [block("c1", "2026-03-02T10:10", "2026-03-02T10:30", "9009"), block("c1", "2026-03-02T10:40", "2026-03-02T10:50", "9001")],
+    facts: [fact("2026-03-02T10:00", "2026-03-02T10:20", "9009"), fact("2026-03-02T10:00", "2026-03-02T10:05", "9001")],
+  }, withSystem);
+  assert.deepEqual(r.accounts.map((a) => a.account), ["9001"]);
+  assert.deepEqual(r.systemAccounts.map((a) => [a.account, a.conversations, a.privateNotes]), [["9009", 2, 1]]);
+  assert.deepEqual([r.team.conversations, r.team.conversationsWithSeveralAccounts, r.team.privateNotes], [1, 0, 0]);
+  assert.deepEqual([r.team.firstResponses.n, r.team.followups.n], [1, 1]);
+  assert.deepEqual(r.activeWithoutMessages, []);
+});
+
+test("sin cuentas de sistema el grupo queda vacío", () => {
+  assert.deepEqual(build({ messages: [msg("9001", "c1", "2026-03-02T10:00")] }).systemAccounts, []);
+});
+
 console.log(`\nmetrics/accounts: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { canViewCallCenterMetrics, canConfigureCallCenterMetrics } from "@/lib/permissions";
+import { canViewCallCenterMetrics, canViewCallCenterSales, canConfigureCallCenterMetrics } from "@/lib/permissions";
 import { arDayISO } from "@/lib/call-center/metrics/business-time";
 import NowPanel from "./NowPanel";
 import AttentionPanel from "./AttentionPanel";
 import OperatorsPanel from "./OperatorsPanel";
 import QualityPanel from "./QualityPanel";
+import SalesPanel from "./SalesPanel";
 
 export const metadata = { title: "Call Center — Métricas" };
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ const BLOCKS = [
   { key: "ahora", label: "Ahora" },
   { key: "atencion", label: "Atención y demoras" },
   { key: "operadores", label: "Operadores" },
+  { key: "ventas", label: "Ventas SIAF" },
   { key: "datos", label: "Calidad de datos" },
 ] as const;
 type BlockKey = (typeof BLOCKS)[number]["key"];
@@ -27,8 +29,10 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
   if (!session?.user) redirect("/login");
   if (!canViewCallCenterMetrics(session.user)) redirect("/sin-acceso");
 
-  // Un valor desconocido cae en "Ahora".
-  const block: BlockKey = BLOCKS.find((b) => b.key === searchParams.bloque)?.key ?? "ahora";
+  // Ventas SIAF tiene su propio permiso: sin él, la pestaña no existe.
+  const blocks = BLOCKS.filter((b) => b.key !== "ventas" || canViewCallCenterSales(session.user));
+  // Un valor desconocido, o un bloque que el usuario no puede ver, cae en "Ahora".
+  const block: BlockKey = blocks.find((b) => b.key === searchParams.bloque)?.key ?? "ahora";
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -41,7 +45,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
       <h1 className="mt-3 text-xl font-bold text-gray-900">Métricas del Call Center</h1>
 
       <nav aria-label="Bloques de métricas" className="mt-4 flex flex-wrap gap-1 border-b border-gray-200">
-        {BLOCKS.map((b) => {
+        {blocks.map((b) => {
           const active = b.key === block;
           return (
             <Link
@@ -59,6 +63,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
       {block === "ahora" && <NowPanel />}
       {block === "atencion" && <AttentionPanel today={arDayISO(new Date())} />}
       {block === "operadores" && <OperatorsPanel today={arDayISO(new Date())} />}
+      {block === "ventas" && <SalesPanel today={arDayISO(new Date())} />}
       {block === "datos" && <QualityPanel />}
     </main>
   );
