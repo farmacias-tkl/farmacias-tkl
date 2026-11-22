@@ -15,7 +15,7 @@ const when = (iso: string | null) => (iso ? dateTimeFmt.format(new Date(iso)) : 
 export default function QualityPanel() {
   const { state, reload } = useNowData();
 
-  if (state.status === "loading") return <p className="mt-6 text-sm text-gray-500">Cargando…</p>;
+  if (state.status === "loading") return <p className="mt-6 text-sm text-gray-600">Cargando…</p>;
   if (state.status === "error") {
     return (
       <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -35,7 +35,7 @@ export default function QualityPanel() {
 
   return (
     <section className="mt-4 space-y-3" aria-label="Calidad de datos">
-      <p className="text-xs text-gray-500">Estos números ayudan a leer las métricas. No son la cola del momento.</p>
+      <p className="text-xs text-gray-600">Estos números ayudan a leer las métricas. No son la cola del momento.</p>
 
       <Box title="¿Están llegando los datos?" evidence="Medido">
         <Line label="Último aviso de Emozion" value={when(q.freshness.lastWebhookAt)} />
@@ -85,7 +85,7 @@ function Box({ title, evidence, children }: { title: string; evidence: string; c
     <div className="rounded-lg border border-gray-200 bg-white p-3">
       <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
       <div className="mt-2 space-y-1">{children}</div>
-      <p className="mt-2 text-[11px] text-gray-400">{evidence}</p>
+      <p className="mt-2 text-[11px] text-gray-500">{evidence}</p>
     </div>
   );
 }
@@ -100,5 +100,5 @@ function Line({ label, value, strong }: { label: string; value: string; strong?:
 }
 
 function Note({ children }: { children: ReactNode }) {
-  return <p className="text-xs text-gray-500">{children}</p>;
+  return <p className="text-xs text-gray-600">{children}</p>;
 }

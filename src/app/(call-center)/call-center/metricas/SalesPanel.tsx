@@ -45,11 +45,11 @@ export default function SalesPanel({ today }: { today: string }) {
   return (
     <section className="mt-4" aria-label="Ventas SIAF">
       <PeriodForm today={today} period={period} onChange={setPeriod} />
-      <p className="mt-2 text-xs text-gray-500">
+      <p className="mt-2 text-xs text-gray-600">
         Comprobantes de SIAF de los vendedores del Call Center, por fecha del comprobante. Hasta {PERIOD_MAX_DAYS} días. Cada consulta queda registrada.
       </p>
 
-      {state.status === "loading" && <p className="mt-6 text-sm text-gray-500">Cargando…</p>}
+      {state.status === "loading" && <p className="mt-6 text-sm text-gray-600">Cargando…</p>}
       {state.status === "error" && (
         <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
           {state.message}{" "}
@@ -65,7 +65,7 @@ function Report({ data }: { data: SalesPayload }) {
   const noVendors = data.byVendor.length === 0;
   return (
     <>
-      <p className="mt-4 text-xs text-gray-500">
+      <p className="mt-4 text-xs text-gray-600">
         Calculado a las {timeFmt.format(new Date(data.generatedAt))}.
         {data.lastLoadedDay ? ` Último día con comprobantes cargados: ${formatShortDay(data.lastLoadedDay)}.` : " No hay comprobantes cargados en el período."}
         {" "}SIAF se carga con un día de atraso.
@@ -83,7 +83,7 @@ function Report({ data }: { data: SalesPayload }) {
       )}
 
       {noVendors ? (
-        <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">
+        <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
           No hay comprobantes de vendedores del Call Center en el período.
         </p>
       ) : (
@@ -91,7 +91,7 @@ function Report({ data }: { data: SalesPayload }) {
           <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
             <h2 className="text-sm font-medium text-gray-600">Importe bruto</h2>
             <p className="mt-1 text-3xl font-semibold tabular-nums text-gray-900">{money.format(data.total.gross)}</p>
-            <p className="mt-1 text-xs text-gray-500">No es lo cobrado: es el importe bruto, con las notas de crédito ya restadas.</p>
+            <p className="mt-1 text-xs text-gray-600">No es lo cobrado: es el importe bruto, con las notas de crédito ya restadas.</p>
             <div className="mt-3 space-y-1">
               <Line label="Comprobantes" value={nf.format(data.total.receipts)} strong />
               <Line label="Descuentos (aparte, no se restan)" value={money.format(data.total.discounts)} />
@@ -109,7 +109,7 @@ function Report({ data }: { data: SalesPayload }) {
             <div className="mt-2 space-y-1">
               <Line label="Vendedor y día con importe negativo" value={nf.format(data.negativeVendorDays)} />
             </div>
-            <p className="mt-1 text-xs text-gray-500">Ese día las notas de crédito superaron a lo vendido. Es lo único que se puede ver de ellas.</p>
+            <p className="mt-1 text-xs text-gray-600">Ese día las notas de crédito superaron a lo vendido. Es lo único que se puede ver de ellas.</p>
           </div>
 
           <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
@@ -118,7 +118,7 @@ function Report({ data }: { data: SalesPayload }) {
             <div className="mt-2 space-y-1">
               <Line label="Pedidos que entraron esos días" value={nf.format(data.orders)} />
             </div>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-600">
               Compara dos volúmenes del mismo día. No es una tasa de conversión: no se sabe qué comprobante corresponde a qué conversación.
               Pedidos son las conversaciones de pedido en el bot y las recetas de Meducar.
             </p>
@@ -148,7 +148,7 @@ function Report({ data }: { data: SalesPayload }) {
         </>
       )}
 
-      <p className="mt-4 text-xs text-gray-500">
+      <p className="mt-4 text-xs text-gray-600">
         Qué vendedor es del Call Center se decide día por día con la configuración que regía ese día. Los coseguros no se suman.
       </p>
     </>
@@ -159,7 +159,7 @@ function Group({ title, note, children }: { title: string; note?: string; childr
   return (
     <>
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
-        {title}{note && <span className="ml-2 text-xs font-normal text-gray-500">{note}</span>}
+        {title}{note && <span className="ml-2 text-xs font-normal text-gray-600">{note}</span>}
       </h2>
       <ul className="mt-2 grid gap-2 sm:grid-cols-2">{children}</ul>
     </>
@@ -170,7 +170,7 @@ function Card({ title, subtitle, t, children }: { title: string; subtitle?: stri
   return (
     <li className="rounded-lg border border-gray-200 bg-white p-3">
       <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-      {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
+      {subtitle && <p className="text-xs text-gray-600">{subtitle}</p>}
       <div className="mt-2 space-y-1">
         <Line label="Importe bruto" value={money.format(t.gross)} strong />
         <Line label="Comprobantes" value={nf.format(t.receipts)} />
@@ -191,5 +191,5 @@ function Line({ label, value, strong }: { label: string; value: string; strong?:
 }
 
 function Evidence({ badge }: { badge: string }) {
-  return <p className="mt-2 text-[11px] text-gray-400">{EVIDENCE_LABELS.MEDIDO} · {badge}</p>;
+  return <p className="mt-2 text-[11px] text-gray-500">{EVIDENCE_LABELS.MEDIDO} · {badge}</p>;
 }

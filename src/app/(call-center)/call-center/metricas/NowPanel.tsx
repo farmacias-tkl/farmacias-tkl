@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
@@ -54,7 +54,7 @@ export default function NowPanel() {
   const { state, refreshing, reload } = useNowData();
   const [filter, setFilter] = useState<CaseFilter>("all");
 
-  if (state.status === "loading") return <p className="mt-6 text-sm text-gray-500">Cargando…</p>;
+  if (state.status === "loading") return <p className="mt-6 text-sm text-gray-600">Cargando…</p>;
   if (state.status === "error") {
     return (
       <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -76,7 +76,7 @@ export default function NowPanel() {
 
   return (
     <section className="mt-4" aria-label="Ahora">
-      <p className="text-xs text-gray-500">
+      <p className="text-xs text-gray-600">
         Actualizado a las {timeFmt.format(new Date(d.generatedAt))} · últimas {d.windowHours} horas{refreshing ? " · actualizando…" : ""}
       </p>
 
@@ -90,10 +90,15 @@ export default function NowPanel() {
           <ActionButton label="Mayor espera" value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} tone="plain"
             active={filter === "longest"} disabled={!w.oldestWaitStart} onClick={() => toggle("longest")} />
         </div>
-        <p className="mt-2 text-xs text-gray-600">
-          Tocá un número para ver esos casos. Los grupos se superponen: no se suman.
+        <p className="mt-2 text-xs text-gray-700">
+          Tocá un número para ver esos casos.
           {w.critical === null ? " Sin configuración cargada no se puede marcar la demora crítica." : ""}
         </p>
+        <More>
+          Los tres grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
+          {d.schedule ? ` En plazo es hasta ${d.schedule.goalMinutes} minutos hábiles de espera, demorado hasta ${d.schedule.criticalMinutes} y crítico más de ${d.schedule.criticalMinutes}.` : ""}
+          {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso no se muestra en plazo.
+        </More>
       </div>
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
@@ -108,7 +113,7 @@ export default function NowPanel() {
           {w.oldestWaitStart ? <>La que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay ninguna esperando en las últimas horas."}
         </p>
         {w.total > 0 && (
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-gray-600">
             {nf.format(w.neverHuman)} esperan la primera respuesta · {nf.format(w.awaitingNext)} esperan la siguiente
           </p>
         )}
@@ -130,7 +135,7 @@ export default function NowPanel() {
               </div>
             </dl>
           ) : (
-            <p className="mt-1 text-sm text-gray-500">No disponible</p>
+            <p className="mt-1 text-sm text-gray-600">No disponible</p>
           )}
           <Evidence level={d.today ? "MEDIDO" : "NO_DISPONIBLE"} />
         </div>
@@ -138,7 +143,7 @@ export default function NowPanel() {
 
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
         Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" ? d.listTotal : shown.length)})` : ""}
-        <span className="ml-2 text-xs font-normal text-gray-500">del que más espera al que menos</span>
+        <span className="ml-2 text-xs font-normal text-gray-600">del que más espera al que menos</span>
       </h2>
       {filter !== "all" && (
         <p className="mt-1 text-xs text-gray-700">
@@ -147,10 +152,10 @@ export default function NowPanel() {
         </p>
       )}
       {d.listTotal > d.list.length && (
-        <p className="mt-1 text-xs text-gray-500">Se muestran los {nf.format(d.list.length)} que más esperan.</p>
+        <p className="mt-1 text-xs text-gray-600">Se muestran los {nf.format(d.list.length)} que más esperan.</p>
       )}
       {shown.length === 0 ? (
-        <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">
+        <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
           {filter === "all" ? "No hay nadie esperando una respuesta." : "Ningún caso en este grupo."}
         </p>
       ) : (
@@ -180,8 +185,18 @@ function ActionButton({ label, value, tone, active, disabled, onClick }: {
   );
 }
 
+/** Explicación ampliable: en el celular no ocupa lugar hasta que se la pide. */
+function More({ children }: { children: ReactNode }) {
+  return (
+    <details className="mt-1">
+      <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Qué significa</summary>
+      <p className="text-xs text-gray-700">{children}</p>
+    </details>
+  );
+}
+
 function Evidence({ level }: { level: keyof typeof EVIDENCE_LABELS }) {
-  return <p className="mt-2 text-[11px] text-gray-400">{EVIDENCE_LABELS[level]}</p>;
+  return <p className="mt-2 text-[11px] text-gray-500">{EVIDENCE_LABELS[level]}</p>;
 }
 
 function ConversationLink({ id }: { id: string }) {
@@ -192,47 +207,47 @@ function ConversationLink({ id }: { id: string }) {
   );
 }
 
-/** Etiqueta del semáforo con el tiempo destacado. Sin configuración no hay semáforo: solo la espera real. */
+/** Etiqueta del semáforo con el tiempo destacado, en una línea. Sin configuración no hay semáforo: solo la espera real. */
 function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["schedule"] }) {
   if (it.level === null || it.businessMinutes === null) {
-    return <p className="text-lg font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>;
+    return <p className="text-base font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>;
   }
   const l = LEVELS[it.level];
-  const paused = !schedule?.inPublicHours;
   return (
-    <div>
-      <p className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${l.chip}`}>
-        <span aria-hidden className={`h-2 w-2 rounded-full ${l.dot}`} />
+    <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold ${l.chip}`}>
+        <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
         {l.label}
         {it.level === "FUERA_HORARIO" && schedule?.operatorShiftActive ? " · turno de operadores activo" : ""}
-      </p>
-      <p className="mt-1 text-lg font-semibold tabular-nums text-gray-900">
+      </span>
+      <span className="text-base font-semibold tabular-nums text-gray-900">
         {it.level === "FUERA_HORARIO" ? formatWait(it.waitMinutes) : `${formatWait(it.businessMinutes)} hábiles`}
-      </p>
-      <p className="text-xs text-gray-600">
-        {it.level === "FUERA_HORARIO"
-          ? `Espera real del cliente. Reloj hábil pausado en ${formatWait(it.businessMinutes)}.`
-          : `Espera real: ${formatWait(it.waitMinutes)}${paused ? " · reloj hábil pausado" : ""}`}
-      </p>
-    </div>
+      </span>
+    </p>
   );
 }
 
+/** Tarjeta compacta: semáforo y tiempo, las dos etiquetas, desde cuándo espera y el enlace. */
 function CaseCard({ it, nowMs, schedule }: { it: NowListItem; nowMs: number; schedule: NowPayload["schedule"] }) {
+  const paused = it.level !== null && !schedule?.inPublicHours;
   return (
-    <li className="rounded-lg border border-gray-200 bg-white p-3">
+    <li className="rounded-lg border border-gray-200 bg-white px-3 py-2">
       <div className="flex items-start justify-between gap-2">
         <WaitBadge it={it} schedule={schedule} />
+        <ConversationLink id={it.conversationId} />
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <p className="mt-1 flex flex-wrap gap-1.5">
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{ownerLabel(it.owner)}</span>
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
-      </div>
-      <p className="mt-2 text-sm text-gray-900">Espera respuesta desde <span className="font-semibold">{whenLabel(it.waitStart, nowMs)}</span></p>
+        {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
+      </p>
+      <p className="mt-1 text-xs text-gray-700">
+        Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>
+        {it.level !== null && it.level !== "FUERA_HORARIO" ? ` · espera real ${formatWait(it.waitMinutes)}` : ""}
+        {paused ? ` · reloj hábil pausado${it.level === "FUERA_HORARIO" && it.businessMinutes ? ` en ${formatWait(it.businessMinutes)}` : ""}` : ""}
+        {it.thanksCandidate ? " · puede ser solo un agradecimiento" : ""}
+      </p>
       <p className="text-xs text-gray-600">La conversación entró {whenLabel(it.createdAt, nowMs)}</p>
-      {it.botOrderComplete && !it.hasHumanResponse && <p className="text-sm text-gray-800">Completó el pedido en el bot.</p>}
-      {it.thanksCandidate && <p className="text-sm text-gray-500">Puede ser solo un agradecimiento.</p>}
-      <div className="mt-1 text-right"><ConversationLink id={it.conversationId} /></div>
     </li>
   );
 }
@@ -296,9 +311,8 @@ function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
       </div>
       {c && (
         <>
-          <p className="mt-1 text-xs text-gray-600">
-            Últimos {c.days} días. Se cerraron sin contestar lo último que escribió el cliente. No incluye agradecimientos ni avisos de que ya compró.
-          </p>
+          <p className="mt-1 text-xs text-gray-700">Últimos {c.days} días.</p>
+          <More>Se cerraron sin contestar lo último que escribió el cliente. No incluye agradecimientos ni avisos de que ya compró.</More>
           <dl className="mt-2 space-y-0.5 text-sm text-gray-700">
             <div className="flex justify-between gap-2"><dt>Con una consulta</dt><dd className="font-medium tabular-nums text-gray-900">{nf.format(c.question)}</dd></div>
             <div className="flex justify-between gap-2"><dt>Con un pedido</dt><dd className="font-medium tabular-nums text-gray-900">{nf.format(c.order)}</dd></div>
@@ -312,7 +326,7 @@ function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
                   <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
                     <span className="text-xs text-gray-700">
                       {REASON_LABELS[it.reason]}
-                      <span className="block text-gray-500">Escribió {whenLabel(it.lastCustomerAt, nowMs)}</span>
+                      <span className="block text-gray-600">Escribió {whenLabel(it.lastCustomerAt, nowMs)}</span>
                     </span>
                     <ConversationLink id={it.conversationId} />
                   </li>
