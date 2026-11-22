@@ -116,6 +116,27 @@ async function main() {
       if (r.ok) await prisma.callCenterMetricsConfig.delete({ where: { id: r.id } });
     });
 
+    await check("auditoría por rol: guardan Administrador y Supervisión, y cada versión queda a nombre de quien la guardó", async () => {
+      const admin = await prisma.user.create({ data: { email: "admin-inventado@example.com", name: "Administrador Inventado", passwordHash: "x", role: "ADMIN" } });
+      const supervisor = await prisma.user.create({ data: { email: "supervision-inventada@example.com", name: "Supervisión Inventada", passwordHash: "x", role: "SUPERVISOR" } });
+      const creadas: string[] = [];
+      for (const [actor, validFrom] of [[admin, "2026-10-01"], [supervisor, "2026-10-15"], [owner, "2026-10-20"]] as const) {
+        const r = await saveConfigVersion(prisma, { actorUserId: actor.id, validFrom, data: data() });
+        assert.equal(r.ok, true);
+        if (!r.ok) continue;
+        creadas.push(r.id);
+        const row = await prisma.callCenterMetricsConfig.findUnique({ where: { id: r.id } });
+        assert.equal(row!.createdByUserId, actor.id, `${actor.role}: autor de la versión`);
+        const audit = await prisma.auditLog.findMany({ where: { action: CONFIG_AUDIT_ACTION, entityId: r.id }, include: { user: { select: { role: true } } } });
+        assert.equal(audit.length, 1, `${actor.role}: una fila de auditoría`);
+        assert.equal(audit[0].userId, actor.id, `${actor.role}: la auditoría queda a su nombre`);
+        assert.equal(audit[0].user.role, actor.role);
+        assert.equal((audit[0].detail as { validFrom: string }).validFrom, validFrom);
+      }
+      // Se quitan para no alterar las comprobaciones siguientes; la auditoría se conserva.
+      await prisma.callCenterMetricsConfig.deleteMany({ where: { id: { in: creadas } } });
+    });
+
     await check("opciones del formulario: cuentas que escribieron o figuran asignadas, y vendedores por sucursal con ventas recientes", async () => {
       const customer = await prisma.customer.create({ data: { phone: "+5491100000001" } });
       const conv = await prisma.conversation.create({ data: { customerId: customer.id, status: "RESUELTA", source: "EMOZION" } });

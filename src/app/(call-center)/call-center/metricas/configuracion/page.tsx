@@ -2,8 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canConfigureCallCenterMetrics } from "@/lib/permissions";
-import { loadConfigVersions, configForDay } from "@/lib/call-center/metrics/config";
+import { callCenterMetricsConfigAccess } from "@/lib/permissions";
+import { loadConfigVersions, configForDay, versionPeriods, versionPeriodLabel } from "@/lib/call-center/metrics/config";
 import { loadConfigOptions } from "@/lib/call-center/metrics/config-service";
 import { arDayISO } from "@/lib/call-center/metrics/business-time";
 import ConfigForm from "./ConfigForm";
@@ -12,17 +12,21 @@ export const metadata = { title: "Call Center — Configuración de métricas" }
 export const dynamic = "force-dynamic";
 
 // Configuración de las métricas: horarios, meta, cuentas de Emozion y vendedores de SIAF.
-// Solo Dirección. Guardar crea una versión nueva vigente desde la fecha elegida; las
+// Dirección, Administrador y Supervisión. Guardar crea una versión nueva vigente desde la fecha elegida; las
 // anteriores no se editan ni se borran.
 export default async function CallCenterMetricsConfigPage() {
   const session = await auth();
-  if (!session?.user) redirect("/login");
-  if (!canConfigureCallCenterMetrics(session.user)) redirect("/sin-acceso");
+  const access = callCenterMetricsConfigAccess(session?.user);
+  if (access === 401) redirect("/login");
+  if (access === 403) redirect("/sin-acceso");
 
   const [{ versions, invalid }, options] = await Promise.all([loadConfigVersions(), loadConfigOptions(prisma)]);
   const today = arDayISO(new Date());
   // Punto de partida del formulario: la versión que rige hoy o, si todas son futuras, la más nueva.
-  const base = configForDay(versions, today) ?? versions[0] ?? null;
+  const current = configForDay(versions, today);
+  const base = current ?? versions[0] ?? null;
+  // Qué período rige cada versión; las que tienen otra de la misma fecha creada después no rigen ningún día.
+  const periods = versionPeriods(versions);
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
@@ -69,8 +73,17 @@ export default async function CallCenterMetricsConfigPage() {
                     <td className="px-3 py-2">{v.data.firstResponseGoalMinutes} min</td>
                     <td className="px-3 py-2">{v.data.accounts.length}</td>
                     <td className="px-3 py-2">{v.data.callCenterVendors.length}</td>
-                    <td className="px-3 py-2 text-xs text-gray-500">
-                      {base?.id === v.id ? (v.validFrom <= today ? "Vigente hoy" : "Próxima") : v.validFrom > today ? "Futura" : ""}
+                    <td className="whitespace-nowrap px-3 py-2 text-xs">
+                      {(() => {
+                        const period = periods.get(v.id);
+                        if (!period) return null;
+                        if (period.superseded) return <span className="text-gray-400">Reemplazada</span>;
+                        return (
+                          <span className={current?.id === v.id ? "font-medium text-emerald-700" : "text-gray-600"}>
+                            {versionPeriodLabel(period, today)}{current?.id === v.id ? " · vigente hoy" : ""}
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

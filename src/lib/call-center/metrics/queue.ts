@@ -22,6 +22,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { utcTimestampParam } from "./business-time";
+import type { AgeBucket, QueueGroupCounts } from "./queue-types";
 import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, isThanksCandidate } from "./patterns";
 
 const MS_HOUR = 3_600_000;
@@ -50,24 +51,7 @@ export interface QueueItem extends WaitingRow {
   waitHours: number;
 }
 
-export type AgeBucket = "lt24h" | "h24to72" | "d3to30" | "gt30d";
-
-export interface QueueGroupCounts {
-  total: number;
-  /** Nunca tuvieron respuesta de una persona. */
-  neverHuman: number;
-  /** Tuvieron respuesta y esperan la siguiente. */
-  awaitingNext: number;
-  /** Sin respuesta de una persona y con pedido completo en el bot. */
-  completedOrders: number;
-  /** Candidatos a agradecimiento (subconjunto de neverHuman; no se restan de total). */
-  thanksCandidates: number;
-  /** Sin salida del bot registrada. */
-  noBotExit: number;
-  byAge: Record<AgeBucket, number>;
-  /** Inicio de la espera más vieja del grupo. */
-  oldestWaitStart: Date | null;
-}
+export type { AgeBucket, QueueGroupCounts } from "./queue-types";
 
 export interface QueueSnapshot {
   generatedAt: Date;
