@@ -134,6 +134,22 @@ async function main() {
       assert.ok(!dump.includes("+549"));
       assert.ok(!/Muchas gracias|inventado\.pdf|relleno|Pedir medicamentos/i.test(dump));
     });
+    await check("detalle de casos: cada lista coincide con el número del informe y trae el estado actual, sin datos del cliente", async () => {
+      const { getAttentionCases } = await import("./attention-cases");
+      const { getAttentionPayload } = await import("./attention-service");
+      const now = at("2026-03-05T12:00");
+      const rep = await getAttentionPayload("2026-03-02", "2026-03-03", now);
+      const pending = await getAttentionCases("2026-03-02", "2026-03-03", "pending", now);
+      const sameDay = await getAttentionCases("2026-03-02", "2026-03-03", "unanswered_same_day", now);
+      assert.equal(pending.total, rep.total.pending.total);
+      assert.equal(sameDay.total, rep.total.unansweredSameDay.total);
+      assert.equal(pending.cases.length, pending.total);
+      assert.ok(pending.cases.every((c) => c.answeredAt === null && c.open !== null), "estado leído de la conversación");
+      assert.ok(pending.cases.every((c) => Object.values(ids).includes(c.conversationId)), "el id es el de la conversación, para el enlace");
+      const dump = JSON.stringify([pending, sameDay]);
+      assert.ok(!dump.includes("+549"));
+      assert.ok(!/Muchas gracias|inventado\.pdf|relleno|Pedir medicamentos/i.test(dump));
+    });
     await check("respuesta de la API: fechas como texto, sin ids de conversación ni datos del cliente, y caché por período", async () => {
       const { getAttentionPayload } = await import("./attention-service");
       const now = at("2026-03-05T12:00");
