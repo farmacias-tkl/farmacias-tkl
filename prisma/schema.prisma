@@ -1519,6 +1519,34 @@ model ConversationStateHistory {
 }
 
 // ============================================================================
+// CALL CENTER — Configuración de las métricas (/call-center/metricas)
+//
+// Una fila = una VERSIÓN de la configuración, vigente desde `validFrom`. Nunca se
+// edita ni se borra una fila: cada guardado crea una nueva. Para un día dado vale
+// la versión con mayor `validFrom` que no lo supere (a igual fecha, la más nueva).
+// Así un indicador de un día pasado usa el horario que regía ese día.
+//
+// `data` (validado en src/lib/call-center/metrics/config-schema.ts): horario
+// público y de operadores, meta de primera respuesta, cuentas de Emozion (número,
+// alias, activa, prestada, histórica) y vendedores de SIAF del Call Center
+// (sucursal + código). Son datos reales de la operación: viven SOLO en la base,
+// nunca en el repo ni en fixtures.
+//
+// createdByUserId es un snapshot de auditoría sin FK (como
+// UserPermission.grantedByUserId): no ata la tabla a User.
+// ============================================================================
+
+model CallCenterMetricsConfig {
+  id              String   @id @default(cuid())
+  validFrom       DateTime @db.Date
+  data            Json
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([validFrom(sort: Desc), createdAt(sort: Desc)])
+}
+
+// ============================================================================
 // CALL CENTER — Adjuntos / multimedia (B1: schema base storage-AGNÓSTICO)
 //
 // Attachment-first: la entidad base es el adjunto. La receta NO es una entidad
