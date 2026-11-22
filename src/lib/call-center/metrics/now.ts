@@ -81,6 +81,19 @@ export function toNowPayload(
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
   const { history, today, closed, wait, accounts } = extras;
   const now = snapshot.generatedAt;
+  // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
+  const items = waiting.map((it) => ({
+    conversationId: it.conversationId,
+    status: it.status,
+    owner: ownerOf(it.externalAssigneeId, accounts),
+    createdAt: it.createdAt.toISOString(),
+    waitStart: it.waitStart.toISOString(),
+    waitMinutes: Math.round(it.waitHours * 60),
+    ...(wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null }),
+    hasHumanResponse: it.hasHumanResponse,
+    botOrderComplete: it.botOrderComplete,
+    thanksCandidate: it.thanksCandidate,
+  }));
 
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
@@ -91,21 +104,11 @@ export function toNowPayload(
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
       completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
+      critical: wait ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
     },
     today,
-    list: waiting.slice(0, maxRows).map((it) => ({
-      conversationId: it.conversationId,
-      status: it.status,
-      owner: ownerOf(it.externalAssigneeId, accounts),
-      createdAt: it.createdAt.toISOString(),
-      waitStart: it.waitStart.toISOString(),
-      waitMinutes: Math.round(it.waitHours * 60),
-      ...(wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null }),
-      hasHumanResponse: it.hasHumanResponse,
-      botOrderComplete: it.botOrderComplete,
-      thanksCandidate: it.thanksCandidate,
-    })),
+    list: items.slice(0, maxRows),
     listTotal: waiting.length,
     stale: {
       total: stale.length,

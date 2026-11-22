@@ -96,6 +96,8 @@ export interface NowPayload {
     awaitingNext: number;
     /** Sin respuesta de una persona y con pedido completo en el bot. */
     completedOrders: number;
+    /** En demora crítica según el semáforo. null sin configuración vigente. */
+    critical: number | null;
     oldestWaitStart: string | null;
   };
   /** Creadas hoy (día de Buenos Aires) y, de esas, las que ya tienen respuesta de una persona. null si no se pudo calcular. */

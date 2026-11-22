@@ -37,7 +37,7 @@ test("clientes esperando: solo abiertas con hasta 72 horas de espera; las más v
     open("mas-vieja", { waitStart: hoursAgo(24 * 90) }),
     row("cerrada", { waitStart: hoursAgo(10) }),
   ]);
-  assert.deepEqual(p.waiting, { total: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, oldestWaitStart: hoursAgo(50).toISOString() });
+  assert.deepEqual(p.waiting, { total: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString() });
   assert.deepEqual(p.list.map((i) => i.conversationId), ["otra", "reciente"]);
   assert.equal(p.listTotal, 2);
   assert.equal(p.stale.total, 2);
@@ -56,7 +56,7 @@ test("los conteos completos de la cola no cambian: quedan en calidad de datos", 
 
 test("sin nadie esperando: cero y sin espera más larga", () => {
   const p = payload([row("cerrada")]);
-  assert.deepEqual(p.waiting, { total: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, oldestWaitStart: null });
+  assert.deepEqual(p.waiting, { total: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null });
   assert.deepEqual([p.list.length, p.stale.total, p.stale.oldestWaitStart], [0, 0, null]);
 });
 
@@ -66,6 +66,10 @@ test("tope de filas: quedan las esperas más viejas y se informa el total sin re
   assert.deepEqual(p.list.map((i) => i.conversationId), ["c9", "c8", "c7"]);
   assert.equal(p.listTotal, 10);
   assert.equal(p.waiting.total, 10);
+  // La demora crítica se cuenta sobre todos los que esperan, no solo sobre los de la lista.
+  const wait = { pub: () => [{ from: 0, to: 1440 }], ops: () => [{ from: 0, to: 1440 }], goalMinutes: 15, criticalMinutes: 60 };
+  const q = payload(rows.map((r) => ({ ...r, botExitAt: r.waitStart })), { ...NONE, wait }, 3);
+  assert.deepEqual([q.list.length, q.waiting.critical], [3, 9]);
 });
 
 test("cada caso: espera, hora de entrada, estado y marcas", () => {
@@ -100,6 +104,7 @@ test("semáforo: sale del horario y los umbrales vigentes; sin configuración qu
   const wait = { pub: () => [{ from: 0, to: 1440 }], ops: () => [{ from: 0, to: 1440 }], goalMinutes: 15, criticalMinutes: 60 };
   const p = payload([open("ok", { waitStart: hoursAgo(0.1), botExitAt: hoursAgo(0.1) }), open("tarde", { waitStart: hoursAgo(0.5), botExitAt: hoursAgo(0.5) }), open("critico", { waitStart: hoursAgo(3), botExitAt: hoursAgo(3) })], { ...NONE, wait });
   assert.deepEqual(p.list.map((i) => [i.conversationId, i.level, i.businessMinutes]), [["critico", "CRITICO", 180], ["tarde", "DEMORADO", 30], ["ok", "EN_PLAZO", 6]]);
+  assert.equal(p.waiting.critical, 1);
   assert.deepEqual(p.schedule, { inPublicHours: true, operatorShiftActive: false, goalMinutes: 15, criticalMinutes: 60 });
   const sin = payload([open("a")]);
   assert.deepEqual([sin.schedule, sin.list[0].level, sin.list[0].businessMinutes], [null, null, null]);
