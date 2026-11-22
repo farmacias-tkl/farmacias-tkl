@@ -63,6 +63,48 @@ export function canActOnCallCenter(
   return canViewCallCenter(u);
 }
 
+// ---------------------------------------------------------------------------
+// Métricas del Call Center (/call-center/metricas y /api/call-center/metrics)
+//
+// Gate PROPIO, por rol: entrar a la bandeja (canViewCallCenter, que también abre
+// el flag callCenterAccess) NO da acceso a las métricas. Un usuario que entra
+// solo por flag ve la bandeja y nada de esto.
+//
+// Tres funciones separadas aunque hoy dos coincidan: cada una se puede ajustar
+// sin tocar los lugares que la usan. Se aplican en el servidor: la página, cada
+// ruta de la API y el detalle de casos. El middleware solo deja pasar a quien
+// tiene canViewCallCenter; el corte fino va en cada handler.
+// ---------------------------------------------------------------------------
+
+/** Roles que ven las métricas del Call Center (atención, demoras, cuentas, detectados). */
+export const CALL_CENTER_METRICS_ROLES: readonly UserRole[] = ["OWNER", "ADMIN", "SUPERVISOR"];
+
+/**
+ * Roles que ven las ventas SIAF de los vendedores del Call Center dentro del módulo de
+ * métricas. Decisión de Dirección (21/11/2026): incluye a ADMIN y SUPERVISOR aunque no
+ * tengan executiveAccess. Vale SOLO para ese bloque: no cambia canViewExecutive ni abre
+ * el Dashboard Ejecutivo. Cada vista se registra en AccessLog.
+ */
+export const CALL_CENTER_SALES_ROLES: readonly UserRole[] = ["OWNER", "ADMIN", "SUPERVISOR"];
+
+/** Roles que cambian la configuración de las métricas (horarios, meta, cuentas, vendedores). */
+export const CALL_CENTER_METRICS_CONFIG_ROLES: readonly UserRole[] = ["OWNER"];
+
+/** ¿Puede ver las métricas del Call Center? */
+export function canViewCallCenterMetrics(u: { role: UserRole } | null | undefined): boolean {
+  return !!u && CALL_CENTER_METRICS_ROLES.includes(u.role);
+}
+
+/** ¿Puede ver el bloque de ventas SIAF del Call Center? No implica el Dashboard Ejecutivo. */
+export function canViewCallCenterSales(u: { role: UserRole } | null | undefined): boolean {
+  return !!u && CALL_CENTER_SALES_ROLES.includes(u.role);
+}
+
+/** ¿Puede cambiar la configuración de las métricas del Call Center? Solo Dirección. */
+export function canConfigureCallCenterMetrics(u: { role: UserRole } | null | undefined): boolean {
+  return !!u && CALL_CENTER_METRICS_CONFIG_ROLES.includes(u.role);
+}
+
 /** Ruta de entrada de la plataforma operativa: adonde lleva "Volver a la plataforma". */
 export const PLATFORM_HOME_ROUTE = "/dashboard";
 
