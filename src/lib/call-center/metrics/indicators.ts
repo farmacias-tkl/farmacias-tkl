@@ -535,11 +535,15 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     block: "DETECTADOS",
     label: "Posibles reclamos y pérdidas",
     definition:
-      "Conversaciones con mensajes del cliente que coinciden con los patrones de cada motivo: demora, pedido " +
-      "sin novedades, producto o cantidad incorrectos, stock, factura, precio o cobertura, pago o devolución, " +
-      "trato y otros.",
+      "Conversaciones creadas en el período con mensajes del cliente que coinciden con los patrones de cada " +
+      "grupo. Ventas: pérdida confirmada (otra farmacia, otro lado o cancela), compró por su cuenta sin decir " +
+      "dónde, y compró en TKL (menciona TKL o una sucursal, o ya retiró el pedido); las tres van por separado " +
+      "y solo la primera es una pérdida. Reclamos del Call Center: demora, pedido sin novedades, producto o " +
+      "cantidad incorrectos, stock, factura con queja, precio o cobertura, pago o devolución, trato y otros. " +
+      "Envíos: no llegó el pedido y problema con la entrega. Tienda online: pagó y no recibió la confirmación, " +
+      "y problemas con la página.",
     source: "ConversationMessage (texto del cliente)",
-    population: "ACTIVIDAD",
+    population: "ENTRADA",
     denominator: null,
     evidence: "DETECTADO",
     limitations: [
