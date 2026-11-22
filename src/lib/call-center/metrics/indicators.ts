@@ -157,6 +157,65 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     needsConfig: false,
   },
   {
+    key: "queue.waiting_now",
+    block: "AHORA",
+    label: "Clientes esperando respuesta",
+    definition:
+      "Abiertas esperando cuya espera empezó hace 72 horas o menos. Las abiertas con más espera se muestran " +
+      "aparte, para cerrar en Emozion, y no cuentan como clientes esperando.",
+    source: "Conversation.status, ConversationMessage",
+    population: "AHORA",
+    denominator: null,
+    evidence: "MEDIDO",
+    limitations: ["Incluye mensajes finales del cliente que no piden respuesta."],
+    needsConfig: false,
+  },
+  {
+    key: "queue.today",
+    block: "AHORA",
+    label: "Entraron hoy y respondidos hoy",
+    definition:
+      "Conversaciones creadas hoy, en hora de Buenos Aires, y de esas las que ya tienen al menos una " +
+      "respuesta pública de un operador. Es una sola población.",
+    source: "Conversation.createdAt, ConversationMessage",
+    population: "ENTRADA",
+    denominator: "Conversaciones creadas hoy",
+    evidence: "MEDIDO",
+    limitations: ["No cuenta las respuestas dadas hoy a conversaciones creadas otros días."],
+    needsConfig: false,
+  },
+  {
+    key: "queue.closed_needs_reply",
+    block: "AHORA",
+    label: "Cerradas sin responder",
+    definition:
+      "Cerradas cuyo último mensaje público es del cliente, de los últimos 7 días, en las que el último " +
+      "bloque del cliente tiene una consulta, un pedido o un adjunto. Quedan afuera los agradecimientos, " +
+      "los avisos de que ya compró, los que no son clientes y las consultas que el bot ya contestó.",
+    source: "Conversation.status, ConversationMessage (texto y adjuntos)",
+    population: "AHORA",
+    denominator: null,
+    evidence: "DETECTADO",
+    limitations: [
+      "Depende de palabras: no toma los reclamos escritos sin signo de pregunta.",
+      "Una imagen sola cuenta como receta o comprobante: puede ser otra cosa.",
+      "Depende de los textos del bot: si cambian, hay que actualizar los patrones.",
+    ],
+    needsConfig: false,
+  },
+  {
+    key: "queue.not_customers",
+    block: "DATOS",
+    label: "No son clientes",
+    definition: "Cerradas de los últimos 7 días cuyo último bloque es de un proveedor, un currículum o publicidad.",
+    source: "ConversationMessage (texto)",
+    population: "AHORA",
+    denominator: null,
+    evidence: "DETECTADO",
+    limitations: ["Depende de palabras: puede dejar afuera a un cliente o no reconocer a un proveedor."],
+    needsConfig: false,
+  },
+  {
     key: "freshness",
     block: "AHORA",
     label: "Última actualización",
