@@ -1702,7 +1702,8 @@ model WebhookEvent {
   externalMessageId      String?
   // payload MÍNIMO NORMALIZADO (lo arman los mappers en el receptor del webhook).
   // CONTIENE: ids externos, estado, fechas, labels crudas, contacto (teléfono completo +
-  // nombre visible), body del mensaje, autor/sender id y metadata de adjuntos sin URL.
+  // nombre visible), body del mensaje, autor/sender id y metadata de adjuntos sin URL;
+  // en los eventos de conversación, id del asignado y tipo de cierre (código + nombre).
   // EXCLUYE por diseño: custom_attributes, additional_attributes, data_url, thumb_url;
   // nunca el body crudo del webhook.
   // Se anula (JsonNull) al quedar PROCESSED; ERROR/RECEIVED lo conservan. Sin TTL

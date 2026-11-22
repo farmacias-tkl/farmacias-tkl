@@ -56,6 +56,7 @@ export async function upsertConversationFromEmozion(
         firstResponseAt: n.firstResponseAt,
         closedAt: n.closedAt,
         externalLabels: n.externalLabels,
+        externalAssigneeId: n.externalAssigneeId ?? null,
         ...(n.externalCreatedAt ? { createdAt: n.externalCreatedAt } : {}),
       },
     });
@@ -66,6 +67,7 @@ export async function upsertConversationFromEmozion(
         toStatus: n.status,
         changedByUserId: null,
         note: "Importado de Emozion (webhook)",
+        externalAssigneeId: n.externalAssigneeId ?? null,
       },
     });
     return { conversationId: conv.id, created: true, warnings };
@@ -209,10 +211,25 @@ export async function applyStatusChangedFromEmozion(
     warnings.push(`transición ingerida fuera de whitelist: ${from}→${n.status} (se registra igual; Emozion es la realidad)`);
   }
 
+  // Asignado y tipo de cierre: a diferencia del resto (merge conservador), acá el evento
+  // MANDA, porque describen el estado actual y no un dato que se completa una vez:
+  //  - externalAssigneeId: el del evento, también null (quedó sin asignado).
+  //  - tipo de cierre: solo vale mientras está RESUELTA. Al resolver se guarda el del evento
+  //    (null si Emozion no lo mandó, para no arrastrar el de un cierre anterior); en cualquier
+  //    otro estado vuelve a null. Cada cierre queda en su fila de StateHistory.
+  // `?? null`: los eventos guardados antes de estos campos no los traen.
+  const externalAssigneeId = n.externalAssigneeId ?? null;
+  const resolved = n.status === "RESUELTA";
+  const closureTypeId = resolved ? n.closureTypeId ?? null : null;
+  const closureTypeName = resolved ? n.closureTypeName ?? null : null;
+
   await tx.conversation.update({
     where: { id: conv.id },
     data: {
       status: n.status,
+      externalAssigneeId,
+      closureTypeId,
+      closureTypeName,
       ...(n.closedAt && !conv.closedAt ? { closedAt: n.closedAt } : {}),
     },
   });
@@ -223,6 +240,9 @@ export async function applyStatusChangedFromEmozion(
       toStatus: n.status,
       changedByUserId: null,
       note: "Cambio de estado de Emozion (webhook)",
+      externalAssigneeId,
+      closureTypeId,
+      closureTypeName,
     },
   });
   return { outcome: "processed", conversationId: conv.id, warnings };
