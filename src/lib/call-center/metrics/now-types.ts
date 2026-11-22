@@ -12,6 +12,9 @@ import type { QueueGroupCounts } from "./queue-types";
 /** Segundos de caché del bloque en el servidor y de refresco en la pantalla. */
 export const NOW_CACHE_SECONDS = 60;
 
+/** Semáforo de espera, en minutos hábiles del horario público. */
+export type WaitLevel = "EN_PLAZO" | "DEMORADO" | "CRITICO" | "FUERA_HORARIO";
+
 export interface NowListItem {
   conversationId: string;
   /** Estado de la conversación: PENDIENTE, SIN_ASIGNAR o ASIGNADA. */
@@ -21,6 +24,10 @@ export interface NowListItem {
   /** ISO. Desde cuándo espera: primer mensaje del cliente del bloque sin responder. */
   waitStart: string;
   waitMinutes: number;
+  /** null si no hay configuración vigente: sin horario no hay semáforo. */
+  level: WaitLevel | null;
+  /** Minutos hábiles de espera; null sin configuración. */
+  businessMinutes: number | null;
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
   thanksCandidate: boolean;
@@ -61,6 +68,14 @@ export interface NowPayload {
   generatedAt: string;
   /** Horas de espera hasta las que una abierta cuenta como cliente esperando. */
   windowHours: number;
+  /** Horario y umbrales del semáforo al momento del cálculo. null sin configuración vigente. */
+  schedule: {
+    inPublicHours: boolean;
+    /** Fuera del horario público pero dentro del de operadores. Ese turno no tiene objetivo. */
+    operatorShiftActive: boolean;
+    goalMinutes: number;
+    criticalMinutes: number;
+  } | null;
   /** Abiertas con hasta `windowHours` de espera. */
   waiting: {
     total: number;

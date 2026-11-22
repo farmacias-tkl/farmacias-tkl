@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
-import type { ClosedReason, NowListItem, NowPayload } from "@/lib/call-center/metrics/now-types";
+import type { ClosedReason, NowListItem, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
 import { useNowData } from "./useNowData";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -25,6 +25,14 @@ function whenLabel(iso: string, nowMs: number): string {
 }
 
 const STATUS_LABELS: Record<string, string> = { PENDIENTE: "Pendiente", SIN_ASIGNAR: "Sin asignar", ASIGNADA: "Asignada" };
+
+/** Semáforo: fondo suave y la etiqueta siempre en texto. Fuera del horario público va sin color. */
+const LEVELS: Record<WaitLevel, { label: string; chip: string; dot: string }> = {
+  EN_PLAZO: { label: "En plazo", chip: "border-green-200 bg-green-50 text-green-900", dot: "bg-green-600" },
+  DEMORADO: { label: "Demorado", chip: "border-orange-200 bg-orange-50 text-orange-900", dot: "bg-orange-500" },
+  CRITICO: { label: "Crítico", chip: "border-red-200 bg-red-50 text-red-900", dot: "bg-red-600" },
+  FUERA_HORARIO: { label: "Fuera del horario público", chip: "border-gray-300 bg-white text-gray-800", dot: "border border-gray-400 bg-white" },
+};
 
 const REASON_LABELS: Record<ClosedReason, string> = {
   QUESTION: "Hizo una consulta",
@@ -101,7 +109,7 @@ export default function NowPanel() {
         <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No hay nadie esperando una respuesta.</p>
       ) : (
         <ul className="mt-2 grid gap-2 lg:grid-cols-2">
-          {d.list.map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} />)}
+          {d.list.map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} schedule={d.schedule} />)}
         </ul>
       )}
 
@@ -123,11 +131,37 @@ function ConversationLink({ id }: { id: string }) {
   );
 }
 
-function CaseCard({ it, nowMs }: { it: NowListItem; nowMs: number }) {
+/** Etiqueta del semáforo con el tiempo destacado. Sin configuración no hay semáforo: solo la espera real. */
+function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["schedule"] }) {
+  if (it.level === null || it.businessMinutes === null) {
+    return <p className="text-lg font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>;
+  }
+  const l = LEVELS[it.level];
+  const paused = !schedule?.inPublicHours;
+  return (
+    <div>
+      <p className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${l.chip}`}>
+        <span aria-hidden className={`h-2 w-2 rounded-full ${l.dot}`} />
+        {l.label}
+        {it.level === "FUERA_HORARIO" && schedule?.operatorShiftActive ? " · turno de operadores activo" : ""}
+      </p>
+      <p className="mt-1 text-lg font-semibold tabular-nums text-gray-900">
+        {it.level === "FUERA_HORARIO" ? formatWait(it.waitMinutes) : `${formatWait(it.businessMinutes)} hábiles`}
+      </p>
+      <p className="text-xs text-gray-600">
+        {it.level === "FUERA_HORARIO"
+          ? `Espera real del cliente. Reloj hábil pausado en ${formatWait(it.businessMinutes)}.`
+          : `Espera real: ${formatWait(it.waitMinutes)}${paused ? " · reloj hábil pausado" : ""}`}
+      </p>
+    </div>
+  );
+}
+
+function CaseCard({ it, nowMs, schedule }: { it: NowListItem; nowMs: number; schedule: NowPayload["schedule"] }) {
   return (
     <li className="rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-lg font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>
+        <WaitBadge it={it} schedule={schedule} />
         <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{STATUS_LABELS[it.status] ?? it.status}</span>
       </div>
       <p className="mt-0.5 text-xs text-gray-500">Entró {whenLabel(it.createdAt, nowMs)}</p>

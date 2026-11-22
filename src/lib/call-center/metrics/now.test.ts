@@ -25,7 +25,7 @@ const row = (id: string, over: Partial<WaitingRow> = {}): WaitingRow => ({
 });
 const open = (id: string, over: Partial<WaitingRow> = {}) => row(id, { open: true, status: "SIN_ASIGNAR", ...over });
 const FRESH = { lastWebhookAt: hoursAgo(0.01), lastMessageAt: hoursAgo(0.05) };
-const NONE: NowExtras = { history: null, today: null, closed: null };
+const NONE: NowExtras = { history: null, today: null, closed: null, wait: null };
 const payload = (rows: WaitingRow[], extras: NowExtras = NONE, maxRows?: number) =>
   toNowPayload(buildQueueSnapshot(rows, NOW, SINCE), extras, FRESH, 72, maxRows);
 
@@ -102,7 +102,7 @@ test("hoy, cerradas sin responder e histórico pasan tal cual; los que no son cl
     blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, ...over,
   });
   const closed = buildClosedUnanswered([block("q", { blockHasQuestion: true }), block("prov", { blockNotCustomer: true, blockHasAttachment: true })]);
-  const p = payload([], { today: { entered: 12, answered: 9 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
+  const p = payload([], { wait: null, today: { entered: 12, answered: 9 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
   assert.deepEqual(p.today, { entered: 12, answered: 9 });
   assert.deepEqual(p.closedUnanswered, { days: 7, total: 1, question: 1, order: 0, attachment: 0, items: [{ conversationId: "q", lastCustomerAt: hoursAgo(3).toISOString(), reason: "QUESTION" }] });
   assert.deepEqual(p.quality.closedBefore, { total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 });

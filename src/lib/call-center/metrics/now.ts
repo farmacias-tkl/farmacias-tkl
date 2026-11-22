@@ -17,6 +17,10 @@ import {
 import { CLOSED_UNANSWERED_DAYS, QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered } from "./closed-unanswered";
+import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
+import { criticalWaitMinutesOf } from "./config-schema";
+import { operatorHours, publicHours } from "./schedule";
+import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
 import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowPayload } from "./now-types";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
@@ -33,6 +37,20 @@ export interface NowExtras {
   history: ClosedUnansweredHistory | null;
   today: { entered: number; answered: number } | null;
   closed: ClosedUnansweredReport | null;
+  /** Horario y umbrales del semáforo. null si no hay configuración vigente hoy. */
+  wait: WaitContext | null;
+}
+
+/** Horario y umbrales con la configuración vigente al momento `now`. PURO. */
+export function waitContext(versions: readonly ConfigVersion[], now: Date): WaitContext | null {
+  const current = configForDay(versions, arDayISO(now));
+  if (!current) return null;
+  return {
+    pub: publicHours(versions),
+    ops: operatorHours(versions),
+    goalMinutes: current.data.firstResponseGoalMinutes,
+    criticalMinutes: criticalWaitMinutesOf(current.data),
+  };
 }
 
 /**
@@ -51,11 +69,13 @@ export function toNowPayload(
   const waiting = open.filter((it) => it.waitHours <= windowHours);
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
-  const { history, today, closed } = extras;
+  const { history, today, closed, wait } = extras;
+  const now = snapshot.generatedAt;
 
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
     windowHours,
+    schedule: wait ? { ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes } : null,
     waiting: {
       total: waiting.length,
       neverHuman: neverHuman.length,
@@ -70,6 +90,7 @@ export function toNowPayload(
       createdAt: it.createdAt.toISOString(),
       waitStart: it.waitStart.toISOString(),
       waitMinutes: Math.round(it.waitHours * 60),
+      ...(wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null }),
       hasHumanResponse: it.hasHumanResponse,
       botOrderComplete: it.botOrderComplete,
       thanksCandidate: it.thanksCandidate,
@@ -137,7 +158,10 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness, today] = await Promise.all([getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null)]);
+  const [snapshot, freshness, today, wait] = await Promise.all([
+    getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null),
+    loadConfigVersions().then(({ versions }) => waitContext(versions, now)).catch(() => null),
+  ]);
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -155,7 +179,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

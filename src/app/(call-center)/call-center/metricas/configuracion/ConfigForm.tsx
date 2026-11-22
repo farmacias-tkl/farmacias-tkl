@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CONFIG_SCHEMA_VERSION, ISO_WEEKDAYS, parseConfigData,
+  CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, ISO_WEEKDAYS, criticalWaitMinutesOf, parseConfigData,
   type CallCenterMetricsConfigData, type ConfigAccount, type IsoWeekday,
 } from "@/lib/call-center/metrics/config-schema";
 import {
@@ -35,6 +35,7 @@ export default function ConfigForm({
   const [publicText, setPublicText] = useState<ScheduleText>(base ? scheduleToText(base.data.publicHours) : emptyScheduleText());
   const [operatorText, setOperatorText] = useState<ScheduleText>(base ? scheduleToText(base.data.operatorHours) : emptyScheduleText());
   const [goal, setGoal] = useState(String(base?.data.firstResponseGoalMinutes ?? ""));
+  const [critical, setCritical] = useState(String(base ? criticalWaitMinutesOf(base.data) : DEFAULT_CRITICAL_WAIT_MINUTES));
   const [accounts, setAccounts] = useState<ConfigAccount[]>(() => initialAccounts(base?.data ?? null, options.accounts));
   const [newAccount, setNewAccount] = useState("");
   const [vendors, setVendors] = useState<Set<string>>(
@@ -84,6 +85,8 @@ export default function ConfigForm({
     if (!ops.ok) for (const [d, m] of Object.entries(ops.errors)) problems.push(`Horario de operadores, ${WEEKDAY_LABELS[d as IsoWeekday]}: ${m}`);
     const goalNumber = Number(goal);
     if (!/^\d+$/.test(goal.trim()) || goalNumber < 1) problems.push("La meta tiene que ser un número entero de minutos, mayor que cero.");
+    const criticalNumber = Number(critical);
+    if (!/^\d+$/.test(critical.trim()) || criticalNumber <= goalNumber) problems.push("La demora crítica tiene que ser un número entero de minutos, mayor que la meta.");
     if (problems.length > 0 || !pub.ok || !ops.ok) { setErrors(problems); return; }
 
     const data: CallCenterMetricsConfigData = {
@@ -91,6 +94,7 @@ export default function ConfigForm({
       publicHours: pub.schedule,
       operatorHours: ops.schedule,
       firstResponseGoalMinutes: goalNumber,
+      criticalWaitMinutes: criticalNumber,
       // system se guarda siempre explícito, aunque la versión base no lo tuviera.
       accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
       callCenterVendors: [...vendors].map((k) => {
@@ -175,6 +179,14 @@ export default function ConfigForm({
         <p className="text-xs text-gray-500">Minutos hábiles, contados dentro del horario público, desde que la conversación sale del bot.</p>
         <div className="mt-2 flex items-center gap-2">
           <input id="goal" inputMode="numeric" value={goal} onChange={(e) => setGoal(e.target.value)} className={`w-24 ${input}`} />
+          <span className="text-sm text-gray-600">minutos</span>
+        </div>
+        <label htmlFor="critical" className="mt-4 block text-sm font-semibold text-gray-800">Demora crítica</label>
+        <p className="text-xs text-gray-500">
+          Minutos hábiles de espera desde los que un caso se marca como crítico en &quot;Ahora&quot;. Entre la meta y este valor se marca como demorado.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <input id="critical" inputMode="numeric" value={critical} onChange={(e) => setCritical(e.target.value)} className={`w-24 ${input}`} />
           <span className="text-sm text-gray-600">minutos</span>
         </div>
       </section>

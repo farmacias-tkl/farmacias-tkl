@@ -104,11 +104,21 @@ export const callCenterMetricsConfigSchema = z
     operatorHours: weekScheduleSchema,
     /** Meta de primera respuesta humana, en minutos hábiles del horario público. */
     firstResponseGoalMinutes: z.number().int().min(1).max(1440),
+    /**
+     * Minutos hábiles de espera a partir de los cuales un caso es "crítico" en el semáforo de
+     * "Ahora" (entre la meta y este valor es "demorado"). OPCIONAL: las versiones guardadas
+     * antes de este campo no lo traen y siguen siendo válidas; ausente vale
+     * DEFAULT_CRITICAL_WAIT_MINUTES (criticalWaitMinutesOf).
+     */
+    criticalWaitMinutes: z.number().int().min(1).max(1440).optional(),
     accounts: z.array(accountSchema).max(100),
     callCenterVendors: z.array(vendorSchema).max(500),
   })
   .strict()
   .superRefine((cfg, ctx) => {
+    if (cfg.criticalWaitMinutes !== undefined && cfg.criticalWaitMinutes <= cfg.firstResponseGoalMinutes) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["criticalWaitMinutes"], message: "La demora crítica tiene que ser mayor que la meta" });
+    }
     const ids = new Set<string>();
     for (const a of cfg.accounts) {
       if (ids.has(a.externalId)) {
@@ -127,6 +137,17 @@ export const callCenterMetricsConfigSchema = z
   });
 
 export type CallCenterMetricsConfigData = z.infer<typeof callCenterMetricsConfigSchema>;
+
+/** Demora crítica cuando la versión no la trae. */
+export const DEFAULT_CRITICAL_WAIT_MINUTES = 60;
+
+/**
+ * Minutos hábiles desde los que un caso es crítico. Sin el campo vale el valor por defecto;
+ * nunca queda por debajo de la meta (una versión vieja con una meta mayor a 60 minutos).
+ */
+export function criticalWaitMinutesOf(d: Pick<CallCenterMetricsConfigData, "firstResponseGoalMinutes" | "criticalWaitMinutes">): number {
+  return Math.max(d.criticalWaitMinutes ?? DEFAULT_CRITICAL_WAIT_MINUTES, d.firstResponseGoalMinutes + 1);
+}
 
 export type ParseConfigResult =
   | { ok: true; data: CallCenterMetricsConfigData }
