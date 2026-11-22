@@ -49,11 +49,11 @@ export default function OperatorsPanel({ today }: { today: string }) {
   return (
     <section className="mt-4" aria-label="Operadores">
       <PeriodForm today={today} period={period} onChange={setPeriod} />
-      <p className="mt-2 text-xs text-gray-500">
+      <p className="mt-2 text-xs text-gray-600">
         Se muestra por cuenta de Emozion. Una cuenta no es una persona: puede estar prestada o compartida. Hasta {PERIOD_MAX_DAYS} días.
       </p>
 
-      {state.status === "loading" && <p className="mt-6 text-sm text-gray-500">Cargando…</p>}
+      {state.status === "loading" && <p className="mt-6 text-sm text-gray-600">Cargando…</p>}
       {state.status === "error" && (
         <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
           {state.message}{" "}
@@ -69,7 +69,7 @@ function Report({ data }: { data: AccountsPayload }) {
   const t = data.team;
   return (
     <>
-      <p className="mt-4 text-xs text-gray-500">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
+      <p className="mt-4 text-xs text-gray-600">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
       {!data.hasConfig && (
         <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           Todavía no hay configuración cargada: las cuentas se muestran por número y no se puede separar la actividad por horario.
@@ -90,17 +90,17 @@ function Report({ data }: { data: AccountsPayload }) {
         <Sub title="Primera respuesta" badge={POPULATION_LABELS.ENTRADA}>
           <DistLines d={t.firstResponses} countLabel="Respondidas" />
         </Sub>
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-gray-600">
           Cada conversación cuenta una sola vez acá, aunque hayan participado varias cuentas. Los tiempos son de reloj y solo entre los respondidos.
         </p>
         <Evidence />
       </div>
 
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
-        Por cuenta<span className="ml-2 text-xs font-normal text-gray-500">ordenadas por número, no por desempeño</span>
+        Por cuenta<span className="ml-2 text-xs font-normal text-gray-600">ordenadas por número, no por desempeño</span>
       </h2>
       {data.accounts.length === 0 ? (
-        <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">Ninguna cuenta escribió en el período.</p>
+        <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">Ninguna cuenta escribió en el período.</p>
       ) : (
         <ul className="mt-2 grid gap-3 lg:grid-cols-2">
           {data.accounts.map((a) => <AccountCard key={a.account ?? "sin-cuenta"} a={a} />)}
@@ -110,7 +110,7 @@ function Report({ data }: { data: AccountsPayload }) {
       {data.systemAccounts.length > 0 && (
         <>
           <h2 className="mt-6 text-sm font-semibold text-gray-800">
-            Cuentas del sistema<span className="ml-2 text-xs font-normal text-gray-500">no son operadores y no suman en el equipo</span>
+            Cuentas del sistema<span className="ml-2 text-xs font-normal text-gray-600">no son operadores y no suman en el equipo</span>
           </h2>
           <ul className="mt-2 grid gap-3 lg:grid-cols-2">
             {data.systemAccounts.map((a) => <AccountCard key={a.account ?? "sin-cuenta"} a={a} />)}
@@ -127,7 +127,7 @@ function Report({ data }: { data: AccountsPayload }) {
         </div>
       )}
 
-      <p className="mt-4 text-xs text-gray-500">
+      <p className="mt-4 text-xs text-gray-600">
         La demora de la primera respuesta es de la cola, no de la cuenta: no se sabe cuánto esperó el caso antes de que alguien lo viera.
         No sirve para comparar cuentas. Las conversaciones resueltas creadas más de {data.lookbackDays} días antes del período no se recorren.
       </p>
@@ -209,5 +209,5 @@ function Line({ label, value, strong }: { label: string; value: string; strong?:
 }
 
 function Evidence() {
-  return <p className="mt-2 text-[11px] text-gray-400">{EVIDENCE_LABELS.MEDIDO}</p>;
+  return <p className="mt-2 text-[11px] text-gray-500">{EVIDENCE_LABELS.MEDIDO}</p>;
 }

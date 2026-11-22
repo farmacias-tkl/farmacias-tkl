@@ -67,6 +67,8 @@ async function main() {
     // Creada hoy (Buenos Aires) con respuesta; "pregunta" y demás son de ayer o antes.
     ids.hoy = await conv(prisma, "hoy", { status: "ASIGNADA", createdH: 2, msgs: [{ author: C, h: 2, body: "Hola" }, { author: O, h: 1 }] });
     ids.hoySin = await conv(prisma, "hoy-sin", { status: "SIN_ASIGNAR", createdH: 14, msgs: [{ author: C, h: 14, body: "Hola" }, { author: O, h: 13, isPrivate: true }] });
+    // Creada ayer y respondida hoy: no entró hoy, pero se atendió hoy.
+    ids.atrasada = await conv(prisma, "atrasada", { status: "ASIGNADA", createdH: 40, msgs: [{ author: C, h: 40, body: "Hola" }, { author: O, h: 3 }] });
     // 23:30 de ayer en Buenos Aires: no es de hoy.
     ids.anoche = await conv(prisma, "anoche", { status: "SIN_ASIGNAR", createdH: 15.5, msgs: [{ author: C, h: 15.5, body: "Hola" }] });
 
@@ -105,13 +107,27 @@ async function main() {
       const r = buildClosedUnanswered(rows);
       assert.deepEqual([r.total, r.question, r.order, r.attachment, r.notCustomers], [6, 3, 2, 1, 1]);
     });
+    await check("último mensaje del cliente: agradecimiento o cierre, sí; una pregunta, no", () => {
+      const by = new Map(rows.map((r) => [r.conversationId, r]));
+      assert.deepEqual([by.get(ids.gracias)!.lastMessageIsClosing, by.get(ids.pregunta)!.lastMessageIsClosing, by.get(ids.preguntaVieja)!.lastMessageIsClosing], [true, false, true]);
+    });
+    await check("abiertas: mismas marcas; un cierre parece resuelta, una pregunta o un cierre con foto siguen pendientes", async () => {
+      const { loadOpenBlockRows, isProbablyClosed } = await import("./closed-unanswered");
+      const abiertaGracias = await conv(prisma, "abierta-gracias", { status: "ASIGNADA", createdH: 200, msgs: [{ author: C, h: 200, body: "Hola" }, { author: O, h: 199 }, { author: C, h: 198, body: "Dale, gracias!" }] });
+      const abiertaFoto = await conv(prisma, "abierta-foto", { status: "ASIGNADA", createdH: 200, msgs: [{ author: C, h: 200, body: "Hola" }, { author: O, h: 199 }, { author: C, h: 198.5, body: null, mediaType: "image" }, { author: C, h: 198, body: "Gracias" }] });
+      const open = new Map((await loadOpenBlockRows()).map((r) => [r.conversationId, r]));
+      assert.equal(open.has(ids.gracias), false, "las cerradas no entran");
+      assert.equal(open.has(ids.hoy), false, "respondida al final: no espera");
+      assert.deepEqual([isProbablyClosed(open.get(abiertaGracias)!), isProbablyClosed(open.get(abiertaFoto)!), isProbablyClosed(open.get(ids.abierta)!)], [true, false, false]);
+    });
     await check("las filas no traen teléfono ni texto", () => {
       const dump = JSON.stringify(rows);
       assert.ok(!dump.includes("+549"));
       assert.ok(!/inventad|stock|gracias/i.test(dump));
     });
     await check("hoy: creadas desde las 00:00 de Buenos Aires y, de esas, las respondidas por una persona", async () => {
-      assert.deepEqual(await loadToday(NOW), { entered: 2, answered: 1 });
+      // Atendidas hoy: "hoy" más las de ayer que recibieron una respuesta pública hoy.
+      assert.deepEqual(await loadToday(NOW), { entered: 2, answered: 1, attended: 2 });
     });
   });
 

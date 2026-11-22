@@ -37,7 +37,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Link href="/call-center" className="text-xs text-gray-500 hover:text-gray-800">← Volver a conversaciones</Link>
+        <Link href="/call-center" className="text-xs text-gray-600 hover:text-gray-800">← Volver a conversaciones</Link>
         {canConfigureCallCenterMetrics(session.user) && (
           <Link href="/call-center/metricas/configuracion" className="text-xs font-medium text-[#1E2D5A] hover:underline">Configuración</Link>
         )}
@@ -52,7 +52,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
               key={b.key}
               href={b.key === "ahora" ? "/call-center/metricas" : `/call-center/metricas?bloque=${b.key}`}
               aria-current={active ? "page" : undefined}
-              className={`-mb-px inline-flex h-11 items-center border-b-2 px-3 text-sm font-medium ${active ? "border-[#1E2D5A] text-[#1E2D5A]" : "border-transparent text-gray-500 hover:text-gray-800"}`}
+              className={`-mb-px inline-flex h-11 items-center border-b-2 px-3 text-sm font-medium ${active ? "border-[#1E2D5A] text-[#1E2D5A]" : "border-transparent text-gray-600 hover:text-gray-800"}`}
             >
               {b.label}
             </Link>

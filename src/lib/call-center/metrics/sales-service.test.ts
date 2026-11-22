@@ -23,8 +23,8 @@ const versions: ConfigVersion[] = [{
 const sale = (day: string, gross: number, receipts: number, code = "V01"): VendorSalesRow =>
   ({ day, branchId: "b1", branchName: "Sucursal Inventada", code, name: `Vendedor Inventado ${code}`, gross, receipts, discounts: 0, units: receipts });
 const entry = (created: string, orderFlow: boolean, meducar = false) => ({ createdAt: at(created), orderFlow, firstCustomerMessageIsMeducar: meducar });
-const build = (rows: VendorSalesRow[], entries: ReturnType<typeof entry>[]) =>
-  toSalesPayload(buildSalesReport(rows, { from: "2026-03-09", to: "2026-03-11", versions }), ordersByDay(entries), { now: NOW, hasConfig: true });
+const build = (rows: VendorSalesRow[], entries: ReturnType<typeof entry>[], siafLastDay: string | null = "2026-03-11", to = "2026-03-11") =>
+  toSalesPayload(buildSalesReport(rows, { from: "2026-03-09", to, versions }), ordersByDay(entries), { now: NOW, hasConfig: true, siafLastDay });
 
 test("pedidos por día: pedido en el bot y receta de Meducar; lo demás no; el día es el de Buenos Aires", () => {
   const m = ordersByDay([entry("2026-03-09T10:00", true), entry("2026-03-09T23:59", false, true), entry("2026-03-09T11:00", false), entry("2026-03-10T00:00", true)]);
@@ -36,9 +36,32 @@ test("comprobantes cada 100 pedidos por día; un día sin pedidos queda sin dato
   assert.deepEqual(p.byDay.map((d) => [d.day, d.receipts, d.orders, d.receiptsPer100Orders]), [["2026-03-09", 5, 2, 250], ["2026-03-10", 2, 0, null]]);
 });
 
-test("total: los pedidos son solo los de los días con comprobantes del Call Center", () => {
+test("total: los pedidos son solo los de los días con ventas cargadas", () => {
   const p = build([sale("2026-03-09", 1000, 5)], [entry("2026-03-09T10:00", true), entry("2026-03-11T10:00", true)]);
-  assert.deepEqual([p.orders, p.total.receipts, p.receiptsPer100Orders], [1, 5, 500]);
+  assert.deepEqual([p.orders, p.relationDays, p.total.receipts, p.receiptsPer100Orders], [1, 1, 5, 500]);
+  // Un día cargado en el que el Call Center no vendió sí cuenta: sus pedidos entran con cero comprobantes.
+  const q = build([sale("2026-03-09", 1000, 5), sale("2026-03-10", 80, 2, "V09")], [entry("2026-03-09T10:00", true), entry("2026-03-10T10:00", true)]);
+  assert.deepEqual([q.orders, q.relationDays, q.receiptsPer100Orders], [2, 2, 250]);
+});
+
+test("días sin datos todavía: los posteriores al último cargado, hasta hoy; no valen cero ni entran en la relación", () => {
+  // Hoy es 12/03; SIAF está cargado hasta el 11/03 (ayer): normal, sin aviso de atraso.
+  const p = build([sale("2026-03-10", 100, 1), sale("2026-03-11", 100, 1)], [entry("2026-03-12T09:00", true)], "2026-03-11", "2026-03-14");
+  assert.deepEqual([p.siafLastDay, p.siafDelayed, p.daysNotLoaded], ["2026-03-11", false, ["2026-03-12"]]);
+  assert.deepEqual([p.orders, p.byDay.some((d) => d.day === "2026-03-12")], [0, false]);
+});
+
+test("atraso: el último día cargado es anterior a ayer", () => {
+  const p = build([sale("2026-03-09", 100, 1)], [], "2026-03-09");
+  assert.deepEqual([p.siafDelayed, p.daysNotLoaded], [true, ["2026-03-10", "2026-03-11"]]);
+  // Un período viejo, ya cargado entero, no lista días sin datos aunque haya atraso hoy.
+  const viejo = toSalesPayload(buildSalesReport([], { from: "2026-03-01", to: "2026-03-05", versions }), new Map(), { now: NOW, hasConfig: true, siafLastDay: "2026-03-09" });
+  assert.deepEqual([viejo.siafDelayed, viejo.daysNotLoaded], [true, []]);
+});
+
+test("sin ningún dato de SIAF: no hay último día, no es atraso, y todo el período queda sin datos todavía", () => {
+  const p = build([], [], null);
+  assert.deepEqual([p.siafLastDay, p.siafDelayed, p.daysNotLoaded], [null, false, ["2026-03-09", "2026-03-10", "2026-03-11"]]);
 });
 
 test("notas de crédito: se cuenta el vendedor y día con importe negativo, solo si es del Call Center", () => {

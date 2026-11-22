@@ -16,8 +16,13 @@ import {
 } from "./queue";
 import { CLOSED_UNANSWERED_DAYS, QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
-import { getClosedUnanswered } from "./closed-unanswered";
-import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowPayload } from "./now-types";
+import { getClosedUnanswered, isProbablyClosed, loadOpenBlockRows, type ClosedBlockRow } from "./closed-unanswered";
+import { loadDailyActivityRows } from "./activity";
+import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
+import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
+import { operatorHours, publicHours } from "./schedule";
+import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
+import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload } from "./now-types";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -31,8 +36,34 @@ const group = (g: QueueGroupCounts): NowGroup => ({ ...g, oldestWaitStart: g.old
 /** Lo que se calcula aparte de la cola. null = no se pudo calcular. */
 export interface NowExtras {
   history: ClosedUnansweredHistory | null;
-  today: { entered: number; answered: number } | null;
+  today: { entered: number; answered: number; attended: number } | null;
   closed: ClosedUnansweredReport | null;
+  /** Horario y umbrales del semáforo. null si no hay configuración vigente hoy. */
+  wait: WaitContext | null;
+  /** Cuentas de la configuración vigente hoy; vacío si no hay. */
+  accounts: readonly ConfigAccount[];
+  /** Marcas del último bloque de las abiertas, para clasificar las antiguas. null si no se pudieron leer. */
+  openBlocks: readonly ClosedBlockRow[] | null;
+}
+
+/** Responsable de un caso. PURO. */
+export function ownerOf(assignee: string | null, accounts: readonly ConfigAccount[]): NowOwner {
+  const cfg = assignee ? accounts.find((a) => a.externalId === assignee) : undefined;
+  if (!cfg) return { kind: "UNKNOWN" };
+  if (isSystemAccount(cfg)) return { kind: "SYSTEM" };
+  return { kind: "ACCOUNT", label: cfg.alias ?? `cuenta ${cfg.externalId}` };
+}
+
+/** Horario y umbrales con la configuración vigente al momento `now`. PURO. */
+export function waitContext(versions: readonly ConfigVersion[], now: Date): WaitContext | null {
+  const current = configForDay(versions, arDayISO(now));
+  if (!current) return null;
+  return {
+    pub: publicHours(versions),
+    ops: operatorHours(versions),
+    goalMinutes: current.data.firstResponseGoalMinutes,
+    criticalMinutes: criticalWaitMinutesOf(current.data),
+  };
 }
 
 /**
@@ -51,34 +82,51 @@ export function toNowPayload(
   const waiting = open.filter((it) => it.waitHours <= windowHours);
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
-  const { history, today, closed } = extras;
+  const { history, today, closed, wait, accounts, openBlocks } = extras;
+  const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
+  // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
+  const staleItems = stale.map((it) => {
+    const b = blockById?.get(it.conversationId);
+    const kind = !blockById ? null : b && isProbablyClosed(b) ? ("PROBABLE_CLOSE" as const) : ("PENDING" as const);
+    return { conversationId: it.conversationId, waitStart: it.waitStart.toISOString(), kind };
+  });
+  const probableClose = blockById ? staleItems.filter((i) => i.kind === "PROBABLE_CLOSE").length : null;
+  const now = snapshot.generatedAt;
+  // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
+  const items = waiting.map((it) => ({
+    conversationId: it.conversationId,
+    status: it.status,
+    owner: ownerOf(it.externalAssigneeId, accounts),
+    createdAt: it.createdAt.toISOString(),
+    waitStart: it.waitStart.toISOString(),
+    waitMinutes: Math.round(it.waitHours * 60),
+    ...(wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null }),
+    hasHumanResponse: it.hasHumanResponse,
+    botOrderComplete: it.botOrderComplete,
+    thanksCandidate: it.thanksCandidate,
+  }));
 
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
     windowHours,
+    schedule: wait ? { ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes } : null,
     waiting: {
       total: waiting.length,
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
       completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
+      critical: wait ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
     },
     today,
-    list: waiting.slice(0, maxRows).map((it) => ({
-      conversationId: it.conversationId,
-      status: it.status,
-      createdAt: it.createdAt.toISOString(),
-      waitStart: it.waitStart.toISOString(),
-      waitMinutes: Math.round(it.waitHours * 60),
-      hasHumanResponse: it.hasHumanResponse,
-      botOrderComplete: it.botOrderComplete,
-      thanksCandidate: it.thanksCandidate,
-    })),
+    list: items.slice(0, maxRows),
     listTotal: waiting.length,
     stale: {
       total: stale.length,
+      probableClose,
+      pending: probableClose === null ? null : stale.length - probableClose,
       oldestWaitStart: stale.length ? stale[0].waitStart.toISOString() : null,
-      items: stale.slice(0, maxRows).map((it) => ({ conversationId: it.conversationId, waitStart: it.waitStart.toISOString() })),
+      items: staleItems.slice(0, maxRows),
     },
     closedUnanswered: closed
       ? { days: closed.days, total: closed.total, question: closed.question, order: closed.order, attachment: closed.attachment, items: closed.items.slice(0, maxRows) }
@@ -102,10 +150,15 @@ export function toNowPayload(
 
 /**
  * Conversaciones creadas hoy (día de Buenos Aires) y, de esas, las que ya tienen al menos
- * una respuesta pública de un operador. Es una sola población. Solo lectura.
+ * una respuesta pública de un operador: una sola población. Aparte, las atendidas hoy por
+ * actividad, que incluyen conversaciones de días anteriores. Solo lectura.
  */
-export async function loadToday(now: Date): Promise<{ entered: number; answered: number }> {
-  const from = arDayStartUTC(arDayISO(now));
+export async function loadToday(now: Date): Promise<{ entered: number; answered: number; attended: number }> {
+  const day = arDayISO(now);
+  const from = arDayStartUTC(day);
+  // Atendidas hoy: la consulta por actividad ya validada, para un solo día.
+  const activity = await loadDailyActivityRows(day, day);
+  const attended = activity.filter((r) => r.operator).length;
   const rows = await prisma.$queryRaw<Array<{ entered: number; answered: number }>>`
     SELECT count(*)::int AS "entered",
       (count(*) FILTER (WHERE EXISTS (
@@ -114,7 +167,7 @@ export async function loadToday(now: Date): Promise<{ entered: number; answered:
     FROM "Conversation" c
     WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp
   `;
-  return rows[0] ?? { entered: 0, answered: 0 };
+  return { ...(rows[0] ?? { entered: 0, answered: 0 }), attended };
 }
 
 async function loadFreshness(): Promise<{ lastWebhookAt: Date | null; lastMessageAt: Date | null }> {
@@ -137,7 +190,12 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness, today] = await Promise.all([getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null)]);
+  const [snapshot, freshness, today, openBlocks, versions] = await Promise.all([
+    getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null), loadOpenBlockRows().catch(() => null),
+    loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
+  ]);
+  const wait = waitContext(versions, now);
+  const accounts = configForDay(versions, arDayISO(now))?.data.accounts ?? [];
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -155,7 +213,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

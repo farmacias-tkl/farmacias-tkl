@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS, POPULATION_LABELS, effectiveEvidence, indicator, type IndicatorDefinition } from "@/lib/call-center/metrics/indicators";
 import type { AttentionPayload } from "@/lib/call-center/metrics/attention-types";
 import { PERIOD_MAX_DAYS, addDaysISO, resolvePeriod } from "@/lib/call-center/metrics/period";
@@ -92,11 +92,11 @@ export default function AttentionPanel({ today }: { today: string }) {
         </div>
       </form>
       {formError && <p role="alert" className="mt-2 text-xs text-red-700">{formError}</p>}
-      <p className="mt-2 text-xs text-gray-500">
+      <p className="mt-2 text-xs text-gray-600">
         Conversaciones que entraron en el período (por fecha de creación, día de Buenos Aires). Hasta {PERIOD_MAX_DAYS} días.
       </p>
 
-      {state.status === "loading" && <p className="mt-6 text-sm text-gray-500">Cargando…</p>}
+      {state.status === "loading" && <p className="mt-6 text-sm text-gray-600">Cargando…</p>}
       {state.status === "error" && (
         <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
           {state.message}{" "}
@@ -112,18 +112,46 @@ export default function AttentionPanel({ today }: { today: string }) {
 function Report({ data }: { data: AttentionPayload }) {
   return (
     <>
-      <p className="mt-4 text-xs text-gray-500">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
+      <p className="mt-4 text-xs text-gray-600">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
+      <Headline total={data.total} />
 
       <SectionTitle title="Por entrada" badge={POPULATION_LABELS.ENTRADA}
         note="Sigue a las conversaciones creadas en el período, hasta su primera respuesta, aunque esa respuesta haya llegado otro día." />
       {data.total.entries === 0
-        ? <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No entró ninguna conversación en el período.</p>
+        ? <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">No entró ninguna conversación en el período.</p>
         : <EntryReport data={data} />}
 
-      <SectionTitle title="Por actividad del día" badge={POPULATION_LABELS.ACTIVIDAD}
-        note="Cuenta lo que pasó cada día, se haya creado cuando se haya creado la conversación. Es otra población: estos números no se comparan con los de entrada." />
-      <ActivityReportView activity={data.activity} />
+      <Fold title="Por actividad del día" hint={POPULATION_LABELS.ACTIVIDAD}>
+        <p className="mt-3 text-xs text-gray-600">
+          Cuenta lo que pasó cada día, se haya creado cuando se haya creado la conversación. Es otra población: estos números no se comparan con los de entrada.
+        </p>
+        <ActivityReportView activity={data.activity} />
+      </Fold>
     </>
+  );
+}
+
+/**
+ * Frase-resumen del período. "Evaluables" son las conversaciones respondidas más las
+ * pendientes con la meta ya vencida: las pendientes todavía en plazo no entran.
+ */
+function Headline({ total }: { total: Summary }) {
+  const goal = total.goal;
+  const median = total.firstResponseBusiness?.median ?? null;
+  if (total.entries === 0) return null;
+  if (!goal || goal.compliance === null) {
+    return (
+      <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
+        No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-base text-gray-900">
+      El <span className="font-semibold">{formatRatio(goal.compliance)}</span> de las conversaciones evaluables recibió respuesta dentro de la meta
+      {goal.goalMinutes !== null ? ` de ${goal.goalMinutes} minutos hábiles` : " vigente cada día (cambió dentro del período)"} desde la salida del bot.
+      {median !== null && <> Entre las respondidas, la mitad esperó <span className="font-semibold">{formatMinutes(median)} hábiles</span>.</>}
+    </p>
   );
 }
 
@@ -134,7 +162,7 @@ function SectionTitle({ title, badge, note }: { title: string; badge: string; no
         <h2 className="text-base font-semibold text-gray-900">{title}</h2>
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">{badge}</span>
       </div>
-      <p className="mt-1 text-xs text-gray-500">{note}</p>
+      <p className="mt-1 text-xs text-gray-600">{note}</p>
     </div>
   );
 }
@@ -143,7 +171,7 @@ function ActivityReportView({ activity }: { activity: AttentionPayload["activity
   const f = activity.followups;
   const followupDef = indicator("followup_response");
   if (activity.days.length === 0) {
-    return <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No hubo mensajes de clientes ni de operadores en el período.</p>;
+    return <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">No hubo mensajes de clientes ni de operadores en el período.</p>;
   }
   const days = [...activity.days].reverse();
   return (
@@ -156,18 +184,18 @@ function ActivityReportView({ activity }: { activity: AttentionPayload["activity
         <div className="col-span-2 rounded-lg border border-gray-200 bg-white p-3 lg:col-span-1" title={followupDef.definition}>
           <p className="text-xs font-medium text-gray-600">{followupDef.label}</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{formatMinutesOrMissing(f.response.median)}</p>
-          <p className="mt-0.5 text-xs text-gray-500">
+          <p className="mt-0.5 text-xs text-gray-600">
             Mediana de reloj · 9 de cada 10 en {formatMinutesOrMissing(f.response.p90)} o menos · sobre {nf.format(f.answered)} bloques respondidos
           </p>
-          <p className="text-xs text-gray-500">{nf.format(f.unanswered)} bloques sin respuesta, aparte: el último mensaje de una conversación suele no pedir respuesta</p>
-          <p className="mt-1 text-[11px] text-gray-400">{EVIDENCE_LABELS[followupDef.evidence]}</p>
+          <p className="text-xs text-gray-600">{nf.format(f.unanswered)} bloques sin respuesta, aparte: el último mensaje de una conversación suele no pedir respuesta</p>
+          <p className="mt-1 text-[11px] text-gray-500">{EVIDENCE_LABELS[followupDef.evidence]}</p>
         </div>
       </div>
 
       <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-left text-sm">
           <caption className="border-b border-gray-200 px-3 py-2 text-left text-xs font-medium text-gray-600">Por día de actividad</caption>
-          <thead className="border-b border-gray-200 text-xs text-gray-500">
+          <thead className="border-b border-gray-200 text-xs text-gray-600">
             <tr>
               <th scope="col" className="px-3 py-2 font-medium">Día</th>
               <th scope="col" className="px-3 py-2 text-right font-medium">Con actividad del cliente</th>
@@ -191,7 +219,7 @@ function ActivityReportView({ activity }: { activity: AttentionPayload["activity
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[11px] text-gray-400">
+      <p className="mt-1 text-[11px] text-gray-500">
         Bloque del cliente: mensajes seguidos del cliente después de una respuesta de operador; cuenta en el día en que empezó.
         No se recorren las conversaciones ya resueltas creadas más de {activity.lookbackDays} días antes del período.
       </p>
@@ -232,14 +260,14 @@ function EntryReport({ data }: { data: AttentionPayload }) {
           <p className="text-xs font-medium text-gray-600">Sin primera respuesta</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{nf.format(t.pending.total)}</p>
           {t.pending.oldestClockStart && (
-            <p className="mt-0.5 text-xs text-gray-500">La más vieja espera desde el {dateTimeFmt.format(new Date(t.pending.oldestClockStart))}</p>
+            <p className="mt-0.5 text-xs text-gray-600">La más vieja espera desde el {dateTimeFmt.format(new Date(t.pending.oldestClockStart))}</p>
           )}
           {t.pending.total > 0 && (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-600">
               Mediana de espera: {formatMinutesOrMissing(t.pending.medianAgeMinutes)} · {nf.format(t.pending.thanksCandidates)} candidatos a agradecimiento · {nf.format(t.pending.completedOrders)} con pedido completo
             </p>
           )}
-          <p className="mt-1 text-[11px] text-gray-400">Medido · no entran en las medianas</p>
+          <p className="mt-1 text-[11px] text-gray-500">Medido · no entran en las medianas</p>
         </div>
       </div>
 
@@ -260,25 +288,76 @@ function EntryReport({ data }: { data: AttentionPayload }) {
           detail={t.lateOrders.total > 0 ? formatRatio(t.lateOrders.answeredSameDay / t.lateOrders.total) : "No entraron pedidos desde las 17:00"} />
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      <Fold title="Salida del bot" hint="cómo salieron las conversaciones del bot">
         <BotExitTable summary={t} />
+      </Fold>
+      <Fold title="Tipo de gestión" hint="pedidos, recetas y otras consultas">
         <ManagementTypeTable summary={t} />
-      </div>
+      </Fold>
 
       <DaysTable data={data} />
 
+      <HoursChart hours={hours} />
+    </>
+  );
+}
+
+/** Detalle plegado: cerrado por defecto, para que la pantalla angosta empiece por lo importante. */
+function Fold({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  return (
+    <details className="mt-4 rounded-lg border border-gray-200 bg-white">
+      <summary className="flex min-h-[44px] cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-gray-800">
+        <span>{title}{hint && <span className="ml-2 text-xs font-normal text-gray-600">{hint}</span>}</span>
+        <span aria-hidden className="text-xs font-normal text-[#1E2D5A]">Ver</span>
+      </summary>
+      <div className="border-t border-gray-200 px-3 pb-3">{children}</div>
+    </details>
+  );
+}
+
+/**
+ * Entradas por hora: una sola serie, barras verticales. Alto fijo y ancho repartido entre
+ * las 24 horas, así entra en una pantalla angosta sin desplazamiento. Se rotula solo la
+ * hora pico; el resto se lee al tocar la barra o en la tabla plegada.
+ */
+function HoursChart({ hours }: { hours: number[] }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const max = Math.max(...hours);
+  const peak = hours.indexOf(max);
+  const shown = picked ?? peak;
+  return (
+    <>
       <h3 className="mt-6 text-sm font-semibold text-gray-800">Entradas por hora</h3>
-      <p className="mt-1 text-xs text-gray-500">Hora de Buenos Aires de creación de la conversación, sumando todos los días del período.</p>
-      <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
-        <table className="w-full text-center text-xs tabular-nums">
-          <thead className="border-b border-gray-200 text-gray-500">
-            <tr>{hours.map((_, h) => <th key={h} scope="col" className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            <tr>{hours.map((n, h) => <td key={h} className={`px-1.5 py-1.5 ${n === 0 ? "text-gray-300" : "text-gray-900"}`}>{nf.format(n)}</td>)}</tr>
-          </tbody>
-        </table>
-      </div>
+      <p className="mt-1 text-xs text-gray-600">Hora de Buenos Aires en que entró la conversación, sumando todos los días del período.</p>
+      {max === 0 ? (
+        <p className="mt-2 text-sm text-gray-600">Sin entradas en el período.</p>
+      ) : (
+        <div className="mt-2 rounded-lg border border-gray-200 bg-white p-3">
+          <p className="text-sm text-gray-900" aria-live="polite">
+            <span className="font-semibold tabular-nums">{nf.format(hours[shown])}</span> entre las {shown} y las {shown + 1} h
+            {shown === peak ? <span className="text-gray-600"> · la hora con más entradas</span> : null}
+          </p>
+          <div className="mt-2 flex h-32 items-end gap-[2px] border-b border-gray-300" role="group" aria-label="Entradas por hora">
+            {hours.map((n, h) => (
+              <button key={h} type="button" title={`${h} a ${h + 1} h: ${nf.format(n)}`} aria-label={`${h} a ${h + 1} horas: ${nf.format(n)} entradas`}
+                onClick={() => setPicked(h)} onMouseEnter={() => setPicked(h)} onFocus={() => setPicked(h)}
+                className="flex h-full min-w-0 flex-1 items-end">
+                <span className={`block w-full rounded-t-[4px] ${h === shown ? "bg-[#1E2D5A]" : "bg-[#8E9BC4]"}`}
+                  style={{ height: n === 0 ? "0" : `${Math.max(3, (n / max) * 100)}%` }} />
+              </button>
+            ))}
+          </div>
+          <div className="mt-1 flex gap-[2px] text-[10px] tabular-nums text-gray-600" aria-hidden>
+            {hours.map((_, h) => <span key={h} className="min-w-0 flex-1 text-center">{h % 3 === 0 ? h : ""}</span>)}
+          </div>
+          <details className="mt-2">
+            <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver los números</summary>
+            <ul className="mt-1 grid grid-cols-3 gap-x-4 text-xs tabular-nums text-gray-800 sm:grid-cols-6">
+              {hours.map((n, h) => <li key={h} className="flex justify-between gap-2"><span className="text-gray-600">{h} h</span><span>{nf.format(n)}</span></li>)}
+            </ul>
+          </details>
+        </div>
+      )}
     </>
   );
 }
@@ -290,9 +369,9 @@ function Card({ def, hasConfig, value, detail, extra, small }: {
     <div className="rounded-lg border border-gray-200 bg-white p-3" title={def.definition}>
       <p className="text-xs font-medium text-gray-600">{def.label}</p>
       <p className={`mt-1 font-semibold tabular-nums text-gray-900 ${small ? "text-xl" : "text-2xl"}`}>{value}</p>
-      {detail && <p className="mt-0.5 text-xs text-gray-500">{detail}</p>}
-      {extra && <p className="text-xs text-gray-500">{extra}</p>}
-      <p className="mt-1 text-[11px] text-gray-400">{EVIDENCE_LABELS[effectiveEvidence(def, hasConfig)]}</p>
+      {detail && <p className="mt-0.5 text-xs text-gray-600">{detail}</p>}
+      {extra && <p className="text-xs text-gray-600">{extra}</p>}
+      <p className="mt-1 text-[11px] text-gray-500">{EVIDENCE_LABELS[effectiveEvidence(def, hasConfig)]}</p>
     </div>
   );
 }
@@ -313,12 +392,12 @@ function GoalGroups({ goal }: { goal: NonNullable<Summary["goal"]> }) {
             <tr key={label} className="border-b border-gray-100 last:border-0">
               <th scope="row" className="px-3 py-2 font-normal text-gray-700">{label}</th>
               <td className="px-3 py-2 text-right font-medium tabular-nums text-gray-900">{nf.format(n)}</td>
-              <td className="px-3 py-2 text-xs text-gray-500">{note}</td>
+              <td className="px-3 py-2 text-xs text-gray-600">{note}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">
+      <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-600">
         {nf.format(goal.thanksCandidatesOverdue)} de las vencidas son candidatos a agradecimiento · {nf.format(goal.answeredBeforeOpening)} se respondieron antes de abrir o sin consumir tiempo hábil
       </p>
     </div>
@@ -331,10 +410,10 @@ function BotExitTable({ summary }: { summary: Summary }) {
   return (
     <div>
       <h3 className="text-sm font-semibold text-gray-800" title={def.definition}>Salida del bot</h3>
-      <p className="mt-1 text-xs text-gray-500">Es una aproximación: indica que la conversación salió del bot, no que una persona la tomó.</p>
+      <p className="mt-1 text-xs text-gray-600">Es una aproximación: indica que la conversación salió del bot, no que una persona la tomó.</p>
       <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-gray-200 text-xs text-gray-500">
+          <thead className="border-b border-gray-200 text-xs text-gray-600">
             <tr>
               <th scope="col" className="px-3 py-2 font-medium">Vía</th>
               <th scope="col" className="px-3 py-2 text-right font-medium">Conversaciones</th>
@@ -357,7 +436,7 @@ function BotExitTable({ summary }: { summary: Summary }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[11px] text-gray-400">{EVIDENCE_LABELS[def.evidence]}</p>
+      <p className="mt-1 text-[11px] text-gray-500">{EVIDENCE_LABELS[def.evidence]}</p>
     </div>
   );
 }
@@ -372,7 +451,7 @@ function ManagementTypeTable({ summary }: { summary: Summary }) {
   return (
     <div>
       <h3 className="text-sm font-semibold text-gray-800" title={def.definition}>{def.label}</h3>
-      <p className="mt-1 text-xs text-gray-500">Se detecta por el recorrido del bot y por el primer mensaje del cliente.</p>
+      <p className="mt-1 text-xs text-gray-600">Se detecta por el recorrido del bot y por el primer mensaje del cliente.</p>
       <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-left text-sm">
           <tbody>
@@ -380,13 +459,13 @@ function ManagementTypeTable({ summary }: { summary: Summary }) {
               <tr key={label} className="border-b border-gray-100 last:border-0">
                 <th scope="row" className="px-3 py-2 font-normal text-gray-700">{label}</th>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(n)}</td>
-                <td className="px-3 py-2 text-right text-xs tabular-nums text-gray-500">{formatRatio(n / summary.entries)}</td>
+                <td className="px-3 py-2 text-right text-xs tabular-nums text-gray-600">{formatRatio(n / summary.entries)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-[11px] text-gray-400">{EVIDENCE_LABELS[def.evidence]}</p>
+      <p className="mt-1 text-[11px] text-gray-500">{EVIDENCE_LABELS[def.evidence]}</p>
     </div>
   );
 }
@@ -397,12 +476,12 @@ function DaysTable({ data }: { data: AttentionPayload }) {
   return (
     <>
       <h3 className="mt-6 text-sm font-semibold text-gray-800">Por día de entrada</h3>
-      <p className="mt-1 text-xs text-gray-500" title={indicator("pending_at_close").definition}>
+      <p className="mt-1 text-xs text-gray-600" title={indicator("pending_at_close").definition}>
         Cada conversación cuenta en el día en que se creó. Las medianas son solo de las respondidas. Pendientes al cierre: de las que salieron del bot en horario público, cuántas no tenían respuesta al cerrar.
       </p>
       <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-gray-200 text-xs text-gray-500">
+          <thead className="border-b border-gray-200 text-xs text-gray-600">
             <tr>
               <th scope="col" className="px-3 py-2 font-medium">Día</th>
               <th scope="col" className="px-3 py-2 text-right font-medium">Entradas</th>
@@ -418,7 +497,7 @@ function DaysTable({ data }: { data: AttentionPayload }) {
             {days.map((d) => (
               <tr key={d.day} className="border-b border-gray-100 last:border-0">
                 <th scope="row" className="whitespace-nowrap px-3 py-2 font-normal tabular-nums text-gray-700">
-                  {formatShortDay(d.day)}{d.inProgress ? <span className="ml-1 text-xs text-gray-400">en curso</span> : null}
+                  {formatShortDay(d.day)}{d.inProgress ? <span className="ml-1 text-xs text-gray-500">en curso</span> : null}
                 </th>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.entries)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.answered)}</td>
