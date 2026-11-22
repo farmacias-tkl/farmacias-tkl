@@ -6,6 +6,7 @@ import { arDayISO } from "@/lib/call-center/metrics/business-time";
 import NowPanel from "./NowPanel";
 import AttentionPanel from "./AttentionPanel";
 import DetectedPanel from "./DetectedPanel";
+import KindsPanel from "./KindsPanel";
 import OperatorsPanel from "./OperatorsPanel";
 import QualityPanel from "./QualityPanel";
 import SalesPanel from "./SalesPanel";
@@ -18,6 +19,7 @@ const BLOCKS = [
   { key: "ahora", label: "Ahora" },
   { key: "atencion", label: "Atención y demoras" },
   { key: "operadores", label: "Operadores" },
+  { key: "tipos", label: "Tipos" },
   { key: "reclamos", label: "Reclamos y pérdidas" },
   { key: "ventas", label: "Ventas SIAF" },
   { key: "datos", label: "Calidad de datos" },
@@ -65,6 +67,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
       {block === "ahora" && <NowPanel />}
       {block === "atencion" && <AttentionPanel today={arDayISO(new Date())} />}
       {block === "operadores" && <OperatorsPanel today={arDayISO(new Date())} />}
+      {block === "tipos" && <KindsPanel today={arDayISO(new Date())} />}
       {block === "reclamos" && <DetectedPanel today={arDayISO(new Date())} />}
       {block === "ventas" && <SalesPanel today={arDayISO(new Date())} />}
       {block === "datos" && <QualityPanel />}

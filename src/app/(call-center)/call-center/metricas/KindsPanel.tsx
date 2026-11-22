@@ -1,0 +1,183 @@
+"use client";
+
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
+import {
+  CONSULT_KINDS, ORDER_KINDS,
+  type ConsultKind, type KindCounts, type KindsPayload, type MainKind, type OrderKind,
+} from "@/lib/call-center/metrics/kinds-types";
+import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
+import { formatShortDay } from "@/lib/call-center/metrics/format";
+import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
+
+const nf = new Intl.NumberFormat("es-AR");
+const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
+
+const ORDER_LABELS: Record<OrderKind, string> = { DOMICILIO: "A domicilio", RETIRO: "Retiro en sucursal", MEDUCAR: "Receta de Meducar", SIN_MODALIDAD: "Sin modalidad" };
+const CONSULT_LABELS: Record<ConsultKind, string> = {
+  PRECIO: "Precio", STOCK: "Stock o disponibilidad", HORARIOS: "Horarios y sucursales", COBERTURA: "Obra social o cobertura",
+  PAGO: "Modalidad de pago", TIENDA_ONLINE: "Tienda online", OTRAS: "Otras",
+};
+
+/** Franjas del día, por hora de entrada en Buenos Aires. */
+const BANDS: Array<{ label: string; hours: number[] }> = [
+  { label: "Mañana, 8 a 13", hours: [8, 9, 10, 11, 12] },
+  { label: "Tarde, 13 a 19", hours: [13, 14, 15, 16, 17, 18] },
+  { label: "Noche, 19 a 8", hours: [19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7] },
+];
+
+/** Los tres tipos que se comparan entre sí. El resto va aparte. */
+const COMPARED: MainKind[] = ["RECLAMO", "PEDIDO", "CONSULTA"];
+const SHORT: Record<MainKind, string> = {
+  RECLAMO: "Reclamos", PEDIDO: "Pedidos", CONSULTA: "Consultas", PEDIDO_SIN_CONFIRMAR: "Sin confirmar", SIN_CONTENIDO: "Sin contenido", SIN_CLASIFICAR: "Sin clasificar",
+};
+
+type State =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; data: KindsPayload };
+
+const pct = (n: number, den: number) => (den > 0 ? `${Math.round((n / den) * 100)} %` : "Sin datos");
+
+/** Bloque "Tipos": qué vienen a hacer las conversaciones que entran. `today` es el día de Buenos Aires. */
+export default function KindsPanel({ today }: { today: string }) {
+  const [period, setPeriod] = useState<Period>(defaultPeriod(today));
+  const [state, setState] = useState<State>({ status: "loading" });
+
+  const load = useCallback(async (p: Period) => {
+    setState({ status: "loading" });
+    try {
+      const res = await fetch(`/api/call-center/metrics/kinds?from=${p.from}&to=${p.to}`, { cache: "no-store" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.data) {
+        setState({ status: "error", message: body?.error ?? "No se pudieron cargar los tipos." });
+        return;
+      }
+      setState({ status: "ready", data: body.data as KindsPayload });
+    } catch {
+      setState({ status: "error", message: "No se pudieron cargar los tipos. Revisá la conexión." });
+    }
+  }, []);
+
+  useEffect(() => { load(period); }, [load, period]);
+
+  return (
+    <section className="mt-4" aria-label="Tipos">
+      <PeriodForm today={today} period={period} onChange={setPeriod} />
+      <p className="mt-2 text-xs text-gray-600">Conversaciones que entraron en el período, con un tipo cada una. Hasta {PERIOD_MAX_DAYS} días.</p>
+
+      {state.status === "loading" && <p className="mt-6 text-sm text-gray-600">Cargando…</p>}
+      {state.status === "error" && (
+        <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {state.message}{" "}
+          <button type="button" onClick={() => load(period)} className="font-medium underline">Reintentar</button>
+        </div>
+      )}
+      {state.status === "ready" && <Report data={state.data} />}
+    </section>
+  );
+}
+
+function Report({ data }: { data: KindsPayload }) {
+  const t = data.total;
+  // Los porcentajes no cuentan las conversaciones sin contenido.
+  const base = data.conversations - t.SIN_CONTENIDO;
+  const sum = (counts: KindCounts[]) => (k: MainKind) => counts.reduce((n, c) => n + c[k], 0);
+
+  if (data.conversations === 0) {
+    return <p className="mt-4 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">No entró ninguna conversación en el período.</p>;
+  }
+  return (
+    <>
+      <p className="mt-4 text-xs text-gray-600">
+        Calculado a las {timeFmt.format(new Date(data.generatedAt))} · {nf.format(data.conversations)} conversaciones ·{" "}
+        {data.source === "MEDIDO" ? "Medido: tipo de cierre de Emozion" : `${EVIDENCE_LABELS.DETECTADO}: recorrido del bot y palabras`}
+      </p>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <Stat label="Pedidos" value={t.PEDIDO} share={pct(t.PEDIDO, base)} />
+        <Stat label="Consultas" value={t.CONSULTA} share={pct(t.CONSULTA, base)} />
+        <Stat label="Reclamos" value={t.RECLAMO} share={pct(t.RECLAMO, base)} />
+      </div>
+      <p className="mt-1 text-xs text-gray-700">
+        Porcentajes sobre {nf.format(base)} conversaciones con contenido. Si una conversación es reclamo y pedido a la vez, cuenta como reclamo.
+      </p>
+
+      <Box title="Aparte">
+        <Line label="Pedido sin confirmar" value={`${nf.format(t.PEDIDO_SIN_CONFIRMAR)} · ${pct(t.PEDIDO_SIN_CONFIRMAR, base)}`}
+          note="Completó el recorrido del bot, pero no hay pago ni coordinación de retiro o envío. No suma como pedido." />
+        <Line label="Sin clasificar" value={`${nf.format(t.SIN_CLASIFICAR)} · ${pct(t.SIN_CLASIFICAR, base)}`} note="Ninguna regla alcanzó. Sirve para revisar el criterio." />
+        <Line label="Sin contenido o agradecimiento" value={nf.format(t.SIN_CONTENIDO)} note="Solo saludos, agradecimientos o botones. No entra en los porcentajes." />
+      </Box>
+
+      <Box title={`Pedidos (${nf.format(t.PEDIDO)})`} note={<>Es pedido si hay evidencia de pago o de coordinación, o si es una receta de Meducar. Elegir &quot;Pedir medicamentos&quot; en el bot no alcanza.</>}>
+        {ORDER_KINDS.map((k) => <Line key={k} label={ORDER_LABELS[k]} value={`${nf.format(data.orders[k])} · ${pct(data.orders[k], t.PEDIDO)}`} />)}
+      </Box>
+
+      <Box title={`Consultas (${nf.format(t.CONSULTA)})`} note="El subtipo sale de las palabras del cliente. Un adjunto sin otra evidencia cuenta como consulta.">
+        {CONSULT_KINDS.map((k) => <Line key={k} label={CONSULT_LABELS[k]} value={`${nf.format(data.consults[k])} · ${pct(data.consults[k], t.CONSULTA)}`} />)}
+      </Box>
+
+      <Box title="Por franja horaria" note="Hora de Buenos Aires en que entró la conversación. El porcentaje es la parte de cada tipo dentro de la franja.">
+        <Grid head={COMPARED.map((k) => SHORT[k])}
+          rows={BANDS.map((b) => {
+            const of = sum(b.hours.map((h) => data.byHour[h]));
+            const den = COMPARED.reduce((n, k) => n + of(k), 0);
+            return { label: b.label, cells: COMPARED.map((k) => `${nf.format(of(k))} · ${pct(of(k), den)}`) };
+          })} />
+      </Box>
+
+      <Box title="Por día" note="Día de Buenos Aires en que entró la conversación.">
+        <Grid head={COMPARED.map((k) => SHORT[k])}
+          rows={[...data.byDay].reverse().map((d) => ({ label: formatShortDay(d.day), cells: COMPARED.map((k) => nf.format(d[k])) }))} />
+      </Box>
+    </>
+  );
+}
+
+function Stat({ label, value, share }: { label: string; value: number; share: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3">
+      <p className="text-2xl font-semibold tabular-nums text-gray-900">{nf.format(value)}</p>
+      <p className="text-xs text-gray-700">{label} · {share}</p>
+    </div>
+  );
+}
+
+function Box({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
+      {note && <p className="mt-1 text-xs text-gray-700">{note}</p>}
+      <div className="mt-2 space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function Line({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-sm">
+      <span className="text-gray-800">{label}{note && <span className="block text-xs text-gray-600">{note}</span>}</span>
+      <span className="shrink-0 font-medium tabular-nums text-gray-900">{value}</span>
+    </div>
+  );
+}
+
+/** Tabla angosta: una etiqueta y tres columnas, entra en el celular sin desplazamiento. */
+function Grid({ head, rows }: { head: string[]; rows: Array<{ label: string; cells: string[] }> }) {
+  return (
+    <table className="w-full text-left text-xs">
+      <thead className="text-gray-600">
+        <tr><th scope="col" className="py-1 font-medium"></th>{head.map((h) => <th key={h} scope="col" className="py-1 text-right font-medium">{h}</th>)}</tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label} className="border-t border-gray-100">
+            <th scope="row" className="py-1.5 pr-2 font-medium text-gray-800">{r.label}</th>
+            {r.cells.map((c, i) => <td key={i} className="py-1.5 text-right tabular-nums text-gray-900">{c}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
