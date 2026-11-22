@@ -65,7 +65,7 @@ export function saleBoughtAtTkl(branchRegex: string): readonly MessagePattern[] 
 export const CLAIM_PATTERNS = {
   // Call Center
   DEMORA: [{ all: ["\\m(demora(n|ron)?|tarda(n|ron)?|sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden))\\M"] }],
-  SIN_NOVEDADES: [{ all: ["(pedido[^|]{0,40}(novedad|d[oó]nde est))|sin novedad|no tengo novedad|cu[aá]ndo (llega|me lo traen|lo env[ií]an|lo mandan)"] }],
+  SIN_NOVEDADES: [{ all: ["(pedido[^|]{0,40}(novedad|d[oó]nde est))|sin novedad|no tengo novedad|cu[aá]ndo (llega|me lo traen|lo env[ií]an|lo mandan)|(saber|avisaron|avisan|avisen) si lleg[oó]"] }],
   INCORRECTO: [{ all: ["\\m(equivocad[oa]s?|incorrect[oa]s?|vencid[oa]s?)\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)"] }],
   STOCK: [{ all: ["no (hay|tienen|ten[ií]an|queda) stock|sin stock|\\men falta\\M|no (lo|la|los|las) tienen"] }],
   // Factura: solo si viene con una queja. Un pedido común de factura no es un reclamo.
@@ -75,25 +75,48 @@ export const CLAIM_PATTERNS = {
   TRATO: [{ all: ["mala atenci[oó]n|maltrat|mal trato|falta de respeto|verg[uü]enza|p[eé]sim|desastre|inacept|una burla"] }],
   OTROS: [{ all: ["\\m(reclamo|queja|denuncia|defensa del consumidor|libro de quejas)\\M"] }],
   // Envíos: solo con queja. Mandar una moto propia o coordinar un horario no es un reclamo.
-  ENVIO_NO_LLEGO: [{
-    all: [
-      "(no (me )?(lleg[oó]|llegaron)|sigo esperando|nunca (vino|lleg[oó])|todav[ií]a no (lleg[oó]|vino|lo recib))",
-      "\\m(pedido|env[ií]o|medicamentos?|remedios?|moto|cadete|repartidor|delivery)\\M",
-    ],
-    none: ["mail|correo|confirmaci[oó]n|no llego a"],
-  }],
-  ENVIO_ENTREGA: [{
-    all: ["(repartidor|cadete|moto|delivery|env[ií]o)[^|]{0,60}(se fue|no (vino|pas[oó])|tarde)|(otra|otro) (direcci[oó]n|domicilio)|(domicilio|direcci[oó]n) (anterior|viej[oa]|equivocad[oa])|no me avisaron"],
-  }],
-  // Tienda online
+  ENVIO_NO_LLEGO: [
+    {
+      all: [
+        "(no (me )?(lleg[oó]|llegaron)|sigo esperando|nunca (vino|lleg[oó])|todav[ií]a no (lleg[oó]|vino|lo recib))",
+        "\\m(pedido|env[ií]o|medicamentos?|remedios?|moto|cadete|repartidor|delivery)\\M",
+      ],
+      none: ["mail|correo|confirmaci[oó]n|n[uú]mero de pedido|no llego a|si lleg[oó]"],
+    },
+    { all: ["\\mnunca vino\\M"] },
+  ],
+  // Lo mandaron mal o el repartidor no entregó. Que el cliente pase otra dirección, programe
+  // un envío o mande su propia moto no es un problema con la entrega.
+  ENVIO_ENTREGA: [
+    { all: ["(mandaron|enviaron|llevaron|mand[oó]|envi[oó])[^|]{0,40}\\ma otr[oa] (direcci[oó]n|domicilio)"] },
+    { all: ["(domicilio|direcci[oó]n) (anterior|viej[oa]|equivocad[oa])"] },
+    {
+      all: ["(repartidor|cadete|moto|delivery)[^|]{0,40}(se fue|no (vino|pas[oó]))"],
+      none: ["mando una moto|mandar una moto|moto de uber|mi moto|una moto a retirar"],
+    },
+  ],
+  // Tienda online. Tiene que nombrar el mail, la confirmación o el número de pedido: "no me
+  // llegó nada" solo no alcanza.
   WEB_SIN_CONFIRMACION: [{
-    all: ["no (me )?lleg[oó][^|]{0,30}(mail|correo|confirmaci[oó]n)|(mail|correo)[^|]{0,30}(no (me )?lleg|nunca (me )?lleg)|no tengo (el )?n[uú]mero de pedido|solo tengo el pago|no (me )?lleg[oó] (nada|ning[uú]n)"],
+    all: ["no (me )?lleg[oó][^|]{0,30}(mail|correo|confirmaci[oó]n|n[uú]mero de pedido)|(mail|correo|confirmaci[oó]n)[^|]{0,30}(no (me )?lleg|nunca (me )?lleg)|no tengo (el )?n[uú]mero de pedido|solo tengo el pago"],
     none: ["no llego a"],
   }],
   WEB_PAGINA: [{
     all: ["(p[aá]gina|\\mweb\\M|sitio|tienda online|carrito)[^|]{0,60}(no me deja|error|no (puedo|pude|funciona|anda|carga))|no (puedo|pude) pagar|cobraron dos veces|doble cobro|cup[oó]n[^|]{0,30}no (funciona|anda|aplica)"],
   }],
 } as const satisfies Record<string, readonly MessagePattern[]>;
+
+/**
+ * "No me llegó nada", "aún no llegó" o "ayer no llegó", sin decir qué. Solo cuenta como envío que no llegó si en la misma
+ * conversación el cliente eligió envío a domicilio y no habla de un mail o una confirmación.
+ */
+export const NOTHING_ARRIVED: readonly MessagePattern[] = [{
+  all: ["no (me )?lleg[oó] (nada|ning[uú]n)|(a[uú]n|todav[ií]a|ayer) no (me )?lleg[oó]"],
+  none: ["mail|correo|confirmaci[oó]n|n[uú]mero de pedido|no llego a"],
+}];
+
+/** Opción del bot con la que el cliente elige envío a domicilio. */
+export const CUSTOMER_HOME_DELIVERY_OPTION = "A mi domicilio";
 
 export type ClaimMotive = keyof typeof CLAIM_PATTERNS;
 

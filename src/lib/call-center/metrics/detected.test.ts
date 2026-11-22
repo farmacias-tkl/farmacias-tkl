@@ -4,7 +4,7 @@
  *   npx tsx src/lib/call-center/metrics/detected.test.ts
  */
 import assert from "node:assert/strict";
-import { buildDetectedReport, claimsOf, classifySale, type DetectedRow } from "./detected";
+import { buildDetectedReport, claimFlags, claimsOf, classifySale, type DetectedRow } from "./detected";
 import { CLAIM_GROUP_OF, CLAIM_MOTIVES, branchNamesRegex, type ClaimMotive } from "./detected-patterns";
 
 let passed = 0;
@@ -52,6 +52,14 @@ test("reclamos: una conversación puede tener varios motivos y cada uno va a su 
   assert.equal(cc.byMotive.find((b) => b.motive === "DEMORA")!.count, 2);
   assert.equal(cc.byMotive.find((b) => b.motive === "FACTURA")!.count, 1);
   assert.deepEqual([r.claims.ENVIOS.conversations, r.claims.TIENDA_ONLINE.conversations], [1, 1]);
+});
+
+test("'no me llegó nada': es un envío que no llegó solo con envío a domicilio y sin reclamo de confirmación web", () => {
+  const web = { ...noClaims(), WEB_SIN_CONFIRMACION: true };
+  assert.equal(claimFlags(noClaims(), { nothingArrived: true, homeDelivery: true }).ENVIO_NO_LLEGO, true);
+  assert.equal(claimFlags(noClaims(), { nothingArrived: true, homeDelivery: false }).ENVIO_NO_LLEGO, false);
+  assert.equal(claimFlags(noClaims(), { nothingArrived: false, homeDelivery: true }).ENVIO_NO_LLEGO, false);
+  assert.equal(claimFlags(web, { nothingArrived: true, homeDelivery: true }).ENVIO_NO_LLEGO, false);
 });
 
 test("cada motivo tiene un grupo, y los grupos listan todos sus motivos aunque estén en cero", () => {

@@ -73,6 +73,18 @@ async function main() {
     await add("envioNoLlego", ["Todavía no llegó el pedido y sigo esperando"]);
     await add("envioDireccion", ["Ayer mandaron la moto a mi domicilio anterior"]);
     await add("envioSeFue", ["El repartidor vino y se fue sin tocar timbre"]);
+    await add("envioAyer", ["Ayer no llegó el envío"]);
+    await add("envioNuncaVino", ["Quedaron en pasar y nunca vino"]);
+    await add("envioNadaDomicilio", ["A mi domicilio", "No me llegó nada aún"]);
+    await add("nadaSinDomicilio", ["No me llegó nada"]);
+    await add("aunNoLlegoDomicilio", ["A mi domicilio", "Buenas noches, aún no llegó"]);
+    await add("ayerNoLlegoSolo", ["Ayer no llegó"]);
+    await add("pasaDireccion", ["Esta vez el envío es en otra dirección, te paso otra dirección"]);
+    await add("enviarAOtra", ["¿Lo pueden enviar a otra dirección?"]);
+    await add("programar", ["Quiero programar el envío para mañana a la tarde"]);
+    await add("motoSeFue", ["Mando una moto a retirar, la otra vez la moto se fue sin el pedido"]);
+    await add("siLlego", ["Quiero saber si llegó mi compra, no me avisaron si llegó"]);
+    await add("devolucionNoLlega", ["No me llega la devolución del dinero"]);
     await add("motoPropia", ["Mando una moto de Uber a retirar, ¿puede ser?"]);
     await add("coordinacion", ["Avisame cuando llegue el repartidor, el horario es de 8 a 17"]);
     // Tienda online
@@ -122,7 +134,20 @@ async function main() {
       assert.deepEqual([claims("envioDireccion"), claims("envioSeFue")], [["ENVIO_ENTREGA"], ["ENVIO_ENTREGA"]]);
     });
     await check("envíos: mandar una moto propia o coordinar el horario no es un reclamo", () => {
-      assert.deepEqual([claims("motoPropia"), claims("coordinacion")], [[], []]);
+      assert.deepEqual([claims("motoPropia"), claims("coordinacion"), claims("motoSeFue")], [[], [], []]);
+    });
+    await check("envíos: 'ayer no llegó el envío' y 'nunca vino' cuentan como pedido que no llegó", () => {
+      assert.deepEqual([claims("envioAyer"), claims("envioNuncaVino")], [["ENVIO_NO_LLEGO"], ["ENVIO_NO_LLEGO"]]);
+    });
+    await check("'no me llegó nada': envío que no llegó solo si eligió envío a domicilio; solo, no alcanza", () => {
+      assert.deepEqual([claims("envioNadaDomicilio"), claims("nadaSinDomicilio")], [["ENVIO_NO_LLEGO"], []]);
+      assert.deepEqual([claims("aunNoLlegoDomicilio"), claims("ayerNoLlegoSolo")], [["ENVIO_NO_LLEGO"], []]);
+    });
+    await check("envíos: que el cliente pase otra dirección o programe el envío no es un problema con la entrega", () => {
+      assert.deepEqual([claims("pasaDireccion"), claims("enviarAOtra"), claims("programar")], [[], [], []]);
+    });
+    await check("'quiero saber si llegó' es pedido sin novedades; 'no me llega la devolución' es pago o devolución", () => {
+      assert.deepEqual([claims("siLlego"), claims("devolucionNoLlega")], [["SIN_NOVEDADES"], ["PAGO"]]);
     });
     await check("tienda online: sin confirmación y problemas con la página, fuera de los reclamos del Call Center", () => {
       assert.deepEqual([claims("webMail"), claims("webNingunMail"), claims("webNumero")], [["WEB_SIN_CONFIRMACION"], ["WEB_SIN_CONFIRMACION"], ["WEB_SIN_CONFIRMACION"]]);
@@ -139,7 +164,7 @@ async function main() {
       const p = await getDetectedPayload("2026-03-02", "2026-03-04", at("2026-03-05T12:00"));
       const n = (k: string) => p.sales.byMotive.find((b) => b.motive === k)!.count;
       assert.deepEqual([n("ELSEWHERE"), n("UNKNOWN_PLACE"), n("AT_TKL")], [3, 2, 4]);
-      assert.deepEqual([p.claims.ENVIOS.conversations, p.claims.TIENDA_ONLINE.conversations], [3, 5]);
+      assert.deepEqual([p.claims.ENVIOS.conversations, p.claims.TIENDA_ONLINE.conversations], [7, 5]);
       assert.ok(p.sales.cases.every((c) => Object.values(ids).includes(c.conversationId)));
       const dump = JSON.stringify(p);
       assert.ok(!dump.includes("+549") && !/farmacia|gracias|reclamo|det-/i.test(dump));

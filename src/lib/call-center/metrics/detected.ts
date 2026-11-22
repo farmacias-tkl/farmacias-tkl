@@ -20,7 +20,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayStartUTC, utcTimestampParam } from "./business-time";
 import {
-  CLAIM_GROUP_OF, CLAIM_MOTIVES, CLAIM_PATTERNS, SALE_BOUGHT, SALE_ELSEWHERE, SALE_PICKED_UP,
+  CLAIM_GROUP_OF, CLAIM_MOTIVES, CLAIM_PATTERNS, CUSTOMER_HOME_DELIVERY_OPTION, NOTHING_ARRIVED, SALE_BOUGHT, SALE_ELSEWHERE, SALE_PICKED_UP,
   branchNamesRegex, saleBoughtAtTkl, type ClaimGroup, type ClaimMotive, type MessagePattern,
 } from "./detected-patterns";
 import type { DetectedCase, DetectedPayload, DetectedSection, SaleKind } from "./detected-types";
@@ -105,7 +105,18 @@ function anyMessage(patterns: readonly MessagePattern[]): Prisma.Sql {
   return Prisma.sql`coalesce(bool_or(${Prisma.join(alternatives, " OR ")}), false)`;
 }
 
-type RawRow = { conversationId: string; createdAt: Date; open: boolean; elsewhere: boolean; pickedUp: boolean; boughtAtTkl: boolean; bought: boolean } & Record<string, unknown>;
+type RawRow = {
+  conversationId: string; createdAt: Date; open: boolean; elsewhere: boolean; pickedUp: boolean; boughtAtTkl: boolean; bought: boolean;
+  nothingArrived: boolean; homeDelivery: boolean;
+} & Record<string, unknown>;
+
+/**
+ * Motivos de una fila. "No me llegó nada" pasa a envío que no llegó solo si el cliente eligió
+ * envío a domicilio y no hay un reclamo de confirmación de la tienda online. PURO.
+ */
+export function claimFlags(raw: Record<ClaimMotive, boolean>, extra: { nothingArrived: boolean; homeDelivery: boolean }): Record<ClaimMotive, boolean> {
+  return { ...raw, ENVIO_NO_LLEGO: raw.ENVIO_NO_LLEGO || (extra.nothingArrived && extra.homeDelivery && !raw.WEB_SIN_CONFIRMACION) };
+}
 
 /**
  * Conversaciones creadas entre dos días de Buenos Aires, inclusive, con al menos una marca.
@@ -126,6 +137,8 @@ export async function loadDetectedRows(fromDay: string, toDayInclusive: string):
         ${anyMessage(SALE_PICKED_UP)} AS "pickedUp",
         ${anyMessage(tkl)} AS "boughtAtTkl",
         ${anyMessage(SALE_BOUGHT)} AS "bought",
+        ${anyMessage(NOTHING_ARRIVED)} AS "nothingArrived",
+        coalesce(bool_or(m.body = ${CUSTOMER_HOME_DELIVERY_OPTION}), false) AS "homeDelivery",
         ${Prisma.join(claimColumns, ", ")}
       FROM "Conversation" c
       JOIN "ConversationMessage" m ON m."conversationId" = c.id AND m.author = 'CUSTOMER' AND m.body IS NOT NULL
@@ -143,7 +156,7 @@ export async function loadDetectedRows(fromDay: string, toDayInclusive: string):
     pickedUp: r.pickedUp,
     boughtAtTkl: r.boughtAtTkl,
     bought: r.bought,
-    claims: Object.fromEntries(CLAIM_MOTIVES.map((m) => [m, r[`claim_${m}`] === true])) as Record<ClaimMotive, boolean>,
+    claims: claimFlags(Object.fromEntries(CLAIM_MOTIVES.map((m) => [m, r[`claim_${m}`] === true])) as Record<ClaimMotive, boolean>, r),
   }));
   // Solo las que tienen alguna marca: el resto no aporta y no hace falta moverlo.
   return { rows: mapped.filter((r) => classifySale(r) !== null || claimsOf(r).length > 0), conversations: total };
