@@ -78,3 +78,10 @@ export const QUESTION_REGEX =
 
 /** Frase con la que llega un pedido con receta desde Meducar. */
 export const ORDER_REQUEST_REGEX = "quiero realizar un pedido";
+
+/**
+ * Agradecimiento o cierre: se evalúa sobre el ÚLTIMO mensaje del cliente. Sirve para separar,
+ * entre las abiertas antiguas, las que probablemente quedaron resueltas y abiertas por error.
+ */
+export const CLOSING_MESSAGE_REGEX =
+  "\\m(gracias+|grax|gcs|genial|perfecto|listo|dale|oka?y?|okey|buen[ií]simo|b[aá]rbaro|igualmente|saludos|de acuerdo|excelente|muy amable|a vos|a ustedes|a uds)\\M|👍|🙏|🙌";

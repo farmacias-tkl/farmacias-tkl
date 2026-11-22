@@ -23,7 +23,7 @@ import { prisma } from "@/lib/prisma";
 import { utcTimestampParam } from "./business-time";
 import {
   ALREADY_BOUGHT_REGEX, BLOCK_ATTACHMENT_MEDIA_TYPES, BOT_INFO_ANSWER_LIKES, BOT_ORDER_COMPLETE_LIKE,
-  CLOSED_UNANSWERED_DAYS, NOT_CUSTOMER_REGEX, ORDER_REQUEST_REGEX, QUESTION_REGEX,
+  CLOSED_UNANSWERED_DAYS, CLOSING_MESSAGE_REGEX, NOT_CUSTOMER_REGEX, ORDER_REQUEST_REGEX, QUESTION_REGEX,
 } from "./patterns";
 import type { ClosedReason, ClosedUnansweredReport } from "./now-types";
 
@@ -43,6 +43,8 @@ export interface ClosedBlockRow {
   blockHasOrderRequest: boolean;
   blockAlreadyBought: boolean;
   blockNotCustomer: boolean;
+  /** El último mensaje del cliente es un agradecimiento o un cierre. */
+  lastMessageIsClosing: boolean;
 }
 
 export type ClosedBlockClass = ClosedReason | "NOT_CUSTOMER" | "ALREADY_BOUGHT" | "BOT_ANSWERED" | "NONE";
@@ -75,16 +77,43 @@ export function buildClosedUnanswered(rows: readonly ClosedBlockRow[], days: num
 }
 
 /**
+ * ¿Una abierta antigua parece cerrada? Sí cuando el último mensaje del cliente es un
+ * agradecimiento o un cierre y el bloque no trae una consulta, un pedido ni un adjunto:
+ * probablemente quedó resuelta y abierta por error. En cualquier otro caso sigue pendiente.
+ * PURO. Es nivel DETECTADO.
+ */
+export function isProbablyClosed(r: ClosedBlockRow): boolean {
+  if (!r.lastMessageIsClosing && !r.blockAlreadyBought) return false;
+  const c = classifyClosedBlock(r);
+  return c === "NONE" || c === "ALREADY_BOUGHT";
+}
+
+/**
  * Cerradas creadas desde `createdSince` cuyo último mensaje público es del cliente y es
  * posterior a `lastCustomerSince`. Solo lectura. No selecciona teléfono, nombre ni texto.
  */
 export async function loadClosedBlockRows(createdSince: Date, lastCustomerSince: Date): Promise<ClosedBlockRow[]> {
+  return loadBlockRows(
+    Prisma.sql`c.status = 'RESUELTA' AND c."createdAt" >= ${utcTimestampParam(createdSince)}::timestamp`,
+    Prisma.sql`AND a.last_cust >= ${utcTimestampParam(lastCustomerSince)}::timestamp`,
+  );
+}
+
+/**
+ * Abiertas (cualquier antigüedad) cuyo último mensaje público es del cliente: las mismas
+ * marcas, para clasificar las antiguas. Solo lectura.
+ */
+export async function loadOpenBlockRows(): Promise<ClosedBlockRow[]> {
+  return loadBlockRows(Prisma.sql`c.status <> 'RESUELTA'`, Prisma.empty);
+}
+
+async function loadBlockRows(scopeWhere: Prisma.Sql, extraWhere: Prisma.Sql): Promise<ClosedBlockRow[]> {
   const media = Prisma.join([...BLOCK_ATTACHMENT_MEDIA_TYPES]);
   const [info1, info2] = BOT_INFO_ANSWER_LIKES;
   return prisma.$queryRaw<ClosedBlockRow[]>(Prisma.sql`
     WITH scope AS (
       SELECT c.id FROM "Conversation" c
-      WHERE c.status = 'RESUELTA' AND c."createdAt" >= ${utcTimestampParam(createdSince)}::timestamp
+      WHERE ${scopeWhere}
     ), agg AS (
       SELECT m."conversationId" AS cid,
         max(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate") AS last_op,
@@ -105,12 +134,13 @@ export async function loadClosedBlockRows(createdSince: Date, lastCustomerSince:
       coalesce(bool_or(m.body ~* ${QUESTION_REGEX}), false) AS "blockHasQuestion",
       coalesce(bool_or(m.body ~* ${ORDER_REQUEST_REGEX}), false) AS "blockHasOrderRequest",
       coalesce(bool_or(m.body ~* ${ALREADY_BOUGHT_REGEX}), false) AS "blockAlreadyBought",
-      coalesce(bool_or(m.body ~* ${NOT_CUSTOMER_REGEX}), false) AS "blockNotCustomer"
+      coalesce(bool_or(m.body ~* ${NOT_CUSTOMER_REGEX}), false) AS "blockNotCustomer",
+      coalesce((array_agg(m.body ORDER BY m."sentAt" DESC, m.id DESC))[1] ~* ${CLOSING_MESSAGE_REGEX}, false) AS "lastMessageIsClosing"
     FROM agg a
     JOIN "ConversationMessage" m ON m."conversationId" = a.cid AND m.author = 'CUSTOMER'
       AND (a.last_op IS NULL OR m."sentAt" > a.last_op)
     WHERE a.last_cust IS NOT NULL AND (a.last_op IS NULL OR a.last_cust > a.last_op)
-      AND a.last_cust >= ${utcTimestampParam(lastCustomerSince)}::timestamp
+      ${extraWhere}
     GROUP BY a.cid, a.last_cust, a.last_op, a.done, a.bot_info
   `);
 }

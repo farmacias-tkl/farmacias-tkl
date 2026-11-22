@@ -16,7 +16,7 @@ import {
 } from "./queue";
 import { CLOSED_UNANSWERED_DAYS, QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
-import { getClosedUnanswered } from "./closed-unanswered";
+import { getClosedUnanswered, isProbablyClosed, loadOpenBlockRows, type ClosedBlockRow } from "./closed-unanswered";
 import { loadDailyActivityRows } from "./activity";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
 import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
@@ -42,6 +42,8 @@ export interface NowExtras {
   wait: WaitContext | null;
   /** Cuentas de la configuración vigente hoy; vacío si no hay. */
   accounts: readonly ConfigAccount[];
+  /** Marcas del último bloque de las abiertas, para clasificar las antiguas. null si no se pudieron leer. */
+  openBlocks: readonly ClosedBlockRow[] | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -80,7 +82,15 @@ export function toNowPayload(
   const waiting = open.filter((it) => it.waitHours <= windowHours);
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
-  const { history, today, closed, wait, accounts } = extras;
+  const { history, today, closed, wait, accounts, openBlocks } = extras;
+  const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
+  // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
+  const staleItems = stale.map((it) => {
+    const b = blockById?.get(it.conversationId);
+    const kind = !blockById ? null : b && isProbablyClosed(b) ? ("PROBABLE_CLOSE" as const) : ("PENDING" as const);
+    return { conversationId: it.conversationId, waitStart: it.waitStart.toISOString(), kind };
+  });
+  const probableClose = blockById ? staleItems.filter((i) => i.kind === "PROBABLE_CLOSE").length : null;
   const now = snapshot.generatedAt;
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
   const items = waiting.map((it) => ({
@@ -113,8 +123,10 @@ export function toNowPayload(
     listTotal: waiting.length,
     stale: {
       total: stale.length,
+      probableClose,
+      pending: probableClose === null ? null : stale.length - probableClose,
       oldestWaitStart: stale.length ? stale[0].waitStart.toISOString() : null,
-      items: stale.slice(0, maxRows).map((it) => ({ conversationId: it.conversationId, waitStart: it.waitStart.toISOString() })),
+      items: staleItems.slice(0, maxRows),
     },
     closedUnanswered: closed
       ? { days: closed.days, total: closed.total, question: closed.question, order: closed.order, attachment: closed.attachment, items: closed.items.slice(0, maxRows) }
@@ -178,8 +190,8 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness, today, versions] = await Promise.all([
-    getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null),
+  const [snapshot, freshness, today, openBlocks, versions] = await Promise.all([
+    getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null), loadOpenBlockRows().catch(() => null),
     loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
   ]);
   const wait = waitContext(versions, now);
@@ -201,7 +213,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

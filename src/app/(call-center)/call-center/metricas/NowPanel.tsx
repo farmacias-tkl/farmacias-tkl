@@ -97,10 +97,15 @@ export default function NowPanel() {
       </div>
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-gray-600">Clientes esperando respuesta</h2>
-        <p className="mt-1 text-4xl font-semibold tabular-nums text-gray-900">{nf.format(w.total)}</p>
+        <h2 className="text-sm font-medium text-gray-700">Conversaciones esperando respuesta</h2>
+        <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-gray-900">
+          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.total)}</span>
+          <span className="text-sm">en las últimas {d.windowHours} h</span>
+          <span className="text-2xl font-semibold tabular-nums">+ {nf.format(d.stale.total)}</span>
+          <span className="text-sm">antiguas por revisar</span>
+        </p>
         <p className="mt-1 text-sm text-gray-700">
-          {w.oldestWaitStart ? <>El que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay nadie esperando."}
+          {w.oldestWaitStart ? <>La que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay ninguna esperando en las últimas horas."}
         </p>
         {w.total > 0 && (
           <p className="mt-2 text-xs text-gray-500">
@@ -234,31 +239,50 @@ function CaseCard({ it, nowMs, schedule }: { it: NowListItem; nowMs: number; sch
 
 function StaleCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
   const s = d.stale;
+  const classified = s.probableClose !== null && s.pending !== null;
+  const pending = s.items.filter((it) => it.kind !== "PROBABLE_CLOSE");
+  const closing = s.items.filter((it) => it.kind === "PROBABLE_CLOSE");
   return (
     <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold text-gray-800">Para cerrar en Emozion</h2>
+        <h2 className="text-sm font-semibold text-gray-800">Casos antiguos por revisar</h2>
         <p className="text-2xl font-semibold tabular-nums text-gray-900">{nf.format(s.total)}</p>
       </div>
-      <p className="mt-1 text-xs text-gray-600">
-        Abiertas hace más de {d.windowHours} horas. No cuentan como clientes esperando.
-        {s.oldestWaitStart ? ` La más vieja: ${dayFmt.format(new Date(s.oldestWaitStart))}.` : ""}
+      <p className="mt-1 text-xs text-gray-700">
+        Abiertas hace más de {d.windowHours} horas.
+        {s.oldestWaitStart ? ` La más vieja espera desde el ${dayFmt.format(new Date(s.oldestWaitStart))}.` : ""}
       </p>
-      {s.items.length > 0 && (
-        <details className="mt-2">
-          <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver las {nf.format(s.items.length)}</summary>
-          <ul className="mt-1 divide-y divide-amber-200">
-            {s.items.map((it) => (
-              <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
-                <span className="text-xs text-gray-700">Espera desde {whenLabel(it.waitStart, nowMs)}</span>
-                <ConversationLink id={it.conversationId} />
-              </li>
-            ))}
-          </ul>
-        </details>
+      {classified ? (
+        <>
+          <StaleGroup title="Siguen pendientes" count={s.pending!} note="El último mensaje del cliente no es un cierre, o trae una consulta, un pedido o un adjunto." items={pending} nowMs={nowMs} />
+          <StaleGroup title="Probablemente resueltas" count={s.probableClose!} note="El último mensaje del cliente es un agradecimiento o un cierre: pueden haber quedado abiertas por error." items={closing} nowMs={nowMs} />
+        </>
+      ) : (
+        <StaleGroup title="Sin clasificar" count={s.total} note="No se pudo revisar el último mensaje de estos casos." items={s.items} nowMs={nowMs} />
       )}
-      <Evidence level="MEDIDO" />
+      <Evidence level={classified ? "DETECTADO" : "MEDIDO"} />
     </div>
+  );
+}
+
+function StaleGroup({ title, count, note, items, nowMs }: { title: string; count: number; note: string; items: NowPayload["stale"]["items"]; nowMs: number }) {
+  return (
+    <details className="mt-2 border-t border-amber-200 pt-2">
+      <summary className="flex cursor-pointer items-baseline justify-between gap-2 py-1 text-sm text-gray-900">
+        <span className="font-medium">{title}</span>
+        <span className="font-semibold tabular-nums">{nf.format(count)}</span>
+      </summary>
+      <p className="text-xs text-gray-700">{note}</p>
+      {items.length < count && <p className="text-xs text-gray-700">Se muestran las {nf.format(items.length)} más viejas.</p>}
+      <ul className="mt-1 divide-y divide-amber-200">
+        {items.map((it) => (
+          <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
+            <span className="text-xs text-gray-800">Espera desde {whenLabel(it.waitStart, nowMs)}</span>
+            <ConversationLink id={it.conversationId} />
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

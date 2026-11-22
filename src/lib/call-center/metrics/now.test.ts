@@ -25,7 +25,7 @@ const row = (id: string, over: Partial<WaitingRow> = {}): WaitingRow => ({
 });
 const open = (id: string, over: Partial<WaitingRow> = {}) => row(id, { open: true, status: "SIN_ASIGNAR", ...over });
 const FRESH = { lastWebhookAt: hoursAgo(0.01), lastMessageAt: hoursAgo(0.05) };
-const NONE: NowExtras = { history: null, today: null, closed: null, wait: null, accounts: [] };
+const NONE: NowExtras = { history: null, today: null, closed: null, wait: null, accounts: [], openBlocks: null };
 const payload = (rows: WaitingRow[], extras: NowExtras = NONE, maxRows?: number) =>
   toNowPayload(buildQueueSnapshot(rows, NOW, SINCE), extras, FRESH, 72, maxRows);
 
@@ -85,6 +85,30 @@ test("cada caso: espera, hora de entrada, estado y marcas", () => {
   assert.equal(by.c.hasHumanResponse, true);
 });
 
+test("casos antiguos: probable cierre o pendiente; ninguno desaparece del total", () => {
+  const block = (id: string, over: Partial<ClosedBlockRow>): ClosedBlockRow => ({
+    conversationId: id, lastCustomerAt: hoursAgo(100), hasHumanResponse: true, botOrderComplete: false, botInfoAnswer: false,
+    blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, lastMessageIsClosing: false, ...over,
+  });
+  const rows = [
+    open("gracias", { waitStart: hoursAgo(100) }), open("gracias-foto", { waitStart: hoursAgo(110) }),
+    open("pregunta", { waitStart: hoursAgo(120) }), open("sin-marcas", { waitStart: hoursAgo(130) }), open("reciente", { waitStart: hoursAgo(2) }),
+  ];
+  const openBlocks = [
+    block("gracias", { lastMessageIsClosing: true }),
+    block("gracias-foto", { lastMessageIsClosing: true, blockHasAttachment: true }),
+    block("pregunta", { blockHasQuestion: true }),
+    block("reciente", { lastMessageIsClosing: true }),
+  ];
+  const p = payload(rows, { ...NONE, openBlocks });
+  assert.deepEqual([p.stale.total, p.stale.probableClose, p.stale.pending], [4, 1, 3]);
+  assert.deepEqual(p.stale.items.map((i) => [i.conversationId, i.kind]), [["sin-marcas", "PENDING"], ["pregunta", "PENDING"], ["gracias-foto", "PENDING"], ["gracias", "PROBABLE_CLOSE"]]);
+  assert.equal(p.waiting.total, 1, "la reciente sigue en la cola aunque su último mensaje sea un cierre");
+  // Sin las marcas no se clasifica: null, no cero.
+  const sin = payload(rows);
+  assert.deepEqual([sin.stale.total, sin.stale.probableClose, sin.stale.pending, sin.stale.items[0].kind], [4, null, null, null]);
+});
+
 test("responsable: asignación automática, cuenta con alias o número, o sin responsable identificado", () => {
   const acc = (externalId: string, over: object = {}) => ({ externalId, alias: null, active: true, borrowed: false, historical: false, ...over });
   const accounts = [acc("9000", { system: true, active: false }), acc("9001", { alias: "Alias inventado" }), acc("9002")];
@@ -128,10 +152,10 @@ test("hoy, cerradas sin responder e histórico: si no se pudieron calcular queda
 test("hoy, cerradas sin responder e histórico pasan tal cual; los que no son clientes van solo a calidad de datos", () => {
   const block = (id: string, over: Partial<ClosedBlockRow>): ClosedBlockRow => ({
     conversationId: id, lastCustomerAt: hoursAgo(3), hasHumanResponse: true, botOrderComplete: false, botInfoAnswer: false,
-    blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, ...over,
+    blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, lastMessageIsClosing: false, ...over,
   });
   const closed = buildClosedUnanswered([block("q", { blockHasQuestion: true }), block("prov", { blockNotCustomer: true, blockHasAttachment: true })]);
-  const p = payload([], { wait: null, accounts: [], today: { entered: 12, answered: 9, attended: 20 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
+  const p = payload([], { wait: null, accounts: [], openBlocks: null, today: { entered: 12, answered: 9, attended: 20 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
   assert.deepEqual(p.today, { entered: 12, answered: 9, attended: 20 });
   assert.deepEqual(p.closedUnanswered, { days: 7, total: 1, question: 1, order: 0, attachment: 0, items: [{ conversationId: "q", lastCustomerAt: hoursAgo(3).toISOString(), reason: "QUESTION" }] });
   assert.deepEqual(p.quality.closedBefore, { total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 });

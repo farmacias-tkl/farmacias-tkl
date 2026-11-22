@@ -44,10 +44,19 @@ export interface NowListItem {
   thanksCandidate: boolean;
 }
 
-/** Abierta con más de `windowHours` de espera: para cerrar en Emozion. */
+/**
+ * Abierta con más de `windowHours` de espera, para revisar.
+ *  - PROBABLE_CLOSE: el último mensaje del cliente es un agradecimiento o un cierre;
+ *    probablemente quedó resuelta y abierta por error;
+ *  - PENDING: sigue pendiente;
+ *  - null: no se pudo clasificar.
+ */
+export type StaleKind = "PROBABLE_CLOSE" | "PENDING";
+
 export interface NowStaleItem {
   conversationId: string;
   waitStart: string;
+  kind: StaleKind | null;
 }
 
 export type ClosedReason = "QUESTION" | "ORDER" | "ATTACHMENT";
@@ -112,7 +121,14 @@ export interface NowPayload {
   /** Filas de la lista antes del tope. */
   listTotal: number;
   /** Abiertas con más de `windowHours` de espera: no cuentan como clientes esperando. */
-  stale: { total: number; oldestWaitStart: string | null; items: NowStaleItem[] };
+  stale: {
+    total: number;
+    /** null si no se pudieron clasificar. Las dos suman `total`: ninguna desaparece. */
+    probableClose: number | null;
+    pending: number | null;
+    oldestWaitStart: string | null;
+    items: NowStaleItem[];
+  };
   /** null si no se pudo calcular. */
   closedUnanswered: Omit<ClosedUnansweredReport, "notCustomers"> | null;
   /** Lo que muestra la pestaña "Calidad de datos". */

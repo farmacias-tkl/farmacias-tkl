@@ -15,7 +15,7 @@ function test(name: string, fn: () => void) {
 const at = (s: string) => new Date(`${s}:00.000-03:00`);
 const row = (id: string, over: Partial<ClosedBlockRow> = {}): ClosedBlockRow => ({
   conversationId: id, lastCustomerAt: at("2026-03-05T10:00"), hasHumanResponse: true, botOrderComplete: false, botInfoAnswer: false,
-  blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, ...over,
+  blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, lastMessageIsClosing: false, ...over,
 });
 
 test("agradecimiento o cierre natural: no entra", () => {
