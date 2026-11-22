@@ -7,7 +7,7 @@ import {
   type CallCenterMetricsConfigData, type ConfigAccount, type IsoWeekday,
 } from "@/lib/call-center/metrics/config-schema";
 import {
-  WEEKDAY_LABELS, emptyScheduleText, isValidDayISO, scheduleToText, textToSchedule,
+  WEEKDAY_LABELS, emptyScheduleText, isValidDayISO, proposeAccount, scheduleToText, textToSchedule,
 } from "@/lib/call-center/metrics/config-form";
 import type { KnownAccount, KnownVendor } from "@/lib/call-center/metrics/config-service";
 
@@ -18,10 +18,8 @@ const vendorKey = (branchId: string, code: string) => `${branchId}|${code}`;
 function initialAccounts(base: CallCenterMetricsConfigData | null, known: KnownAccount[]): ConfigAccount[] {
   const fromBase = base?.accounts ?? [];
   const have = new Set(fromBase.map((a) => a.externalId));
-  const extra = known
-    .filter((k) => !have.has(k.externalId))
-    // Una cuenta nueva se propone activa si escribió en los últimos 30 días; si no, histórica.
-    .map((k) => ({ externalId: k.externalId, alias: null, active: k.messagesLast30Days > 0, borrowed: false, historical: k.messagesLast30Days === 0 }));
+  // Las que no están en la versión base se proponen según lo que se ve en los datos (proposeAccount).
+  const extra = known.filter((k) => !have.has(k.externalId)).map(proposeAccount);
   return [...fromBase, ...extra];
 }
 
@@ -71,7 +69,7 @@ export default function ConfigForm({
   function addAccount() {
     const id = newAccount.trim();
     if (!id || /\s/.test(id) || accounts.some((a) => a.externalId === id)) return;
-    setAccounts((list) => [...list, { externalId: id, alias: null, active: true, borrowed: false, historical: false }]);
+    setAccounts((list) => [...list, { externalId: id, alias: null, active: true, borrowed: false, historical: false, system: false }]);
     setNewAccount("");
   }
 
@@ -93,7 +91,8 @@ export default function ConfigForm({
       publicHours: pub.schedule,
       operatorHours: ops.schedule,
       firstResponseGoalMinutes: goalNumber,
-      accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null })),
+      // system se guarda siempre explícito, aunque la versión base no lo tuviera.
+      accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
       callCenterVendors: [...vendors].map((k) => {
         const [branchId, ...rest] = k.split("|");
         return { branchId, code: rest.join("|") };
@@ -184,7 +183,8 @@ export default function ConfigForm({
         <h2 className="text-sm font-semibold text-gray-800">Cuentas de Emozion</h2>
         <p className="text-xs text-gray-500">
           Se muestran por su número o por el alias. Activa: está en uso, aunque no escriba por una ausencia. Prestada: la usa otra persona que su titular.
-          Histórica: ya no se usa y aparece solo en los períodos en que tuvo actividad.
+          Histórica: ya no se usa y aparece solo en los períodos en que tuvo actividad. Sistema: no es una persona (por ejemplo, una cuenta a la que
+          Emozion asigna conversaciones de forma automática).
         </p>
         <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
           <table className="w-full text-left text-sm">
@@ -196,12 +196,13 @@ export default function ConfigForm({
                 <th className="px-3 py-2 font-medium">Activa</th>
                 <th className="px-3 py-2 font-medium">Prestada</th>
                 <th className="px-3 py-2 font-medium">Histórica</th>
+                <th className="px-3 py-2 font-medium">Sistema</th>
                 <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {accounts.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-3 text-gray-500">No hay cuentas. Agregá una con su número de Emozion.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-3 text-gray-500">No hay cuentas. Agregá una con su número de Emozion.</td></tr>
               )}
               {accounts.map((a, i) => {
                 const known = knownByAccount.get(a.externalId);
@@ -212,7 +213,13 @@ export default function ConfigForm({
                       <input aria-label={`Alias de la cuenta ${a.externalId}`} value={a.alias ?? ""} maxLength={60}
                         onChange={(e) => updateAccount(i, { alias: e.target.value })} className={`w-36 ${input}`} />
                     </td>
-                    <td className="px-3 py-2 tabular-nums text-gray-500">{known ? formatDay(known.lastMessageDay) : "Sin mensajes"}</td>
+                    <td className="px-3 py-2 tabular-nums text-gray-500">
+                      {known?.lastMessageDay
+                        ? formatDay(known.lastMessageDay)
+                        : known?.onlySeenAsAssignee
+                          ? <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">Vista solo como asignada</span>
+                          : "Sin mensajes"}
+                    </td>
                     <td className="px-3 py-2">
                       <input type="checkbox" aria-label={`Cuenta ${a.externalId} activa`} checked={a.active}
                         onChange={(e) => updateAccount(i, { active: e.target.checked, historical: e.target.checked ? false : a.historical })} />
@@ -224,6 +231,10 @@ export default function ConfigForm({
                     <td className="px-3 py-2">
                       <input type="checkbox" aria-label={`Cuenta ${a.externalId} histórica`} checked={a.historical}
                         onChange={(e) => updateAccount(i, { historical: e.target.checked, active: e.target.checked ? false : a.active })} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" aria-label={`Cuenta ${a.externalId} de sistema`} checked={a.system === true}
+                        onChange={(e) => updateAccount(i, { system: e.target.checked })} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       {!known && (

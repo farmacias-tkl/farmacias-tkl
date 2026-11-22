@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import {
-  emptyScheduleText, formatDayRanges, isValidDayISO, parseDayRanges, scheduleToText, textToSchedule,
+  emptyScheduleText, formatDayRanges, isValidDayISO, parseDayRanges, proposeAccount, scheduleToText, textToSchedule,
 } from "./config-form";
 import { parseConfigData } from "./config-schema";
 
@@ -71,6 +71,33 @@ test("lo que la forma del texto deja pasar lo frena el esquema: hora inexistente
   assert.equal(cfg("25:00-26:00").ok, false);
   assert.equal(cfg("18:00-10:00").ok, false);
   assert.equal(cfg("10:00-14:00, 13:00-18:00").ok, false);
+});
+
+test("propuesta de una cuenta nueva: activa si escribió hace poco, histórica si no", () => {
+  const reciente = proposeAccount({ externalId: "9001", messagesLast30Days: 12, onlySeenAsAssignee: false });
+  assert.deepEqual(reciente, { externalId: "9001", alias: null, active: true, borrowed: false, historical: false, system: false });
+  const vieja = proposeAccount({ externalId: "9002", messagesLast30Days: 0, onlySeenAsAssignee: false });
+  assert.deepEqual([vieja.active, vieja.historical, vieja.system], [false, true, false]);
+});
+
+test("propuesta de una cuenta vista solo como asignada: ni activa ni histórica, y sin marcar como sistema", () => {
+  const asignada = proposeAccount({ externalId: "9003", messagesLast30Days: 0, onlySeenAsAssignee: true });
+  assert.deepEqual([asignada.active, asignada.historical, asignada.system], [false, false, false]);
+});
+
+test("toda propuesta es una cuenta válida para el esquema", () => {
+  const propuestas = [
+    proposeAccount({ externalId: "9001", messagesLast30Days: 3, onlySeenAsAssignee: false }),
+    proposeAccount({ externalId: "9002", messagesLast30Days: 0, onlySeenAsAssignee: false }),
+    proposeAccount({ externalId: "9003", messagesLast30Days: 0, onlySeenAsAssignee: true }),
+  ];
+  const vacio = textToSchedule(emptyScheduleText());
+  assert.ok(vacio.ok);
+  const r = parseConfigData({
+    schemaVersion: 1, publicHours: vacio.ok ? vacio.schedule : null, operatorHours: vacio.ok ? vacio.schedule : null,
+    firstResponseGoalMinutes: 15, accounts: propuestas, callCenterVendors: [],
+  });
+  assert.equal(r.ok, true);
 });
 
 test("fecha de vigencia: formato y fecha real", () => {

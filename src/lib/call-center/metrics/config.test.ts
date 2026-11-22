@@ -5,7 +5,7 @@
  *   npx tsx src/lib/call-center/metrics/config.test.ts
  */
 import assert from "node:assert/strict";
-import { parseConfigData, hhmmToMinutes, type CallCenterMetricsConfigData } from "./config-schema";
+import { parseConfigData, hhmmToMinutes, isSystemAccount, type CallCenterMetricsConfigData } from "./config-schema";
 import { configForDay, sortVersions, type ConfigVersion } from "./config";
 
 let passed = 0;
@@ -58,6 +58,31 @@ test("cuenta activa e histórica a la vez → error", () => {
   const cfg = base();
   cfg.accounts[0].historical = true;
   assert.ok(errorsOf(cfg).length > 0);
+});
+
+test("cuenta de sistema: campo opcional; una versión guardada sin él sigue siendo válida y equivale a false", () => {
+  const sinCampo = parseConfigData(base()); // ninguna cuenta de base() trae `system`
+  assert.equal(sinCampo.ok, true);
+  if (sinCampo.ok) {
+    assert.equal(sinCampo.data.accounts.every((a) => !isSystemAccount(a)), true);
+    assert.equal("system" in sinCampo.data.accounts[0], false, "no se inventa el campo al leer");
+  }
+  const con = base();
+  con.accounts[0].system = true;
+  con.accounts[1].system = false;
+  const r = parseConfigData(con);
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(isSystemAccount(r.data.accounts[0]), true);
+    assert.equal(isSystemAccount(r.data.accounts[1]), false);
+    assert.equal(isSystemAccount(r.data.accounts[2]), false);
+  }
+});
+
+test("cuenta de sistema: tiene que ser sí o no", () => {
+  const cfg = base() as unknown as { accounts: Array<Record<string, unknown>> };
+  cfg.accounts[0].system = "sí";
+  assert.ok(errorsOf(cfg).some((e) => e.startsWith("accounts")));
 });
 
 test("franja que termina antes de empezar, hora mal formada y franjas superpuestas → error", () => {

@@ -70,12 +70,41 @@ export async function saveConfigVersion(
   return { ok: true, id, validFrom };
 }
 
-/** Una cuenta de Emozion que escribió mensajes: para ofrecerla en el formulario. */
+/**
+ * Una cuenta de Emozion vista en los datos, para ofrecerla en el formulario: porque escribió
+ * mensajes como operador, porque figura como asignada de una conversación, o las dos cosas.
+ */
 export interface KnownAccount {
   externalId: string;
-  firstMessageDay: string;
-  lastMessageDay: string;
+  /** null si la cuenta nunca escribió un mensaje. */
+  firstMessageDay: string | null;
+  lastMessageDay: string | null;
   messagesLast30Days: number;
+  /** Último día en que figuró como asignada (conversación o cambio de estado); null si nunca. */
+  lastAssignedDay: string | null;
+  /** Vista solo como asignada: nunca escribió. Suele ser una cuenta de sistema. */
+  onlySeenAsAssignee: boolean;
+}
+
+interface MessageAccountRow { externalId: string; firstMessageDay: string; lastMessageDay: string; messagesLast30Days: number }
+interface AssigneeAccountRow { externalId: string; lastAssignedDay: string }
+
+/** Une las cuentas que escribieron con las que figuran como asignadas. PURO. */
+export function mergeKnownAccounts(messages: readonly MessageAccountRow[], assignees: readonly AssigneeAccountRow[]): KnownAccount[] {
+  const assignedDay = new Map(assignees.map((a) => [a.externalId, a.lastAssignedDay]));
+  const wrote = new Set(messages.map((m) => m.externalId));
+  return [
+    // Primero las que escribieron (ya vienen de la más reciente a la más antigua)…
+    ...messages.map((m) => ({ ...m, lastAssignedDay: assignedDay.get(m.externalId) ?? null, onlySeenAsAssignee: false })),
+    // …y después las vistas solo como asignadas, por número.
+    ...assignees
+      .filter((a) => !wrote.has(a.externalId))
+      .sort((a, b) => a.externalId.localeCompare(b.externalId, "es", { numeric: true }))
+      .map((a) => ({
+        externalId: a.externalId, firstMessageDay: null, lastMessageDay: null, messagesLast30Days: 0,
+        lastAssignedDay: a.lastAssignedDay, onlySeenAsAssignee: true,
+      })),
+  ];
 }
 
 /** Un vendedor de SIAF visto en las ventas recientes de una sucursal. */
@@ -92,11 +121,23 @@ export interface KnownVendor {
 export const VENDOR_LOOKBACK_DAYS = 90;
 
 /**
- * Opciones del formulario: las cuentas de Emozion que alguna vez escribieron y los
- * vendedores con ventas en los últimos VENDOR_LOOKBACK_DAYS días, por sucursal. Solo lectura.
+ * Opciones del formulario: las cuentas de Emozion que alguna vez escribieron o figuraron
+ * como asignadas, y los vendedores con ventas en los últimos VENDOR_LOOKBACK_DAYS días, por
+ * sucursal. Solo lectura.
  */
 export async function loadConfigOptions(prisma: PrismaClient): Promise<{ accounts: KnownAccount[]; vendors: KnownVendor[] }> {
-  const accounts = await prisma.$queryRaw<KnownAccount[]>(Prisma.sql`
+  // Asignadas: el valor actual de cada conversación y el de cada cambio de estado.
+  const assignees = await prisma.$queryRaw<AssigneeAccountRow[]>(Prisma.sql`
+    SELECT x.id AS "externalId", to_char(max(x.t) - interval '3 hours', 'YYYY-MM-DD') AS "lastAssignedDay"
+    FROM (
+      SELECT c."externalAssigneeId" AS id, c."updatedAt" AS t FROM "Conversation" c WHERE c."externalAssigneeId" IS NOT NULL
+      UNION ALL
+      SELECT h."externalAssigneeId" AS id, h."changedAt" AS t FROM "ConversationStateHistory" h WHERE h."externalAssigneeId" IS NOT NULL
+    ) x
+    GROUP BY x.id
+  `);
+
+  const messageAccounts = await prisma.$queryRaw<MessageAccountRow[]>(Prisma.sql`
     SELECT m."externalSenderId" AS "externalId",
       to_char(min(m."sentAt") - interval '3 hours', 'YYYY-MM-DD') AS "firstMessageDay",
       to_char(max(m."sentAt") - interval '3 hours', 'YYYY-MM-DD') AS "lastMessageDay",
@@ -106,6 +147,7 @@ export async function loadConfigOptions(prisma: PrismaClient): Promise<{ account
     GROUP BY 1
     ORDER BY max(m."sentAt") DESC
   `);
+  const accounts = mergeKnownAccounts(messageAccounts, assignees);
 
   const vendors = await prisma.$queryRaw<KnownVendor[]>(Prisma.sql`
     SELECT s."branchId" AS "branchId", b.name AS "branchName",

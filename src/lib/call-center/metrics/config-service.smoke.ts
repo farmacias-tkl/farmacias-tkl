@@ -97,7 +97,26 @@ async function main() {
       await prisma.callCenterMetricsConfig.delete({ where: { id: bad.id } });
     });
 
-    await check("opciones del formulario: cuentas que escribieron y vendedores por sucursal con ventas recientes", async () => {
+    await check("guardar con cuentas de sistema: el campo se conserva al leer; las versiones anteriores sin él siguen leyéndose", async () => {
+      const r = await saveConfigVersion(prisma, {
+        actorUserId: owner.id, validFrom: "2026-08-01",
+        data: data({ accounts: [
+          { externalId: "9001", alias: null, active: true, borrowed: false, historical: false, system: false },
+          { externalId: "9037", alias: "Asignación automática inventada", active: true, borrowed: false, historical: false, system: true },
+        ] }),
+      });
+      assert.equal(r.ok, true);
+      const { versions, invalid } = await loadConfigVersions();
+      assert.deepEqual(invalid, []);
+      assert.equal(versions.length, 3);
+      const nueva = configForDay(versions, "2026-08-15")!;
+      assert.deepEqual(nueva.data.accounts.map((a) => a.system), [false, true]);
+      const vieja = configForDay(versions, "2026-03-15")!;
+      assert.equal(vieja.data.accounts[0].system, undefined);
+      if (r.ok) await prisma.callCenterMetricsConfig.delete({ where: { id: r.id } });
+    });
+
+    await check("opciones del formulario: cuentas que escribieron o figuran asignadas, y vendedores por sucursal con ventas recientes", async () => {
       const customer = await prisma.customer.create({ data: { phone: "+5491100000001" } });
       const conv = await prisma.conversation.create({ data: { customerId: customer.id, status: "RESUELTA", source: "EMOZION" } });
       const now = Date.now();
@@ -118,10 +137,23 @@ async function main() {
       await snap(branchB.id, 200, [{ codigo: "V09", nombre: "Demasiado Viejo" }]); // fuera de la ventana
       await snap(branchB.id, 4, null);                                              // sin detalle de vendedores
 
+      // Asignadas: 9001 escribió y además figura asignada; 9037 y 9040 aparecen SOLO como asignadas
+      // (una en la conversación, otra en un cambio de estado).
+      await prisma.conversation.update({ where: { id: conv.id }, data: { externalAssigneeId: "9037" } });
+      await prisma.conversationStateHistory.create({ data: { conversationId: conv.id, fromStatus: "PENDIENTE", toStatus: "ASIGNADA", externalAssigneeId: "9001" } });
+      await prisma.conversationStateHistory.create({ data: { conversationId: conv.id, fromStatus: "ASIGNADA", toStatus: "RESUELTA", externalAssigneeId: "9040" } });
+      await prisma.conversationStateHistory.create({ data: { conversationId: conv.id, fromStatus: "RESUELTA", toStatus: "SIN_ASIGNAR" } }); // sin asignado
+
       const { accounts, vendors } = await loadConfigOptions(prisma);
-      assert.deepEqual(accounts.map((a) => a.externalId), ["9001", "9002"]);
+      assert.deepEqual(accounts.map((a) => a.externalId), ["9001", "9002", "9037", "9040"]);
       assert.equal(accounts[0].messagesLast30Days, 1);
       assert.equal(accounts[1].messagesLast30Days, 0);
+      assert.deepEqual(accounts.map((a) => a.onlySeenAsAssignee), [false, false, true, true]);
+      assert.ok(accounts[0].lastAssignedDay, "9001 escribió y además figura asignada");
+      assert.equal(accounts[1].lastAssignedDay, null);
+      assert.deepEqual([accounts[2].firstMessageDay, accounts[2].lastMessageDay, accounts[2].messagesLast30Days], [null, null, 0]);
+      assert.ok(accounts[2].lastAssignedDay && accounts[3].lastAssignedDay);
+      assert.equal(accounts.some((a) => a.externalId === "777" || a.externalId === "1"), false, "cliente y bot no son cuentas");
       assert.equal(vendors.length, 3);
       const a1 = vendors.find((v) => v.branchId === branchA.id && v.code === "V01")!;
       assert.equal(a1.name, "Vendedor Inventado Uno"); // el nombre más reciente

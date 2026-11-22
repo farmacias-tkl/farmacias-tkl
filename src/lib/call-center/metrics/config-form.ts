@@ -5,7 +5,7 @@
  * Un día se escribe como franjas separadas por coma: "08:00-13:00, 16:00-20:30". Vacío =
  * ese día no hay atención.
  */
-import { ISO_WEEKDAYS, type IsoWeekday, type TimeRange, type WeekSchedule } from "./config-schema";
+import { ISO_WEEKDAYS, type ConfigAccount, type IsoWeekday, type TimeRange, type WeekSchedule } from "./config-schema";
 
 export const WEEKDAY_LABELS: Record<IsoWeekday, string> = {
   "1": "Lunes", "2": "Martes", "3": "Miércoles", "4": "Jueves", "5": "Viernes", "6": "Sábado", "7": "Domingo",
@@ -60,6 +60,28 @@ export function textToSchedule(text: Record<IsoWeekday, string>): ParseScheduleR
 /** Horario sin atención ningún día: punto de partida de un formulario vacío. */
 export function emptyScheduleText(): Record<IsoWeekday, string> {
   return Object.fromEntries(ISO_WEEKDAYS.map((d) => [d, ""])) as Record<IsoWeekday, string>;
+}
+
+/**
+ * Cómo se PROPONE en el formulario una cuenta vista en los datos que todavía no está en la
+ * configuración. Es solo el punto de partida: Dirección lo cambia antes de guardar.
+ *  - escribió en los últimos 30 días → activa;
+ *  - escribió, pero no en los últimos 30 días → histórica;
+ *  - vista solo como asignada (nunca escribió) → ni activa ni histórica, y sin marcar como
+ *    sistema: no se adivina qué es.
+ */
+export function proposeAccount(known: {
+  externalId: string; messagesLast30Days: number; onlySeenAsAssignee: boolean;
+}): ConfigAccount {
+  const wroteRecently = !known.onlySeenAsAssignee && known.messagesLast30Days > 0;
+  return {
+    externalId: known.externalId,
+    alias: null,
+    active: wroteRecently,
+    borrowed: false,
+    historical: !known.onlySeenAsAssignee && !wroteRecently,
+    system: false,
+  };
 }
 
 /** "YYYY-MM-DD" que además es una fecha de calendario real. */

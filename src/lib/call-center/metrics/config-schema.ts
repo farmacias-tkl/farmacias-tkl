@@ -66,11 +66,23 @@ const accountSchema = z
     borrowed: z.boolean(),
     /** Ya no se usa; se muestra solo en los períodos en que tuvo actividad. */
     historical: z.boolean(),
+    /**
+     * Cuenta de sistema: no es una persona (por ejemplo, una cuenta a la que Emozion asigna
+     * conversaciones de forma automática). OPCIONAL: las versiones guardadas antes de este
+     * campo no lo traen y siguen siendo válidas; ausente equivale a false (isSystemAccount).
+     * Por ahora solo se guarda: ni la bandeja ni las métricas lo usan todavía.
+     */
+    system: z.boolean().optional(),
   })
   .strict()
   .refine((a) => !(a.active && a.historical), "Una cuenta no puede ser activa e histórica a la vez");
 
 export type ConfigAccount = z.infer<typeof accountSchema>;
+
+/** ¿Es una cuenta de sistema? El campo es opcional: sin él, no lo es. */
+export function isSystemAccount(a: Pick<ConfigAccount, "system">): boolean {
+  return a.system === true;
+}
 
 const vendorSchema = z
   .object({
