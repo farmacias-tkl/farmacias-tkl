@@ -12,6 +12,7 @@
  */
 import {
   can, canAccessOwnerPanel, canAccessRoute, canViewCallCenter, canViewExecutive,
+  canSeePlatformLinkFromCallCenter, PLATFORM_HOME_ROUTE,
   CALL_CENTER_ROLE_ACCESS, MENU_BY_ROLE, ROUTE_PERMISSIONS, visibleMenu,
 } from "./permissions";
 import type { UserRole } from "@prisma/client";
@@ -183,6 +184,30 @@ for (const r of ROLES.filter((x) => x !== "OWNER")) {
   assert(`menú: ${r} no tiene /owner`, !MENU_BY_ROLE[r].includes("/owner"));
 }
 assert("panel de Dirección: OWNER sí", canAccessOwnerPanel({ role: "OWNER" }));
+
+console.log("=== Volver a la plataforma desde Call Center ===");
+assert("la ruta de vuelta es /dashboard", PLATFORM_HOME_ROUTE === "/dashboard");
+for (const r of ROLES) {
+  const porJerarquia = CALL_CENTER_ROLE_ACCESS.includes(r);
+  // Con el flag: todos entran a la bandeja y todos tienen /dashboard → todos ven el enlace.
+  assert(`${r} con callCenterAccess: ve "Volver a la plataforma"`, canSeePlatformLinkFromCallCenter({ role: r, callCenterAccess: true }));
+  // Sin el flag: solo quien entra a la bandeja por jerarquía.
+  assert(
+    `${r} sin callCenterAccess: ${porJerarquia ? "lo ve" : "no lo ve (no entra a la bandeja)"}`,
+    canSeePlatformLinkFromCallCenter({ role: r, callCenterAccess: false }) === porJerarquia,
+  );
+  // Nunca se ofrece a quien no entra a la bandeja, ni a quien no puede entrar a la plataforma.
+  for (const flag of [true, false]) {
+    const u = { role: r, callCenterAccess: flag };
+    assert(
+      `${r} flag=${flag}: el enlace equivale a entrar a la bandeja y a /dashboard`,
+      canSeePlatformLinkFromCallCenter(u) === (canViewCallCenter(u) && canAccessRoute(r, PLATFORM_HOME_ROUTE)),
+    );
+  }
+  // Hoy los seis roles tienen la plataforma operativa: si esto cambia, el enlace se oculta solo.
+  assert(`${r}: tiene acceso a /dashboard`, canAccessRoute(r, PLATFORM_HOME_ROUTE));
+}
+assert("sin usuario: no se muestra", !canSeePlatformLinkFromCallCenter(null) && !canSeePlatformLinkFromCallCenter(undefined));
 
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);
 process.exit(failed === 0 ? 0 : 1);
