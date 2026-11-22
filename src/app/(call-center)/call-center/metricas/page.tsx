@@ -5,6 +5,7 @@ import { canViewCallCenterMetrics, canConfigureCallCenterMetrics } from "@/lib/p
 import { arDayISO } from "@/lib/call-center/metrics/business-time";
 import NowPanel from "./NowPanel";
 import AttentionPanel from "./AttentionPanel";
+import QualityPanel from "./QualityPanel";
 
 export const metadata = { title: "Call Center — Métricas" };
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 const BLOCKS = [
   { key: "ahora", label: "Ahora" },
   { key: "atencion", label: "Atención y demoras" },
+  { key: "datos", label: "Calidad de datos" },
 ] as const;
 type BlockKey = (typeof BLOCKS)[number]["key"];
 
@@ -54,6 +56,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
 
       {block === "ahora" && <NowPanel />}
       {block === "atencion" && <AttentionPanel today={arDayISO(new Date())} />}
+      {block === "datos" && <QualityPanel />}
     </main>
   );
 }
