@@ -15,48 +15,14 @@ import {
   type ClosedUnansweredHistory, type QueueGroupCounts, type QueueSnapshot,
 } from "./queue";
 import { QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
+import { NOW_CACHE_SECONDS, type NowGroup, type NowPayload } from "./now-types";
+
+export { NOW_CACHE_SECONDS } from "./now-types";
+export type { NowGroup, NowListItem, NowPayload } from "./now-types";
 
 /** Tope de filas de la lista. Los conteos no se recortan. */
 export const NOW_LIST_MAX_ROWS = 200;
-export const NOW_CACHE_SECONDS = 60;
 const HISTORY_CACHE_SECONDS = 3600;
-
-export interface NowListItem {
-  conversationId: string;
-  open: boolean;
-  /** ISO. Desde cuándo espera: primer mensaje del cliente del bloque sin responder. */
-  waitStart: string;
-  waitMinutes: number;
-  hasHumanResponse: boolean;
-  botOrderComplete: boolean;
-  thanksCandidate: boolean;
-  noBotExit: boolean;
-}
-
-export interface NowGroup extends Omit<QueueGroupCounts, "oldestWaitStart"> {
-  oldestWaitStart: string | null;
-}
-
-export interface NowPayload {
-  generatedAt: string;
-  /** Evidencia de actualización. null si no hay ningún evento o mensaje. */
-  freshness: { lastWebhookAt: string | null; lastMessageAt: string | null };
-  openWaiting: NowGroup;
-  closedUnanswered: NowGroup;
-  /** Desde qué fecha de creación se cuentan las cerradas en closedUnanswered. */
-  closedSince: string;
-  /** Cerradas sin respuesta anteriores a esa fecha. null si no se pudo calcular. */
-  closedBefore: { total: number; neverHuman: number; awaitingNext: number; completedOrders: number } | null;
-  /** Abiertas esperando hace más de la ventana de la lista. */
-  openOlderThanListWindow: number;
-  /** Pedidos completos en el bot sin respuesta de una persona: abiertas + cerradas de la ventana. */
-  completedOrdersWaiting: number;
-  list: NowListItem[];
-  /** Horas de la ventana de la lista para las cerradas (las abiertas van todas). */
-  listWindowHours: number;
-  /** Filas que cumplen el filtro de la lista, antes del tope. */
-  listTotal: number;
-}
 
 const group = (g: QueueGroupCounts): NowGroup => ({ ...g, oldestWaitStart: g.oldestWaitStart ? g.oldestWaitStart.toISOString() : null });
 
