@@ -65,11 +65,23 @@ function Report({ data }: { data: SalesPayload }) {
   const noVendors = data.byVendor.length === 0;
   return (
     <>
-      <p className="mt-4 text-xs text-gray-600">
-        Calculado a las {timeFmt.format(new Date(data.generatedAt))}.
-        {data.lastLoadedDay ? ` Último día con comprobantes cargados: ${formatShortDay(data.lastLoadedDay)}.` : " No hay comprobantes cargados en el período."}
-        {" "}SIAF se carga con un día de atraso.
+      <p className="mt-4 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900">
+        {data.siafLastDay
+          ? <>Datos de SIAF hasta el <span className="font-semibold">{formatShortDay(data.siafLastDay)}</span>. Se actualizan una vez por día, de madrugada.</>
+          : "Todavía no hay datos de SIAF cargados. Se actualizan una vez por día, de madrugada."}
       </p>
+      {data.siafDelayed && (
+        <p role="alert" className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
+          Los datos de SIAF tienen más de un día de atraso.
+        </p>
+      )}
+      {data.daysNotLoaded.length > 0 && (
+        <p className="mt-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs text-gray-800">
+          <span className="font-semibold">Sin datos todavía:</span> {data.daysNotLoaded.map(formatShortDay).join(", ")}.
+          {" "}{data.daysNotLoaded.length === 1 ? "Ese día no entra" : "Esos días no entran"} en los totales y no {data.daysNotLoaded.length === 1 ? "vale" : "valen"} cero.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-gray-600">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
       {!data.hasConfig && (
         <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           Todavía no hay configuración cargada: no se sabe qué vendedores son del Call Center.
@@ -117,9 +129,10 @@ function Report({ data }: { data: SalesPayload }) {
             <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{per100(data.receiptsPer100Orders)}</p>
             <div className="mt-2 space-y-1">
               <Line label="Pedidos que entraron esos días" value={nf.format(data.orders)} />
+              <Line label="Días con ventas cargadas" value={nf.format(data.relationDays)} />
             </div>
             <p className="mt-1 text-xs text-gray-600">
-              Compara dos volúmenes del mismo día. No es una tasa de conversión: no se sabe qué comprobante corresponde a qué conversación.
+              Se calcula solo sobre los días que tienen ventas de SIAF cargadas. Compara dos volúmenes del mismo día. No es una tasa de conversión: no se sabe qué comprobante corresponde a qué conversación.
               Pedidos son las conversaciones de pedido en el bot y las recetas de Meducar.
             </p>
           </div>

@@ -515,10 +515,13 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     key: "sales.receipts_per_100_orders",
     block: "VENTAS",
     label: "Comprobantes cada 100 pedidos",
-    definition: "Comprobantes del día sobre conversaciones de tipo pedido creadas ese día, por cien.",
+    definition:
+      "Comprobantes sobre pedidos, por cien. Pedido es una conversación de pedido en el bot o una receta de " +
+      "Meducar (Meducar es un pedido con receta), creada ese día. Se calcula solo sobre los días que tienen " +
+      "ventas de SIAF cargadas.",
     source: "SalesSnapshot, Conversation, configuración",
     population: "COMPROBANTE",
-    denominator: "Conversaciones de tipo pedido del día",
+    denominator: "Pedidos (pedido en el bot o receta de Meducar) de los días con ventas cargadas",
     evidence: "MEDIDO",
     limitations: [
       "Es una relación de volúmenes, no una tasa de conversión: no hay vínculo entre conversación y comprobante.",

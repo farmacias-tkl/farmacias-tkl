@@ -22,8 +22,19 @@ export interface SalesPayloadDay extends SalesDayLine {
 export interface SalesPayload extends Omit<SalesReport, "byDay"> {
   generatedAt: string;
   byDay: SalesPayloadDay[];
-  /** Pedidos de los días que tienen comprobantes del Call Center. */
+  /**
+   * Pedidos de los días del período que tienen ventas de SIAF cargadas y configuración
+   * vigente: los dos lados de la relación cubren los mismos días.
+   */
   orders: number;
+  /** Cantidad de esos días. */
+  relationDays: number;
+  /** Último día con ventas de SIAF cargadas, en toda la base. null si no hay ninguno. */
+  siafLastDay: string | null;
+  /** El último día cargado es anterior a ayer: la sincronización tiene más de un día de atraso. */
+  siafDelayed: boolean;
+  /** Días del período posteriores al último cargado: sin datos todavía, no cero. No entran en los totales. */
+  daysNotLoaded: string[];
   receiptsPer100Orders: number | null;
   /** Hay una versión de la configuración vigente hoy. */
   hasConfig: boolean;

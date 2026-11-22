@@ -13,7 +13,8 @@ import { loadEntryRows, type EntryRow } from "./attention";
 import { arDayISO } from "./business-time";
 import { configForDay, loadConfigVersions } from "./config";
 import { classifyManagementType } from "./management-type";
-import { buildSalesReport, loadVendorSalesRows, receiptsPer100Orders, type SalesReport } from "./sales";
+import { buildSalesReport, loadLastSalesDay, loadVendorSalesRows, receiptsPer100Orders, type SalesReport } from "./sales";
+import { addDaysISO } from "./period";
 import { SALES_CACHE_SECONDS, type SalesPayload } from "./sales-types";
 
 /** Pedidos por día de Buenos Aires: pedido en el bot o receta de Meducar. PURO. */
@@ -28,19 +29,38 @@ export function ordersByDay(rows: readonly Pick<EntryRow, "createdAt" | "orderFl
 }
 
 /** Arma la respuesta. PURO. */
-export function toSalesPayload(report: SalesReport, orders: ReadonlyMap<string, number>, opts: { now: Date; hasConfig: boolean }): SalesPayload {
+export function toSalesPayload(
+  report: SalesReport,
+  orders: ReadonlyMap<string, number>,
+  opts: { now: Date; hasConfig: boolean; siafLastDay: string | null },
+): SalesPayload {
   const byDay = report.byDay.map((d) => {
     const n = orders.get(d.day) ?? 0;
     return { ...d, orders: n, receiptsPer100Orders: receiptsPer100Orders(d.receipts, n) };
   });
-  // Solo los días con comprobantes del Call Center: los dos lados de la relación cubren los mismos días.
-  const totalOrders = byDay.reduce((n, d) => n + d.orders, 0);
+  // La relación usa solo los días con ventas cargadas y configuración vigente: un día sin
+  // datos de SIAF todavía tiene pedidos pero no comprobantes, y bajaría la relación sin motivo.
+  const withoutConfig = new Set(report.daysWithoutConfig);
+  const relationDays = report.loadedDays.filter((day) => !withoutConfig.has(day));
+  const totalOrders = relationDays.reduce((n, day) => n + (orders.get(day) ?? 0), 0);
+
+  // Días del período posteriores al último cargado: todavía no hay datos, no valen cero.
+  const today = arDayISO(opts.now);
+  const end = report.to < today ? report.to : today;
+  const daysNotLoaded: string[] = [];
+  for (let day = opts.siafLastDay && opts.siafLastDay >= report.from ? addDaysISO(opts.siafLastDay, 1) : report.from; day <= end; day = addDaysISO(day, 1)) {
+    daysNotLoaded.push(day);
+  }
   return {
     ...report,
     generatedAt: opts.now.toISOString(),
     byDay,
     orders: totalOrders,
+    relationDays: relationDays.length,
     receiptsPer100Orders: receiptsPer100Orders(report.total.receipts, totalOrders),
+    siafLastDay: opts.siafLastDay,
+    siafDelayed: opts.siafLastDay !== null && opts.siafLastDay < addDaysISO(today, -1),
+    daysNotLoaded,
     hasConfig: opts.hasConfig,
   };
 }
@@ -56,9 +76,11 @@ export async function getSalesPayload(from: string, to: string, now: Date = new 
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < ttl) return hit.payload;
 
-  const [{ versions }, sales, entries] = await Promise.all([loadConfigVersions(), loadVendorSalesRows(from, to), loadEntryRows(from, to)]);
+  const [{ versions }, sales, entries, siafLastDay] = await Promise.all([
+    loadConfigVersions(), loadVendorSalesRows(from, to), loadEntryRows(from, to), loadLastSalesDay(),
+  ]);
   const payload = toSalesPayload(buildSalesReport(sales, { from, to, versions }), ordersByDay(entries), {
-    now, hasConfig: configForDay(versions, arDayISO(now)) !== null,
+    now, siafLastDay, hasConfig: configForDay(versions, arDayISO(now)) !== null,
   });
 
   if (cache.size >= CACHE_MAX_ENTRIES) {

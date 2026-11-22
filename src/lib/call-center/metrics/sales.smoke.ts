@@ -83,6 +83,8 @@ async function main() {
       const now = new Date("2026-03-13T15:00:00.000Z");
       const p = await getSalesPayload("2026-03-08", "2026-03-12", now);
       assert.deepEqual([p.total.gross, p.negativeVendorDays, p.hasConfig], [3970, 1, true]);
+      // El último día cargado se busca en toda la base (20/03), no solo en el período.
+      assert.deepEqual([p.siafLastDay, p.siafDelayed, p.daysNotLoaded, p.relationDays], ["2026-03-20", false, [], 4]);
       // Sin conversaciones cargadas no hay pedidos: la relación queda sin dato, no en cero.
       assert.deepEqual([p.orders, p.receiptsPer100Orders], [0, null]);
       assert.equal(p.byDay.every((d) => d.receiptsPer100Orders === null), true);

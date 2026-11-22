@@ -78,6 +78,8 @@ export interface SalesReport {
   configVersionsUsed: Array<{ id: string; validFrom: string }>;
   /** Último día con ventas cargadas dentro del período; null si no hay ninguno. */
   lastLoadedDay: string | null;
+  /** Días del período con ventas cargadas (de cualquier vendedor), en orden. */
+  loadedDays: string[];
   /**
    * Vendedor y día con importe negativo: ese día las notas de crédito superaron a las ventas.
    * Es lo único que la fuente deja ver de las notas de crédito: no las informa por separado.
@@ -126,11 +128,13 @@ export function buildSalesReport(
   const withoutConfig = new Set<string>();
   const used = new Map<string, string>();
   let lastLoadedDay: string | null = null;
+  const loaded = new Set<string>();
   let negativeVendorDays = 0;
 
   for (const r of rows) {
     if (r.day < opts.from || r.day > opts.to) continue;
     if (lastLoadedDay === null || r.day > lastLoadedDay) lastLoadedDay = r.day;
+    loaded.add(r.day);
 
     const version = versionFor(r.day);
     if (!version) { withoutConfig.add(r.day); continue; }
@@ -173,6 +177,7 @@ export function buildSalesReport(
     daysWithoutConfig: [...withoutConfig].sort(),
     configVersionsUsed: [...used.entries()].map(([id, validFrom]) => ({ id, validFrom })).sort((a, b) => a.validFrom.localeCompare(b.validFrom)),
     lastLoadedDay,
+    loadedDays: [...loaded].sort(),
     negativeVendorDays,
   };
 }
@@ -180,6 +185,21 @@ export function buildSalesReport(
 /** Comprobantes cada 100 pedidos: relación de volúmenes. null sin pedidos (no cero). */
 export function receiptsPer100Orders(receipts: number, orders: number): number | null {
   return orders > 0 ? Math.round((receipts / orders) * 1000) / 10 : null;
+}
+
+/**
+ * Último día con ventas de SIAF cargadas con detalle de vendedores, en toda la base (no solo
+ * en el período). null si no hay ninguno. Solo lectura.
+ */
+export async function loadLastSalesDay(): Promise<string | null> {
+  const rows = await prisma.$queryRaw<Array<{ day: string | null }>>(Prisma.sql`
+    SELECT to_char(max(s."snapshotDate"), 'YYYY-MM-DD') AS "day"
+    FROM "SalesSnapshot" s
+    WHERE CASE WHEN jsonb_typeof(s."rawData"::jsonb -> 'vendedores') = 'array'
+               THEN jsonb_array_length(s."rawData"::jsonb -> 'vendedores') > 0
+               ELSE false END
+  `);
+  return rows[0]?.day ?? null;
 }
 
 interface RawVendorSalesRow {
