@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS, indicator, type IndicatorDefinition } from "@/lib/call-center/metrics/indicators";
+import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
 import { NOW_CACHE_SECONDS, type NowGroup, type NowListItem, type NowPayload } from "@/lib/call-center/metrics/now-types";
 
 const REFRESH_MS = NOW_CACHE_SECONDS * 1000;
@@ -10,13 +11,6 @@ const nf = new Intl.NumberFormat("es-AR");
 const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
 const dateTimeFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
 
-/** 95 → "1 h 35 min"; 3000 → "2 d 2 h". */
-function formatWait(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h ${minutes % 60} min`;
-  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
-}
 const minutesSince = (iso: string, nowMs: number) => Math.max(0, Math.round((nowMs - new Date(iso).getTime()) / 60000));
 
 type State = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; data: NowPayload; fetchedAt: number };
