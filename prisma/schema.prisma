@@ -877,6 +877,7 @@ enum AccessAction {
   VIEW_SALES
   VIEW_COMPARATIVE
   EXPORT
+  VIEW_CALL_CENTER_SALES // vista del bloque Ventas SIAF de /call-center/metricas; distinta de VIEW_SALES (Dashboard Ejecutivo). Al final: coincide con ADD VALUE.
 }
 
 model BankBalanceSnapshot {
