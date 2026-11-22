@@ -1,8 +1,9 @@
 /**
  * GET /api/call-center/metrics/now — bloque "Ahora" de las métricas del Call Center.
  *
- * Quién espera una respuesta en este momento: abiertas esperando, cerradas sin respuesta,
- * candidatos a agradecimiento, pedidos completos y evidencia de actualización. Solo lectura.
+ * Quién espera una respuesta en este momento (abiertas con hasta 72 horas de espera), las
+ * abiertas más viejas para cerrar en Emozion, las cerradas sin responder de los últimos 7
+ * días y los datos de la pestaña "Calidad de datos". Solo lectura.
  *
  * Gate: canViewCallCenterMetrics (Dirección, Administrador y Supervisión). Entrar a la
  * bandeja por el flag callCenterAccess NO alcanza. La respuesta lleva ids internos de

@@ -1,68 +1,120 @@
 /**
- * Bloque "Ahora" de las métricas: lo que la pantalla y la API entregan.
+ * Bloque "Ahora" y pestaña "Calidad de datos" de las métricas: lo que las pantallas y la API entregan.
  *
  * toNowPayload es PURO: arma la respuesta a partir de la cola ya calculada. getNowPayload
  * la calcula con una caché en memoria de 60 segundos por instancia, para que el refresco
  * automático de varias pantallas abiertas no repita la consulta. El histórico de cerradas
  * sin respuesta anterior a la ventana recorre todos los mensajes: se guarda una hora.
  *
- * La lista lleva solo el id interno de la conversación (para el enlace), horas y marcas.
+ * Las listas llevan solo el id interno de la conversación (para el enlace), horas y marcas.
  * Nunca teléfono, nombre ni texto del cliente.
  */
 import { prisma } from "@/lib/prisma";
 import {
-  getQueueSnapshot, countClosedUnansweredBefore, itemsForList,
+  getQueueSnapshot, countClosedUnansweredBefore,
   type ClosedUnansweredHistory, type QueueGroupCounts, type QueueSnapshot,
 } from "./queue";
-import { QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
-import { NOW_CACHE_SECONDS, type NowGroup, type NowPayload } from "./now-types";
+import { CLOSED_UNANSWERED_DAYS, QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
+import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
+import { getClosedUnanswered } from "./closed-unanswered";
+import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowPayload } from "./now-types";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
 
-/** Tope de filas de la lista. Los conteos no se recortan. */
+/** Tope de filas de cada lista. Los conteos no se recortan. */
 export const NOW_LIST_MAX_ROWS = 200;
 const HISTORY_CACHE_SECONDS = 3600;
 
 const group = (g: QueueGroupCounts): NowGroup => ({ ...g, oldestWaitStart: g.oldestWaitStart ? g.oldestWaitStart.toISOString() : null });
 
-/** Arma la respuesta. PURO. */
+/** Lo que se calcula aparte de la cola. null = no se pudo calcular. */
+export interface NowExtras {
+  history: ClosedUnansweredHistory | null;
+  today: { entered: number; answered: number } | null;
+  closed: ClosedUnansweredReport | null;
+}
+
+/**
+ * Arma la respuesta. PURO. Reagrupa la cola ya calculada: los clientes esperando son las
+ * abiertas con hasta `windowHours` de espera; las abiertas más viejas van aparte.
+ */
 export function toNowPayload(
   snapshot: QueueSnapshot,
-  history: ClosedUnansweredHistory | null,
+  extras: NowExtras,
   freshness: { lastWebhookAt: Date | null; lastMessageAt: Date | null },
-  listWindowHours: number = QUEUE_LIST_DEFAULT_HOURS,
+  windowHours: number = QUEUE_LIST_DEFAULT_HOURS,
   maxRows: number = NOW_LIST_MAX_ROWS,
 ): NowPayload {
-  const listed = itemsForList(snapshot, listWindowHours);
+  // snapshot.items viene de la espera más vieja a la más nueva.
+  const open = snapshot.items.filter((it) => it.open);
+  const waiting = open.filter((it) => it.waitHours <= windowHours);
+  const stale = open.filter((it) => it.waitHours > windowHours);
+  const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
+  const { history, today, closed } = extras;
+
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
-    freshness: {
-      lastWebhookAt: freshness.lastWebhookAt ? freshness.lastWebhookAt.toISOString() : null,
-      lastMessageAt: freshness.lastMessageAt ? freshness.lastMessageAt.toISOString() : null,
+    windowHours,
+    waiting: {
+      total: waiting.length,
+      neverHuman: neverHuman.length,
+      awaitingNext: waiting.length - neverHuman.length,
+      completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
+      oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
     },
-    openWaiting: group(snapshot.openWaiting),
-    closedUnanswered: group(snapshot.closedUnanswered),
-    closedSince: snapshot.closedSince.toISOString(),
-    closedBefore: history
-      ? { total: history.total, neverHuman: history.neverHuman, awaitingNext: history.awaitingNext, completedOrders: history.completedOrders }
-      : null,
-    openOlderThanListWindow: snapshot.openOlderThanListWindow,
-    completedOrdersWaiting: snapshot.openWaiting.completedOrders + snapshot.closedUnanswered.completedOrders,
-    // itemsForList ya viene de la espera más vieja a la más nueva: el tope deja las más viejas.
-    list: listed.slice(0, maxRows).map((it) => ({
+    today,
+    list: waiting.slice(0, maxRows).map((it) => ({
       conversationId: it.conversationId,
-      open: it.open,
+      status: it.status,
+      createdAt: it.createdAt.toISOString(),
       waitStart: it.waitStart.toISOString(),
       waitMinutes: Math.round(it.waitHours * 60),
       hasHumanResponse: it.hasHumanResponse,
       botOrderComplete: it.botOrderComplete,
       thanksCandidate: it.thanksCandidate,
-      noBotExit: it.botExitAt === null,
     })),
-    listWindowHours,
-    listTotal: listed.length,
+    listTotal: waiting.length,
+    stale: {
+      total: stale.length,
+      oldestWaitStart: stale.length ? stale[0].waitStart.toISOString() : null,
+      items: stale.slice(0, maxRows).map((it) => ({ conversationId: it.conversationId, waitStart: it.waitStart.toISOString() })),
+    },
+    closedUnanswered: closed
+      ? { days: closed.days, total: closed.total, question: closed.question, order: closed.order, attachment: closed.attachment, items: closed.items.slice(0, maxRows) }
+      : null,
+    quality: {
+      freshness: {
+        lastWebhookAt: freshness.lastWebhookAt ? freshness.lastWebhookAt.toISOString() : null,
+        lastMessageAt: freshness.lastMessageAt ? freshness.lastMessageAt.toISOString() : null,
+      },
+      openWaiting: group(snapshot.openWaiting),
+      closedUnanswered: group(snapshot.closedUnanswered),
+      closedSince: snapshot.closedSince.toISOString(),
+      closedBefore: history
+        ? { total: history.total, neverHuman: history.neverHuman, awaitingNext: history.awaitingNext, completedOrders: history.completedOrders }
+        : null,
+      notCustomers: closed ? closed.notCustomers : null,
+      notCustomersDays: closed ? closed.days : CLOSED_UNANSWERED_DAYS,
+    },
   };
+}
+
+/**
+ * Conversaciones creadas hoy (día de Buenos Aires) y, de esas, las que ya tienen al menos
+ * una respuesta pública de un operador. Es una sola población. Solo lectura.
+ */
+export async function loadToday(now: Date): Promise<{ entered: number; answered: number }> {
+  const from = arDayStartUTC(arDayISO(now));
+  const rows = await prisma.$queryRaw<Array<{ entered: number; answered: number }>>`
+    SELECT count(*)::int AS "entered",
+      (count(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM "ConversationMessage" m
+        WHERE m."conversationId" = c.id AND m.author = 'OPERATOR' AND NOT m."isPrivate")))::int AS "answered"
+    FROM "Conversation" c
+    WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp
+  `;
+  return rows[0] ?? { entered: 0, answered: 0 };
 }
 
 async function loadFreshness(): Promise<{ lastWebhookAt: Date | null; lastMessageAt: Date | null }> {
@@ -85,10 +137,12 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness] = await Promise.all([getQueueSnapshot(now), loadFreshness()]);
+  const [snapshot, freshness, today] = await Promise.all([getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null)]);
 
-  // Histórico: se recalcula como mucho una vez por hora. Si falla, la pantalla lo muestra como
-  // no disponible en lugar de caerse entera.
+  // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
+  const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
+
+  // Histórico: se recalcula como mucho una vez por hora.
   let history: ClosedUnansweredHistory | null = null;
   if (historyCache && now.getTime() - historyCache.at < HISTORY_CACHE_SECONDS * 1000) {
     history = historyCache.value;
@@ -101,7 +155,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, history, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

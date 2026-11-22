@@ -1,6 +1,11 @@
 /**
- * Tipos de la respuesta del bloque "Ahora" y su intervalo de refresco. Archivo aparte, sin
- * imports de servidor, para que la pantalla (cliente) los use sin arrastrar Prisma.
+ * Tipos de la respuesta del bloque "Ahora" y de la pestaña "Calidad de datos", y su
+ * intervalo de refresco. Archivo aparte, sin imports de servidor, para que las pantallas
+ * (cliente) los usen sin arrastrar Prisma.
+ *
+ * "Ahora" responde una sola pregunta: quién está esperando en este momento. Mira solo las
+ * abiertas con hasta `windowHours` de espera. Lo demás (abiertas viejas, cerradas, histórico
+ * y calidad de datos) va aparte y no se suma a la cola.
  */
 import type { QueueGroupCounts } from "./queue-types";
 
@@ -9,14 +14,43 @@ export const NOW_CACHE_SECONDS = 60;
 
 export interface NowListItem {
   conversationId: string;
-  open: boolean;
+  /** Estado de la conversación: PENDIENTE, SIN_ASIGNAR o ASIGNADA. */
+  status: string;
+  /** ISO. Cuándo entró la conversación. */
+  createdAt: string;
   /** ISO. Desde cuándo espera: primer mensaje del cliente del bloque sin responder. */
   waitStart: string;
   waitMinutes: number;
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
   thanksCandidate: boolean;
-  noBotExit: boolean;
+}
+
+/** Abierta con más de `windowHours` de espera: para cerrar en Emozion. */
+export interface NowStaleItem {
+  conversationId: string;
+  waitStart: string;
+}
+
+export type ClosedReason = "QUESTION" | "ORDER" | "ATTACHMENT";
+
+export interface NowClosedItem {
+  conversationId: string;
+  /** ISO. Último mensaje del cliente. */
+  lastCustomerAt: string;
+  reason: ClosedReason;
+}
+
+/** Cerradas sin responder de los últimos `days` días, por lo que pedía el último bloque del cliente. */
+export interface ClosedUnansweredReport {
+  days: number;
+  total: number;
+  question: number;
+  order: number;
+  attachment: number;
+  /** Proveedores, currículums y publicidad: no entran en total ni en la lista. */
+  notCustomers: number;
+  items: NowClosedItem[];
 }
 
 export interface NowGroup extends Omit<QueueGroupCounts, "oldestWaitStart"> {
@@ -25,21 +59,42 @@ export interface NowGroup extends Omit<QueueGroupCounts, "oldestWaitStart"> {
 
 export interface NowPayload {
   generatedAt: string;
-  /** Evidencia de actualización. null si no hay ningún evento o mensaje. */
-  freshness: { lastWebhookAt: string | null; lastMessageAt: string | null };
-  openWaiting: NowGroup;
-  closedUnanswered: NowGroup;
-  /** Desde qué fecha de creación se cuentan las cerradas en closedUnanswered. */
-  closedSince: string;
-  /** Cerradas sin respuesta anteriores a esa fecha. null si no se pudo calcular. */
-  closedBefore: { total: number; neverHuman: number; awaitingNext: number; completedOrders: number } | null;
-  /** Abiertas esperando hace más de la ventana de la lista. */
-  openOlderThanListWindow: number;
-  /** Pedidos completos en el bot sin respuesta de una persona: abiertas + cerradas de la ventana. */
-  completedOrdersWaiting: number;
+  /** Horas de espera hasta las que una abierta cuenta como cliente esperando. */
+  windowHours: number;
+  /** Abiertas con hasta `windowHours` de espera. */
+  waiting: {
+    total: number;
+    /** Esperan la primera respuesta de una persona. */
+    neverHuman: number;
+    /** Ya les respondieron y volvieron a escribir. */
+    awaitingNext: number;
+    /** Sin respuesta de una persona y con pedido completo en el bot. */
+    completedOrders: number;
+    oldestWaitStart: string | null;
+  };
+  /** Creadas hoy (día de Buenos Aires) y, de esas, las que ya tienen respuesta de una persona. null si no se pudo calcular. */
+  today: { entered: number; answered: number } | null;
+  /** Las de `waiting`, de la espera más vieja a la más nueva. */
   list: NowListItem[];
-  /** Horas de la ventana de la lista para las cerradas (las abiertas van todas). */
-  listWindowHours: number;
-  /** Filas que cumplen el filtro de la lista, antes del tope. */
+  /** Filas de la lista antes del tope. */
   listTotal: number;
+  /** Abiertas con más de `windowHours` de espera: no cuentan como clientes esperando. */
+  stale: { total: number; oldestWaitStart: string | null; items: NowStaleItem[] };
+  /** null si no se pudo calcular. */
+  closedUnanswered: Omit<ClosedUnansweredReport, "notCustomers"> | null;
+  /** Lo que muestra la pestaña "Calidad de datos". */
+  quality: {
+    /** Evidencia de actualización. null si no hay ningún evento o mensaje. */
+    freshness: { lastWebhookAt: string | null; lastMessageAt: string | null };
+    /** Todas las abiertas esperando, de cualquier antigüedad. */
+    openWaiting: NowGroup;
+    /** Cerradas cuyo último mensaje es del cliente, creadas desde closedSince, sin filtrar por contenido. */
+    closedUnanswered: NowGroup;
+    closedSince: string;
+    /** Las anteriores a closedSince. null si no se pudo calcular. */
+    closedBefore: { total: number; neverHuman: number; awaitingNext: number; completedOrders: number } | null;
+    /** No son clientes, en los últimos días de closedUnanswered. null si no se pudo calcular. */
+    notCustomers: number | null;
+    notCustomersDays: number;
+  };
 }

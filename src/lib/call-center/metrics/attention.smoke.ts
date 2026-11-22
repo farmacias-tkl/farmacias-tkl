@@ -134,6 +134,26 @@ async function main() {
       assert.ok(!dump.includes("+549"));
       assert.ok(!/Muchas gracias|inventado\.pdf|relleno|Pedir medicamentos/i.test(dump));
     });
+    await check("respuesta de la API: fechas como texto, sin ids de conversación ni datos del cliente, y caché por período", async () => {
+      const { getAttentionPayload } = await import("./attention-service");
+      const now = at("2026-03-05T12:00");
+      const p = await getAttentionPayload("2026-03-02", "2026-03-03", now);
+      assert.equal(p.total.entries, 7);
+      assert.equal(typeof p.generatedAt, "string");
+      assert.equal(typeof p.total.pending.oldestClockStart, "string");
+      assert.equal(p.hasConfig, false);
+      assert.equal(p.total.goal, null);
+      // Por actividad: otra población, en la misma respuesta.
+      assert.equal(p.activity.period.activeCustomer > 0, true);
+      assert.equal(p.activity.days.every((d) => d.day >= "2026-03-02" && d.day <= "2026-03-03"), true);
+      const dump = JSON.stringify(p);
+      assert.ok(!dump.includes("+549"));
+      for (const id of Object.values(ids)) assert.ok(!dump.includes(id), "sin ids de conversación");
+      // Dentro del minuto devuelve el mismo objeto; otro período o pasado el minuto, se recalcula.
+      assert.equal(await getAttentionPayload("2026-03-02", "2026-03-03", new Date(now.getTime() + 30_000)), p);
+      assert.notEqual(await getAttentionPayload("2026-03-02", "2026-03-03", new Date(now.getTime() + 61_000)), p);
+      assert.equal((await getAttentionPayload("2026-03-03", "2026-03-03", now)).total.entries, 1);
+    });
   });
 
   console.log(`\nmetrics/attention.smoke: ${pass} ok, ${fails.length} fail`);

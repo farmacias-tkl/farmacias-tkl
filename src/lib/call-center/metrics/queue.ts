@@ -32,6 +32,8 @@ export interface WaitingRow {
   conversationId: string;
   /** true si el estado no es RESUELTA. */
   open: boolean;
+  /** Estado de la conversación, tal como está guardado. Solo para mostrarlo. */
+  status: string;
   createdAt: Date;
   /** Primer mensaje del cliente del bloque sin responder: desde cuándo espera. */
   waitStart: Date;
@@ -120,6 +122,7 @@ export function itemsForList(snapshot: QueueSnapshot, windowHours: number = QUEU
 interface RawWaitingRow {
   id: string;
   open: boolean;
+  status: string;
   createdAt: Date;
   waitStart: Date;
   hasHuman: boolean;
@@ -157,6 +160,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     SELECT
       s.id,
       (s.status <> 'RESUELTA') AS "open",
+      s.status::text AS "status",
       s."createdAt" AS "createdAt",
       (SELECT min(m."sentAt") FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
@@ -183,6 +187,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
   return rows.map((r) => ({
     conversationId: r.id,
     open: r.open,
+    status: r.status,
     createdAt: r.createdAt,
     waitStart: r.waitStart,
     hasHumanResponse: r.hasHuman,

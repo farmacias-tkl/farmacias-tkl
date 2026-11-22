@@ -1,193 +1,211 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { EVIDENCE_LABELS, indicator, type IndicatorDefinition } from "@/lib/call-center/metrics/indicators";
-import { NOW_CACHE_SECONDS, type NowGroup, type NowListItem, type NowPayload } from "@/lib/call-center/metrics/now-types";
+import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
+import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
+import type { ClosedReason, NowListItem, NowPayload } from "@/lib/call-center/metrics/now-types";
+import { useNowData } from "./useNowData";
 
-const REFRESH_MS = NOW_CACHE_SECONDS * 1000;
+const TZ = "America/Argentina/Buenos_Aires";
 const nf = new Intl.NumberFormat("es-AR");
-const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
-const dateTimeFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
+const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
+const dayFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit", timeZone: TZ });
+const dayKeyFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ });
 
-/** 95 → "1 h 35 min"; 3000 → "2 d 2 h". */
-function formatWait(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h ${minutes % 60} min`;
-  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
-}
 const minutesSince = (iso: string, nowMs: number) => Math.max(0, Math.round((nowMs - new Date(iso).getTime()) / 60000));
 
-type State = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; data: NowPayload; fetchedAt: number };
+/** "hoy 12:22", "ayer 18:40" o "19/11 09:10", en hora de Buenos Aires. */
+function whenLabel(iso: string, nowMs: number): string {
+  const d = new Date(iso);
+  const key = dayKeyFmt.format(d);
+  const time = timeFmt.format(d);
+  if (key === dayKeyFmt.format(new Date(nowMs))) return `hoy ${time}`;
+  if (key === dayKeyFmt.format(new Date(nowMs - 86_400_000))) return `ayer ${time}`;
+  return `${dayFmt.format(d)} ${time}`;
+}
+
+const STATUS_LABELS: Record<string, string> = { PENDIENTE: "Pendiente", SIN_ASIGNAR: "Sin asignar", ASIGNADA: "Asignada" };
+
+const REASON_LABELS: Record<ClosedReason, string> = {
+  QUESTION: "Hizo una consulta",
+  ORDER: "Hizo un pedido",
+  ATTACHMENT: "Mandó una receta o un comprobante",
+};
 
 export default function NowPanel() {
-  const [state, setState] = useState<State>({ status: "loading" });
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const res = await fetch("/api/call-center/metrics/now", { cache: "no-store" });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !body?.data) {
-        // Si ya había datos en pantalla se conservan: un refresco fallido no los borra.
-        setState((prev) => (prev.status === "ready" ? prev : { status: "error", message: body?.error ?? "No se pudieron cargar las métricas." }));
-        return;
-      }
-      setState({ status: "ready", data: body.data as NowPayload, fetchedAt: Date.now() });
-    } catch {
-      setState((prev) => (prev.status === "ready" ? prev : { status: "error", message: "No se pudieron cargar las métricas. Revisá la conexión." }));
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, REFRESH_MS);
-    return () => clearInterval(id);
-  }, [load]);
+  const { state, refreshing, reload } = useNowData();
 
   if (state.status === "loading") return <p className="mt-6 text-sm text-gray-500">Cargando…</p>;
   if (state.status === "error") {
     return (
       <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
         {state.message}{" "}
-        <button type="button" onClick={load} className="font-medium underline">Reintentar</button>
+        <button type="button" onClick={reload} className="font-medium underline">Reintentar</button>
       </div>
     );
   }
 
   const d = state.data;
-  const generatedMs = new Date(d.generatedAt).getTime();
-  const open = d.openWaiting;
-  const closed = d.closedUnanswered;
+  const nowMs = new Date(d.generatedAt).getTime();
+  const w = d.waiting;
 
   return (
     <section className="mt-4" aria-label="Ahora">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <h2 className="text-sm font-semibold text-gray-800">Ahora</h2>
-        <p className="text-xs text-gray-500">
-          Calculado a las {timeFmt.format(new Date(d.generatedAt))} · se actualiza cada {NOW_CACHE_SECONDS} segundos{refreshing ? " · actualizando…" : ""}
-        </p>
-      </div>
-      <p className="mt-1 text-xs text-gray-500" title={indicator("freshness").definition}>
-        Último evento de Emozion: {d.freshness.lastWebhookAt ? dateTimeFmt.format(new Date(d.freshness.lastWebhookAt)) : "No disponible"}
-        {" · "}último mensaje: {d.freshness.lastMessageAt ? dateTimeFmt.format(new Date(d.freshness.lastMessageAt)) : "No disponible"}
+      <p className="text-xs text-gray-500">
+        Actualizado a las {timeFmt.format(new Date(d.generatedAt))} · últimas {d.windowHours} horas{refreshing ? " · actualizando…" : ""}
       </p>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card def={indicator("queue.open_waiting")} value={open.total}
-          detail={open.oldestWaitStart ? `La más vieja espera hace ${formatWait(minutesSince(open.oldestWaitStart, generatedMs))}` : "Nadie esperando"}
-          extra={`${nf.format(open.neverHuman)} sin primera respuesta · ${nf.format(open.awaitingNext)} esperan la siguiente`} />
-        <Card def={indicator("queue.completed_orders_waiting")} value={d.completedOrdersWaiting}
-          detail={`${nf.format(open.completedOrders)} abiertas · ${nf.format(closed.completedOrders)} cerradas`} />
-        <Card def={indicator("queue.closed_unanswered")} value={closed.total}
-          detail={`${nf.format(closed.neverHuman)} sin primera respuesta · ${nf.format(closed.awaitingNext)} esperaban la siguiente`}
-          extra={`Creadas desde el ${dateTimeFmt.format(new Date(d.closedSince)).slice(0, 5)}`} />
-        <Card def={indicator("queue.thanks_candidates")} value={closed.thanksCandidates + open.thanksCandidates}
-          detail="Para revisar: siguen contando como pendientes" />
+      <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-gray-600">Clientes esperando respuesta</h2>
+        <p className="mt-1 text-4xl font-semibold tabular-nums text-gray-900">{nf.format(w.total)}</p>
+        <p className="mt-1 text-sm text-gray-700">
+          {w.oldestWaitStart ? <>El que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay nadie esperando."}
+        </p>
+        {w.total > 0 && (
+          <p className="mt-2 text-xs text-gray-500">
+            {nf.format(w.neverHuman)} esperan la primera respuesta · {nf.format(w.awaitingNext)} esperan la siguiente
+          </p>
+        )}
+        <Evidence level="MEDIDO" />
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card small def={indicator("queue.old_open")} value={d.openOlderThanListWindow} />
-        <Card small def={indicator("queue.no_bot_exit")} value={open.noBotExit + closed.noBotExit}
-          detail={`${nf.format(open.noBotExit)} abiertas · ${nf.format(closed.noBotExit)} cerradas`} />
-        <AgeCard group={closed} />
+      <div className="mt-3 grid grid-cols-2 gap-3">
         <div className="rounded-lg border border-gray-200 bg-white p-3">
-          <p className="text-xs font-medium text-gray-600">Cerradas sin respuesta, anteriores</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums text-gray-900">{d.closedBefore ? nf.format(d.closedBefore.total) : "No disponible"}</p>
-          {d.closedBefore && (
-            <p className="mt-0.5 text-xs text-gray-500">
-              {nf.format(d.closedBefore.neverHuman)} sin primera respuesta · {nf.format(d.closedBefore.completedOrders)} con pedido completo
-            </p>
+          <h2 className="text-xs font-medium text-gray-600">Pedidos completos sin atender</h2>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{nf.format(w.completedOrders)}</p>
+          <p className="mt-0.5 text-xs text-gray-500">Completaron el pedido en el bot y nadie los tomó.</p>
+          <Evidence level="DETECTADO" />
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-3">
+          <h2 className="text-xs font-medium text-gray-600">Hoy</h2>
+          {d.today ? (
+            <dl className="mt-1 space-y-1 text-sm text-gray-700">
+              <div className="flex items-baseline justify-between gap-2"><dt>Entraron</dt><dd className="text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.entered)}</dd></div>
+              <div className="flex items-baseline justify-between gap-2"><dt>Respondidos</dt><dd className="text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.answered)}</dd></div>
+            </dl>
+          ) : (
+            <p className="mt-1 text-sm text-gray-500">No disponible</p>
           )}
-          <p className="mt-1 text-[11px] text-gray-400">Medido · histórico, se recalcula cada hora</p>
+          <Evidence level={d.today ? "MEDIDO" : "NO_DISPONIBLE"} />
         </div>
       </div>
 
-      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-800">Casos</h3>
-        <p className="text-xs text-gray-500">
-          Todas las abiertas y las cerradas de las últimas {d.listWindowHours} horas, de la espera más vieja a la más nueva.
-          {d.listTotal > d.list.length ? ` Se muestran ${nf.format(d.list.length)} de ${nf.format(d.listTotal)}.` : ""}
-        </p>
-      </div>
+      <h2 className="mt-6 text-sm font-semibold text-gray-800">
+        Casos{d.listTotal > 0 ? ` (${nf.format(d.listTotal)})` : ""}
+        <span className="ml-2 text-xs font-normal text-gray-500">del que más espera al que menos</span>
+      </h2>
+      {d.listTotal > d.list.length && (
+        <p className="mt-1 text-xs text-gray-500">Se muestran los {nf.format(d.list.length)} que más esperan.</p>
+      )}
       {d.list.length === 0 ? (
         <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No hay nadie esperando una respuesta.</p>
       ) : (
-        <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 text-xs text-gray-500">
-              <tr>
-                <th className="px-3 py-2 font-medium">Espera</th>
-                <th className="px-3 py-2 font-medium">Desde</th>
-                <th className="px-3 py-2 font-medium">Estado</th>
-                <th className="px-3 py-2 font-medium">Situación</th>
-                <th className="px-3 py-2 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.list.map((it) => <Row key={it.conversationId} it={it} />)}
-            </tbody>
-          </table>
-        </div>
+        <ul className="mt-2 grid gap-2 lg:grid-cols-2">
+          {d.list.map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} />)}
+        </ul>
       )}
+
+      <StaleCard d={d} nowMs={nowMs} />
+      <ClosedCard d={d} nowMs={nowMs} />
     </section>
   );
 }
 
-function Card({ def, value, detail, extra, small }: { def: IndicatorDefinition; value: number; detail?: string; extra?: string; small?: boolean }) {
+function Evidence({ level }: { level: keyof typeof EVIDENCE_LABELS }) {
+  return <p className="mt-2 text-[11px] text-gray-400">{EVIDENCE_LABELS[level]}</p>;
+}
+
+function ConversationLink({ id }: { id: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3" title={def.definition}>
-      <p className="text-xs font-medium text-gray-600">{def.label}</p>
-      <p className={`mt-1 font-semibold tabular-nums text-gray-900 ${small ? "text-xl" : "text-2xl"}`}>{nf.format(value)}</p>
-      {detail && <p className="mt-0.5 text-xs text-gray-500">{detail}</p>}
-      {extra && <p className="text-xs text-gray-500">{extra}</p>}
-      <p className="mt-1 text-[11px] text-gray-400">{EVIDENCE_LABELS[def.evidence]}</p>
+    <Link href={`/call-center/${id}`} className="inline-flex min-h-[36px] items-center text-xs font-medium text-[#1E2D5A] hover:underline">
+      Ver conversación →
+    </Link>
+  );
+}
+
+function CaseCard({ it, nowMs }: { it: NowListItem; nowMs: number }) {
+  return (
+    <li className="rounded-lg border border-gray-200 bg-white p-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-lg font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>
+        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{STATUS_LABELS[it.status] ?? it.status}</span>
+      </div>
+      <p className="mt-0.5 text-xs text-gray-500">Entró {whenLabel(it.createdAt, nowMs)}</p>
+      <p className="mt-2 text-sm text-gray-800">{it.hasHumanResponse ? "Le respondieron y volvió a escribir." : "Todavía no le respondió nadie."}</p>
+      {it.botOrderComplete && !it.hasHumanResponse && <p className="text-sm text-gray-800">Completó el pedido en el bot.</p>}
+      {it.thanksCandidate && <p className="text-sm text-gray-500">Puede ser solo un agradecimiento.</p>}
+      <div className="mt-1 text-right"><ConversationLink id={it.conversationId} /></div>
+    </li>
+  );
+}
+
+function StaleCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
+  const s = d.stale;
+  return (
+    <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-gray-800">Para cerrar en Emozion</h2>
+        <p className="text-2xl font-semibold tabular-nums text-gray-900">{nf.format(s.total)}</p>
+      </div>
+      <p className="mt-1 text-xs text-gray-600">
+        Abiertas hace más de {d.windowHours} horas. No cuentan como clientes esperando.
+        {s.oldestWaitStart ? ` La más vieja: ${dayFmt.format(new Date(s.oldestWaitStart))}.` : ""}
+      </p>
+      {s.items.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver las {nf.format(s.items.length)}</summary>
+          <ul className="mt-1 divide-y divide-amber-200">
+            {s.items.map((it) => (
+              <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
+                <span className="text-xs text-gray-700">Espera desde {whenLabel(it.waitStart, nowMs)}</span>
+                <ConversationLink id={it.conversationId} />
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <Evidence level="MEDIDO" />
     </div>
   );
 }
 
-function AgeCard({ group }: { group: NowGroup }) {
-  const rows: Array<[string, number]> = [
-    ["Menos de 24 h", group.byAge.lt24h], ["24 a 72 h", group.byAge.h24to72], ["3 a 30 días", group.byAge.d3to30], ["Más de 30 días", group.byAge.gt30d],
-  ];
+function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
+  const c = d.closedUnanswered;
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3">
-      <p className="text-xs font-medium text-gray-600">Cerradas sin respuesta, por antigüedad</p>
-      <dl className="mt-1 space-y-0.5 text-xs text-gray-600">
-        {rows.map(([label, n]) => (
-          <div key={label} className="flex justify-between gap-2">
-            <dt>{label}</dt><dd className="tabular-nums font-medium text-gray-900">{nf.format(n)}</dd>
-          </div>
-        ))}
-      </dl>
-      <p className="mt-1 text-[11px] text-gray-400">Medido</p>
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-gray-800">Cerradas sin responder</h2>
+        <p className="text-2xl font-semibold tabular-nums text-gray-900">{c ? nf.format(c.total) : "No disponible"}</p>
+      </div>
+      {c && (
+        <>
+          <p className="mt-1 text-xs text-gray-600">
+            Últimos {c.days} días. Se cerraron sin contestar lo último que escribió el cliente. No incluye agradecimientos ni avisos de que ya compró.
+          </p>
+          <dl className="mt-2 space-y-0.5 text-sm text-gray-700">
+            <div className="flex justify-between gap-2"><dt>Con una consulta</dt><dd className="font-medium tabular-nums text-gray-900">{nf.format(c.question)}</dd></div>
+            <div className="flex justify-between gap-2"><dt>Con un pedido</dt><dd className="font-medium tabular-nums text-gray-900">{nf.format(c.order)}</dd></div>
+            <div className="flex justify-between gap-2"><dt>Con receta o comprobante</dt><dd className="font-medium tabular-nums text-gray-900">{nf.format(c.attachment)}</dd></div>
+          </dl>
+          {c.items.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver casos</summary>
+              <ul className="mt-1 divide-y divide-gray-100">
+                {c.items.map((it) => (
+                  <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
+                    <span className="text-xs text-gray-700">
+                      {REASON_LABELS[it.reason]}
+                      <span className="block text-gray-500">Escribió {whenLabel(it.lastCustomerAt, nowMs)}</span>
+                    </span>
+                    <ConversationLink id={it.conversationId} />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
+      <Evidence level={c ? "DETECTADO" : "NO_DISPONIBLE"} />
     </div>
-  );
-}
-
-function Row({ it }: { it: NowListItem }) {
-  const tags: string[] = [];
-  tags.push(it.hasHumanResponse ? "Espera la siguiente respuesta" : "Sin primera respuesta");
-  if (it.botOrderComplete && !it.hasHumanResponse) tags.push("Pedido completo");
-  if (it.thanksCandidate) tags.push("Posible agradecimiento");
-  if (it.noBotExit) tags.push("Sin salida del bot");
-  return (
-    <tr className="border-b border-gray-100 last:border-0">
-      <td className="whitespace-nowrap px-3 py-2 font-medium tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</td>
-      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-gray-500">{dateTimeFmt.format(new Date(it.waitStart))}</td>
-      <td className="px-3 py-2">
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${it.open ? "bg-red-50 text-red-700" : "bg-gray-100 text-gray-600"}`}>
-          {it.open ? "Abierta" : "Cerrada"}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-xs text-gray-600">{tags.join(" · ")}</td>
-      <td className="px-3 py-2 text-right">
-        <Link href={`/call-center/${it.conversationId}`} className="text-xs font-medium text-[#1E2D5A] hover:underline">Ver conversación</Link>
-      </td>
-    </tr>
   );
 }
