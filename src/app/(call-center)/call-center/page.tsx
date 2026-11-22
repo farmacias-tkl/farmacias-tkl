@@ -53,7 +53,7 @@ export default async function CallCenterPage({
     <main style={{ maxWidth: 960, margin: "0 auto", padding: "40px 24px" }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: "#111827" }}>Conversaciones</h1>
       <p style={{ marginTop: 6, marginBottom: 20, color: "#6b7280", fontSize: 13 }}>
-        Vista de solo lectura · datos de prueba. Las acciones operativas llegan en una fase posterior.
+        Conversaciones de WhatsApp que llegan por Emozion, de la más reciente a la más antigua. Para responderle al cliente, usá Emozion.
       </p>
 
       {/* Filtro por estado */}
