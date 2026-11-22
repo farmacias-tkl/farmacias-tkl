@@ -154,6 +154,22 @@ async function main() {
       assert.equal(h.neverHuman, 1);
       assert.equal(h.completedOrders, 1);
     });
+    await check("calidad de datos: eventos sin procesar, salida del bot y cuentas sin configurar de los últimos 7 días", async () => {
+      const { loadQualityChecks, unknownAccountsOf } = await import("./quality");
+      await prisma.webhookEvent.create({ data: { eventType: "message_created", accountId: 22, status: "ERROR", receivedAt: hoursAgo(5) } });
+      await prisma.webhookEvent.create({ data: { eventType: "message_created", accountId: 22, status: "PROCESSED", receivedAt: hoursAgo(5) } });
+      await prisma.webhookEvent.create({ data: { eventType: "message_created", accountId: 22, status: "ERROR", receivedAt: hoursAgo(24 * 20) } });
+      await prisma.conversationMessage.create({ data: { conversationId: ids.respondida, author: "OPERATOR", externalSenderId: "9001", body: "x", sentAt: hoursAgo(3), externalMessageId: "q-cuenta-1" } });
+      await prisma.conversationMessage.create({ data: { conversationId: ids.respondida, author: "OPERATOR", externalSenderId: "9002", body: "x", sentAt: hoursAgo(2), externalMessageId: "q-cuenta-2" } });
+      const acc = { externalId: "9001", alias: null, active: true, borrowed: false, historical: false };
+      const q = await loadQualityChecks(NOW, [acc]);
+      assert.deepEqual(q.events, { error: 1, received: 0, total: 2 });
+      // 8 conversaciones creadas en los últimos 7 días, todas con salida del bot; la de 45 días y la de 60 quedan afuera.
+      assert.deepEqual(q.botExit, { entries: 8, withExit: 8 });
+      assert.deepEqual([q.unknownAccounts, q.salesLastDay, q.days], [["9002"], null, 7]);
+      assert.equal((await loadQualityChecks(NOW, null)).unknownAccounts, null, "sin configuración no se sabe qué falta");
+      assert.deepEqual(unknownAccountsOf(["10", "9", "9", "2"], [{ ...acc, externalId: "9" }]), ["2", "10"]);
+    });
     await check("las filas no traen teléfono ni texto", () => {
       const dump = JSON.stringify(rows);
       assert.ok(!dump.includes("+549"));

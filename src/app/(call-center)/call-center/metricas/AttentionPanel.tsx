@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS, POPULATION_LABELS, effectiveEvidence, indicator, type IndicatorDefinition } from "@/lib/call-center/metrics/indicators";
 import type { AttentionPayload } from "@/lib/call-center/metrics/attention-types";
-import { PERIOD_MAX_DAYS, addDaysISO, resolvePeriod } from "@/lib/call-center/metrics/period";
+import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
+import type { AttentionCaseKind } from "@/lib/call-center/metrics/attention-types";
+import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
+import AttentionCases from "./AttentionCases";
 import { formatMinutes, formatMinutesOrMissing, formatRatio, formatShortDay } from "@/lib/call-center/metrics/format";
 
 const nf = new Intl.NumberFormat("es-AR");
@@ -18,7 +21,6 @@ const BOT_EXIT_LABELS = {
 } as const;
 
 type Summary = AttentionPayload["total"];
-type Period = { from: string; to: string };
 type State =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -26,9 +28,7 @@ type State =
 
 /** Bloque "Atención y demoras": conversaciones creadas en el período. `today` es el día de Buenos Aires. */
 export default function AttentionPanel({ today }: { today: string }) {
-  const [period, setPeriod] = useState<Period>({ from: addDaysISO(today, -6), to: today });
-  const [draft, setDraft] = useState<Period>(period);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>(defaultPeriod(today));
   const [state, setState] = useState<State>({ status: "loading" });
 
   const load = useCallback(async (p: Period) => {
@@ -48,50 +48,9 @@ export default function AttentionPanel({ today }: { today: string }) {
 
   useEffect(() => { load(period); }, [load, period]);
 
-  const apply = (p: Period) => {
-    const r = resolvePeriod(p, today);
-    if (!r.ok) { setFormError(r.error); return; }
-    setFormError(null);
-    setDraft({ from: r.from, to: r.to });
-    setPeriod({ from: r.from, to: r.to });
-  };
-  const quick: Array<[string, Period]> = [
-    ["Hoy", { from: today, to: today }],
-    ["Ayer", { from: addDaysISO(today, -1), to: addDaysISO(today, -1) }],
-    ["7 días", { from: addDaysISO(today, -6), to: today }],
-    ["30 días", { from: addDaysISO(today, -29), to: today }],
-  ];
-
   return (
     <section className="mt-4" aria-label="Atención y demoras">
-      <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={(e) => { e.preventDefault(); apply(draft); }}
-      >
-        <label className="text-xs text-gray-600">
-          Desde
-          <input type="date" value={draft.from} max={today} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
-            className="mt-1 block h-11 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-900" />
-        </label>
-        <label className="text-xs text-gray-600">
-          Hasta
-          <input type="date" value={draft.to} max={today} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
-            className="mt-1 block h-11 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-900" />
-        </label>
-        <button type="submit" className="h-11 rounded-md bg-[#1E2D5A] px-4 text-sm font-semibold text-white hover:bg-[#16224a]">Ver</button>
-        <div className="flex flex-wrap gap-2">
-          {quick.map(([label, p]) => {
-            const active = p.from === period.from && p.to === period.to;
-            return (
-              <button key={label} type="button" onClick={() => apply(p)} aria-pressed={active}
-                className={`h-11 rounded-md border px-3 text-xs font-medium ${active ? "border-[#1E2D5A] bg-[#1E2D5A] text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}>
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </form>
-      {formError && <p role="alert" className="mt-2 text-xs text-red-700">{formError}</p>}
+      <PeriodForm today={today} period={period} onChange={setPeriod} />
       <p className="mt-2 text-xs text-gray-600">
         Conversaciones que entraron en el período (por fecha de creación, día de Buenos Aires). Hasta {PERIOD_MAX_DAYS} días.
       </p>
@@ -103,13 +62,17 @@ export default function AttentionPanel({ today }: { today: string }) {
           <button type="button" onClick={() => load(period)} className="font-medium underline">Reintentar</button>
         </div>
       )}
-      {state.status === "ready" && <Report data={state.data} />}
+      {state.status === "ready" && <Report data={state.data} period={period} />}
     </section>
   );
 }
 
 /** Las dos poblaciones del bloque, separadas y rotuladas: no se suman ni se comparan entre sí. */
-function Report({ data }: { data: AttentionPayload }) {
+function Report({ data, period }: { data: AttentionPayload; period: Period }) {
+  // Detalle de casos abierto. Se cierra solo al cambiar de período (el informe se vuelve a montar).
+  const [cases, setCases] = useState<AttentionCaseKind | null>(null);
+  const t = data.total;
+  const overdue = t.goal?.pendingOverdue ?? null;
   return (
     <>
       <p className="mt-4 text-xs text-gray-600">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
@@ -119,7 +82,23 @@ function Report({ data }: { data: AttentionPayload }) {
         note="Sigue a las conversaciones creadas en el período, hasta su primera respuesta, aunque esa respuesta haya llegado otro día." />
       {data.total.entries === 0
         ? <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">No entró ninguna conversación en el período.</p>
-        : <EntryReport data={data} />}
+        : (
+          <>
+            <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+              <h3 className="text-sm font-semibold text-gray-800">Ver los casos</h3>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <CasesButton label="Sin primera respuesta" value={nf.format(t.pending.total)} active={cases === "pending"} onClick={() => setCases(cases === "pending" ? null : "pending")} />
+                <CasesButton label="Con la meta vencida" value={overdue === null ? "—" : nf.format(overdue)} disabled={overdue === null}
+                  active={cases === "overdue"} onClick={() => setCases(cases === "overdue" ? null : "overdue")} />
+                <CasesButton label="Sin respuesta el mismo día" value={nf.format(t.unansweredSameDay.total)} active={cases === "unanswered_same_day"}
+                  onClick={() => setCases(cases === "unanswered_same_day" ? null : "unanswered_same_day")} />
+              </div>
+              <p className="mt-2 text-xs text-gray-700">Tocá un número para ver esas conversaciones. Los grupos se superponen: no se suman.</p>
+            </div>
+            {cases && <AttentionCases key={cases} kind={cases} period={period} onClose={() => setCases(null)} />}
+            <EntryReport data={data} />
+          </>
+        )}
 
       <Fold title="Por actividad del día" hint={POPULATION_LABELS.ACTIVIDAD}>
         <p className="mt-3 text-xs text-gray-600">
@@ -128,6 +107,17 @@ function Report({ data }: { data: AttentionPayload }) {
         <ActivityReportView activity={data.activity} />
       </Fold>
     </>
+  );
+}
+
+/** Número que abre el detalle de casos de un indicador. */
+function CasesButton({ label, value, active, disabled, onClick }: { label: string; value: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active}
+      className={`flex min-h-[76px] flex-col rounded-md border bg-white p-2 text-left disabled:opacity-60 ${active ? "border-[#1E2D5A] ring-2 ring-[#1E2D5A]" : "border-gray-200"}`}>
+      <span className="text-xl font-semibold tabular-nums text-gray-900">{value}</span>
+      <span className="mt-0.5 text-[11px] leading-tight text-gray-700">{label}</span>
+    </button>
   );
 }
 
