@@ -12,6 +12,9 @@ import {
   normalizeConversation,
   normalizeMessage,
   normalizeStatusEvent,
+  normalizeClosure,
+  normalizeExternalAssigneeId,
+  CLOSURE_TYPE_NAME_MAX,
   mapAuthor,
   readEnvelope,
   conversationExternalId,
@@ -204,6 +207,78 @@ test("extra. body: vacío/whitespace → null; contenido real preserva texto ori
   assert.equal(mk(undefined), null); // ausente → null
   assert.equal(mk("hola"), "hola");
   assert.equal(mk("  hola  "), "  hola  "); // contenido real → texto ORIGINAL, no recortado
+});
+
+// ── Tipo de cierre y asignado (datos inventados) ─────────────────────────────────────
+test("cierre. resolved con closure_type_id numérico + nombre → id string + nombre", () => {
+  const r = normalizeStatusEvent({
+    id: 501, status: "resolved", closure_type_id: 7, closure_type_name: "Tipo inventado A",
+    meta: { assignee: { id: 42 } },
+  });
+  assert.equal(r.outcome, "processed");
+  assert.equal(r.data?.status, "RESUELTA");
+  assert.equal(r.data?.closureTypeId, "7");
+  assert.equal(r.data?.closureTypeName, "Tipo inventado A");
+  assert.equal(r.data?.externalAssigneeId, "42");
+  assert.deepEqual(r.warnings, []);
+});
+
+test("cierre. closure_comment NUNCA aparece en el normalizado", () => {
+  const raw = {
+    id: 502, status: "resolved", closure_type_id: "c-3", closure_type_name: "Tipo inventado B",
+    closure_comment: "COMENTARIO-LIBRE-QUE-NO-DEBE-GUARDARSE",
+  };
+  const r = normalizeStatusEvent(raw as never);
+  const json = JSON.stringify(r);
+  assert.ok(!json.includes("COMENTARIO-LIBRE"), "el comentario de cierre no se ingiere");
+  assert.ok(!/closure_comment|closureComment/i.test(json), "ni siquiera la clave");
+  assert.equal(r.data?.closureTypeId, "c-3");
+});
+
+test("cierre. sin claves de cierre ni asignado → los tres en null, sin warnings", () => {
+  const r = normalizeStatusEvent({ id: 503, status: "open" });
+  assert.equal(r.data?.closureTypeId, null);
+  assert.equal(r.data?.closureTypeName, null);
+  assert.equal(r.data?.externalAssigneeId, null);
+  assert.deepEqual(r.warnings, []);
+});
+
+test("cierre. formas inesperadas → null + warning sin valores", () => {
+  const c = normalizeClosure({ closure_type_id: { x: 1 }, closure_type_name: 99 } as never);
+  assert.equal(c.closureTypeId, null);
+  assert.equal(c.closureTypeName, null);
+  assert.equal(c.warnings.length, 2);
+  const idConEspacios = normalizeClosure({ closure_type_id: "texto libre con espacios" });
+  assert.equal(idConEspacios.closureTypeId, null);
+  assert.ok(!idConEspacios.warnings.join(" ").includes("texto libre"), "el warning no lleva el valor");
+  assert.equal(normalizeClosure({ closure_type_name: "   " }).closureTypeName, null);
+});
+
+test("cierre. nombre más largo que el tope → recortado + warning sin el valor", () => {
+  const largo = "N".repeat(CLOSURE_TYPE_NAME_MAX + 50);
+  const c = normalizeClosure({ closure_type_id: 1, closure_type_name: `  ${largo}  ` });
+  assert.equal(c.closureTypeName?.length, CLOSURE_TYPE_NAME_MAX);
+  assert.equal(c.warnings.length, 1);
+  assert.ok(!c.warnings[0].includes("NNN"));
+});
+
+test("asignado. meta.assignee.id número o string corto → string; ausente o raro → null", () => {
+  assert.equal(normalizeExternalAssigneeId({ meta: { assignee: { id: 9 } } }), "9");
+  assert.equal(normalizeExternalAssigneeId({ meta: { assignee: { id: "ag-9" } } } as never), "ag-9");
+  assert.equal(normalizeExternalAssigneeId({ meta: { assignee: null } }), null);
+  assert.equal(normalizeExternalAssigneeId({ meta: {} }), null);
+  assert.equal(normalizeExternalAssigneeId(null), null);
+  assert.equal(normalizeExternalAssigneeId({ meta: { assignee: { id: "con espacios" } } } as never), null);
+});
+
+test("asignado. normalizeConversation lo expone y no cambia el mapeo de estado", () => {
+  const sender = { phone_number: "+5491100000002" };
+  const con = normalizeConversation({ id: 601, status: "open", meta: { sender, assignee: { id: 5 } } });
+  assert.equal(con.data?.status, "ASIGNADA");
+  assert.equal(con.data?.externalAssigneeId, "5");
+  const sin = normalizeConversation({ id: 602, status: "open", meta: { sender } });
+  assert.equal(sin.data?.status, "SIN_ASIGNAR");
+  assert.equal(sin.data?.externalAssigneeId, null);
 });
 
 console.log(`\nemozion-mappers: ${passed} ok, ${failures.length} fail`);
