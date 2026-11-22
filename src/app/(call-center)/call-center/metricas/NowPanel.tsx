@@ -24,7 +24,8 @@ function whenLabel(iso: string, nowMs: number): string {
   return `${dayFmt.format(d)} ${time}`;
 }
 
-const STATUS_LABELS: Record<string, string> = { PENDIENTE: "Pendiente", SIN_ASIGNAR: "Sin asignar", ASIGNADA: "Asignada" };
+const ownerLabel = (o: NowListItem["owner"]) =>
+  o.kind === "SYSTEM" ? "Asignación automática" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin responsable identificado";
 
 /** Semáforo: fondo suave y la etiqueta siempre en texto. Fuera del horario público va sin color. */
 const LEVELS: Record<WaitLevel, { label: string; chip: string; dot: string }> = {
@@ -162,10 +163,12 @@ function CaseCard({ it, nowMs, schedule }: { it: NowListItem; nowMs: number; sch
     <li className="rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex items-start justify-between gap-2">
         <WaitBadge it={it} schedule={schedule} />
-        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{STATUS_LABELS[it.status] ?? it.status}</span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{ownerLabel(it.owner)}</span>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
       </div>
       <p className="mt-0.5 text-xs text-gray-500">Entró {whenLabel(it.createdAt, nowMs)}</p>
-      <p className="mt-2 text-sm text-gray-800">{it.hasHumanResponse ? "Le respondieron y volvió a escribir." : "Todavía no le respondió nadie."}</p>
       {it.botOrderComplete && !it.hasHumanResponse && <p className="text-sm text-gray-800">Completó el pedido en el bot.</p>}
       {it.thanksCandidate && <p className="text-sm text-gray-500">Puede ser solo un agradecimiento.</p>}
       <div className="mt-1 text-right"><ConversationLink id={it.conversationId} /></div>

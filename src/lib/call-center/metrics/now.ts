@@ -18,10 +18,10 @@ import { CLOSED_UNANSWERED_DAYS, QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered } from "./closed-unanswered";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
-import { criticalWaitMinutesOf } from "./config-schema";
+import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
-import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowPayload } from "./now-types";
+import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload } from "./now-types";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -39,6 +39,16 @@ export interface NowExtras {
   closed: ClosedUnansweredReport | null;
   /** Horario y umbrales del semáforo. null si no hay configuración vigente hoy. */
   wait: WaitContext | null;
+  /** Cuentas de la configuración vigente hoy; vacío si no hay. */
+  accounts: readonly ConfigAccount[];
+}
+
+/** Responsable de un caso. PURO. */
+export function ownerOf(assignee: string | null, accounts: readonly ConfigAccount[]): NowOwner {
+  const cfg = assignee ? accounts.find((a) => a.externalId === assignee) : undefined;
+  if (!cfg) return { kind: "UNKNOWN" };
+  if (isSystemAccount(cfg)) return { kind: "SYSTEM" };
+  return { kind: "ACCOUNT", label: cfg.alias ?? `cuenta ${cfg.externalId}` };
 }
 
 /** Horario y umbrales con la configuración vigente al momento `now`. PURO. */
@@ -69,7 +79,7 @@ export function toNowPayload(
   const waiting = open.filter((it) => it.waitHours <= windowHours);
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
-  const { history, today, closed, wait } = extras;
+  const { history, today, closed, wait, accounts } = extras;
   const now = snapshot.generatedAt;
 
   return {
@@ -87,6 +97,7 @@ export function toNowPayload(
     list: waiting.slice(0, maxRows).map((it) => ({
       conversationId: it.conversationId,
       status: it.status,
+      owner: ownerOf(it.externalAssigneeId, accounts),
       createdAt: it.createdAt.toISOString(),
       waitStart: it.waitStart.toISOString(),
       waitMinutes: Math.round(it.waitHours * 60),
@@ -158,10 +169,12 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness, today, wait] = await Promise.all([
+  const [snapshot, freshness, today, versions] = await Promise.all([
     getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null),
-    loadConfigVersions().then(({ versions }) => waitContext(versions, now)).catch(() => null),
+    loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
   ]);
+  const wait = waitContext(versions, now);
+  const accounts = configForDay(versions, arDayISO(now))?.data.accounts ?? [];
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -179,7 +192,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

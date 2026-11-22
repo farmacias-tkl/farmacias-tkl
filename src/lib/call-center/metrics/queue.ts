@@ -34,6 +34,11 @@ export interface WaitingRow {
   open: boolean;
   /** Estado de la conversación, tal como está guardado. Solo para mostrarlo. */
   status: string;
+  /**
+   * Cuenta de Emozion asignada según el último evento recibido; null si no hay. Solo para
+   * mostrarla: una reasignación que no cambia el estado no genera evento y puede quedar vieja.
+   */
+  externalAssigneeId: string | null;
   createdAt: Date;
   /** Primer mensaje del cliente del bloque sin responder: desde cuándo espera. */
   waitStart: Date;
@@ -123,6 +128,7 @@ interface RawWaitingRow {
   id: string;
   open: boolean;
   status: string;
+  assignee: string | null;
   createdAt: Date;
   waitStart: Date;
   hasHuman: boolean;
@@ -142,7 +148,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
   const prevHours = `${THANKS_CANDIDATE.previousResolvedWithinHours} hours`;
   const rows = await prisma.$queryRaw<RawWaitingRow[]>(Prisma.sql`
     WITH scope AS (
-      SELECT c.id, c.status, c."customerId", c."createdAt"
+      SELECT c.id, c.status, c."customerId", c."createdAt", c."externalAssigneeId"
       FROM "Conversation" c
       WHERE c.status <> 'RESUELTA' OR c."createdAt" >= ${utcTimestampParam(closedSince)}::timestamp
     ), agg AS (
@@ -161,6 +167,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
       s.id,
       (s.status <> 'RESUELTA') AS "open",
       s.status::text AS "status",
+      s."externalAssigneeId" AS "assignee",
       s."createdAt" AS "createdAt",
       (SELECT min(m."sentAt") FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
@@ -188,6 +195,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     conversationId: r.id,
     open: r.open,
     status: r.status,
+    externalAssigneeId: r.assignee,
     createdAt: r.createdAt,
     waitStart: r.waitStart,
     hasHumanResponse: r.hasHuman,

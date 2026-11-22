@@ -15,10 +15,21 @@ export const NOW_CACHE_SECONDS = 60;
 /** Semáforo de espera, en minutos hábiles del horario público. */
 export type WaitLevel = "EN_PLAZO" | "DEMORADO" | "CRITICO" | "FUERA_HORARIO";
 
+/**
+ * Responsable de un caso, según la cuenta de Emozion asignada y la configuración vigente:
+ * una cuenta de sistema (asignación automática), una cuenta configurada, o nadie identificado
+ * (sin asignado, o asignado a una cuenta que no está en la configuración).
+ */
+export type NowOwner =
+  | { kind: "SYSTEM" }
+  | { kind: "ACCOUNT"; /** Alias de la configuración, o "cuenta N" si no tiene. */ label: string }
+  | { kind: "UNKNOWN" };
+
 export interface NowListItem {
   conversationId: string;
   /** Estado de la conversación: PENDIENTE, SIN_ASIGNAR o ASIGNADA. */
   status: string;
+  owner: NowOwner;
   /** ISO. Cuándo entró la conversación. */
   createdAt: string;
   /** ISO. Desde cuándo espera: primer mensaje del cliente del bloque sin responder. */
