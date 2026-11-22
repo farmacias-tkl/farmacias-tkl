@@ -1436,6 +1436,16 @@ model Conversation {
   source                 String?            // EMOZION | WHATSAPP_CLOUD | MANUAL — String?, sin enum aún
   externalLabels         String[] @default([]) // staging de labels crudas de Emozion; NO se unifican; futuro = modelo ConversationTag (sub-dominio aparte)
 
+  // Asignado en Emozion según el último evento de conversación recibido (id crudo del
+  // agente). NO se cruza a User TKL. Una reasignación que no cambia el estado no genera
+  // evento: puede quedar desactualizado.
+  externalAssigneeId     String?
+  // Tipo de cierre que el operador elige al resolver en Emozion (catálogo: código + nombre).
+  // Solo tiene valor mientras la conversación está RESUELTA; al reabrir vuelve a null (cada
+  // cierre queda en ConversationStateHistory). El comentario de cierre NUNCA se ingiere.
+  closureTypeId          String?
+  closureTypeName        String?
+
   firstResponseAt        DateTime?
   closedAt               DateTime?
   createdAt              DateTime           @default(now())
@@ -1497,6 +1507,12 @@ model ConversationStateHistory {
 
   changedAt            DateTime            @default(now())
   note                 String?
+
+  // Snapshot del evento de Emozion que produjo esta fila (null en filas de operador TKL y
+  // en las anteriores a esta ingesta): asignado en ese momento y tipo de cierre elegido.
+  externalAssigneeId   String?
+  closureTypeId        String?
+  closureTypeName      String?
 
   @@index([conversationId])
   @@index([changedAt])
