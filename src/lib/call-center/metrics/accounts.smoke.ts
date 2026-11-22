@@ -127,6 +127,21 @@ async function main() {
       const dump = JSON.stringify(rep);
       for (const id of Object.values(ids)) assert.ok(!dump.includes(id), "el informe no lleva ids de conversación");
     });
+    await check("respuesta de la API de operadores: por cuenta y del equipo, sin ids de conversación, con caché por período", async () => {
+      const { getAccountsPayload } = await import("./accounts-service");
+      const now = at("2026-03-05T12:00");
+      const p = await getAccountsPayload("2026-03-02", "2026-03-03", now);
+      assert.deepEqual(p.accounts.map((a) => [a.account, a.status, a.alias]), [["9001", "SIN_CONFIGURAR", null], ["9002", "SIN_CONFIGURAR", null]]);
+      assert.deepEqual([p.hasConfig, p.period.from, p.period.to], [false, "2026-03-02", "2026-03-03"]);
+      assert.equal(p.accounts[0].activity.inPublicHours, null, "sin configuración no hay horario: no disponible, no cero");
+      assert.equal(typeof p.accounts[0].activity.firstMessageAt, "string");
+      assert.deepEqual([p.team.followups.n, p.team.followupsUnanswered, p.team.privateNotes], [2, 2, 1]);
+      const dump = JSON.stringify(p);
+      assert.ok(!dump.includes("+549"));
+      for (const id of Object.values(ids)) assert.ok(!dump.includes(id), "sin ids de conversación");
+      assert.equal(await getAccountsPayload("2026-03-02", "2026-03-03", new Date(now.getTime() + 30_000)), p);
+      assert.notEqual(await getAccountsPayload("2026-03-02", "2026-03-03", new Date(now.getTime() + 61_000)), p);
+    });
     await check("las filas no traen teléfono ni texto", () => {
       const dump = JSON.stringify([messages, blocks]);
       assert.ok(!dump.includes("+549"));
