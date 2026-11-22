@@ -229,7 +229,7 @@ export function buildAccountsReport(
  */
 export const ACTIVITY_LOOKBACK_DAYS = 30;
 
-function periodBounds(fromDay: string, toDayInclusive: string) {
+export function periodBounds(fromDay: string, toDayInclusive: string) {
   const from = arDayStartUTC(fromDay);
   const to = new Date(arDayStartUTC(toDayInclusive).getTime() + MS_DAY);
   const scopeFrom = new Date(from.getTime() - ACTIVITY_LOOKBACK_DAYS * MS_DAY);

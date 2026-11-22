@@ -107,6 +107,26 @@ async function main() {
       assert.equal(blocks.some((b) => iso(b.startedAt) === iso(at("2026-03-01T23:50"))), false);
       assert.equal(blocks.length, 4);
     });
+    await check("por actividad: una fila por día y conversación; la nota interna no cuenta y el día es el de Buenos Aires", async () => {
+      const { loadDailyActivityRows, loadActivityReport } = await import("./activity");
+      const rows = await loadDailyActivityRows("2026-03-02", "2026-03-03");
+      const pick = (day: string, id: string) => rows.find((r) => r.day === day && r.conversationId === id);
+      assert.equal(rows.length, 3);
+      assert.deepEqual([pick("2026-03-02", ids.a)!.customer, pick("2026-03-02", ids.a)!.operator], [true, true]);
+      // El cliente escribió a las 23:50 del 01/03 (fuera del período): el 02/03 solo hay operador.
+      assert.deepEqual([pick("2026-03-02", ids.b)!.customer, pick("2026-03-02", ids.b)!.operator], [false, true]);
+      // 23:59 del 03/03 en Buenos Aires ya es 04/03 en UTC: tiene que quedar en el 03/03.
+      assert.deepEqual([pick("2026-03-03", ids.b)!.customer, pick("2026-03-03", ids.b)!.operator], [true, false]);
+      assert.equal(rows.some((r) => r.conversationId === ids.c), false);
+
+      const rep = await loadActivityReport("2026-03-02", "2026-03-03");
+      assert.deepEqual(rep.days.map((d) => [d.day, d.activeCustomer, d.attended]), [["2026-03-02", 1, 2], ["2026-03-03", 1, 0]]);
+      assert.deepEqual(rep.period, { activeCustomer: 2, attended: 2 });
+      assert.deepEqual([rep.followups.blocks, rep.followups.answered, rep.followups.unanswered], [4, 2, 2]);
+      assert.equal(rep.followups.response.median, 12.5); // 5 y 20 minutos
+      const dump = JSON.stringify(rep);
+      for (const id of Object.values(ids)) assert.ok(!dump.includes(id), "el informe no lleva ids de conversación");
+    });
     await check("las filas no traen teléfono ni texto", () => {
       const dump = JSON.stringify([messages, blocks]);
       assert.ok(!dump.includes("+549"));

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { EVIDENCE_LABELS, effectiveEvidence, indicator, type IndicatorDefinition } from "@/lib/call-center/metrics/indicators";
+import { EVIDENCE_LABELS, POPULATION_LABELS, effectiveEvidence, indicator, type IndicatorDefinition } from "@/lib/call-center/metrics/indicators";
 import type { AttentionPayload } from "@/lib/call-center/metrics/attention-types";
 import { PERIOD_MAX_DAYS, addDaysISO, resolvePeriod } from "@/lib/call-center/metrics/period";
 import { formatMinutes, formatMinutesOrMissing, formatRatio, formatShortDay } from "@/lib/call-center/metrics/format";
@@ -108,18 +108,105 @@ export default function AttentionPanel({ today }: { today: string }) {
   );
 }
 
+/** Las dos poblaciones del bloque, separadas y rotuladas: no se suman ni se comparan entre sí. */
 function Report({ data }: { data: AttentionPayload }) {
-  const t = data.total;
-  if (t.entries === 0) {
-    return <p className="mt-6 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No entró ninguna conversación en el período.</p>;
+  return (
+    <>
+      <p className="mt-4 text-xs text-gray-500">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
+
+      <SectionTitle title="Por entrada" badge={POPULATION_LABELS.ENTRADA}
+        note="Sigue a las conversaciones creadas en el período, hasta su primera respuesta, aunque esa respuesta haya llegado otro día." />
+      {data.total.entries === 0
+        ? <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No entró ninguna conversación en el período.</p>
+        : <EntryReport data={data} />}
+
+      <SectionTitle title="Por actividad del día" badge={POPULATION_LABELS.ACTIVIDAD}
+        note="Cuenta lo que pasó cada día, se haya creado cuando se haya creado la conversación. Es otra población: estos números no se comparan con los de entrada." />
+      <ActivityReportView activity={data.activity} />
+    </>
+  );
+}
+
+function SectionTitle({ title, badge, note }: { title: string; badge: string; note: string }) {
+  return (
+    <div className="mt-8 border-t border-gray-200 pt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">{badge}</span>
+      </div>
+      <p className="mt-1 text-xs text-gray-500">{note}</p>
+    </div>
+  );
+}
+
+function ActivityReportView({ activity }: { activity: AttentionPayload["activity"] }) {
+  const f = activity.followups;
+  const followupDef = indicator("followup_response");
+  if (activity.days.length === 0) {
+    return <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500">No hubo mensajes de clientes ni de operadores en el período.</p>;
   }
+  const days = [...activity.days].reverse();
+  return (
+    <>
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <Card def={indicator("active_customer")} hasConfig value={nf.format(activity.period.activeCustomer)}
+          detail="Conversaciones distintas en el período" extra="No es la suma de los días: una conversación cuenta en cada día en que tuvo actividad" />
+        <Card def={indicator("attended")} hasConfig value={nf.format(activity.period.attended)}
+          detail="Conversaciones distintas con al menos un mensaje público de operador" />
+        <div className="col-span-2 rounded-lg border border-gray-200 bg-white p-3 lg:col-span-1" title={followupDef.definition}>
+          <p className="text-xs font-medium text-gray-600">{followupDef.label}</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{formatMinutesOrMissing(f.response.median)}</p>
+          <p className="mt-0.5 text-xs text-gray-500">
+            Mediana de reloj · 9 de cada 10 en {formatMinutesOrMissing(f.response.p90)} o menos · sobre {nf.format(f.answered)} bloques respondidos
+          </p>
+          <p className="text-xs text-gray-500">{nf.format(f.unanswered)} bloques sin respuesta, aparte: el último mensaje de una conversación suele no pedir respuesta</p>
+          <p className="mt-1 text-[11px] text-gray-400">{EVIDENCE_LABELS[followupDef.evidence]}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <table className="w-full text-left text-sm">
+          <caption className="border-b border-gray-200 px-3 py-2 text-left text-xs font-medium text-gray-600">Por día de actividad</caption>
+          <thead className="border-b border-gray-200 text-xs text-gray-500">
+            <tr>
+              <th scope="col" className="px-3 py-2 font-medium">Día</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Con actividad del cliente</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Atendidas</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Bloques del cliente</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Sin respuesta</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Mediana de respuesta posterior</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((d) => (
+              <tr key={d.day} className="border-b border-gray-100 last:border-0">
+                <th scope="row" className="whitespace-nowrap px-3 py-2 font-normal tabular-nums text-gray-700">{formatShortDay(d.day)}</th>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.activeCustomer)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.attended)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.followups.blocks)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.followups.unanswered)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{formatMinutesOrMissing(d.followups.response.median)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-[11px] text-gray-400">
+        Bloque del cliente: mensajes seguidos del cliente después de una respuesta de operador; cuenta en el día en que empezó.
+        No se recorren las conversaciones ya resueltas creadas más de {activity.lookbackDays} días antes del período.
+      </p>
+    </>
+  );
+}
+
+function EntryReport({ data }: { data: AttentionPayload }) {
+  const t = data.total;
   const goal = t.goal;
   const hours = new Array<number>(24).fill(0);
   for (const d of data.days) d.byHour.forEach((n, h) => { hours[h] += n; });
 
   return (
     <>
-      <p className="mt-4 text-xs text-gray-500">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
       {!data.hasConfig && (
         <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           No había una configuración vigente en el período: la meta y el tiempo hábil se muestran como no disponibles.
@@ -311,7 +398,7 @@ function DaysTable({ data }: { data: AttentionPayload }) {
     <>
       <h3 className="mt-6 text-sm font-semibold text-gray-800">Por día de entrada</h3>
       <p className="mt-1 text-xs text-gray-500" title={indicator("pending_at_close").definition}>
-        Las medianas son solo de las respondidas. Pendientes al cierre: de las que salieron del bot en horario público, cuántas no tenían respuesta al cerrar.
+        Cada conversación cuenta en el día en que se creó. Las medianas son solo de las respondidas. Pendientes al cierre: de las que salieron del bot en horario público, cuántas no tenían respuesta al cerrar.
       </p>
       <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-left text-sm">

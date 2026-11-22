@@ -143,6 +143,9 @@ async function main() {
       assert.equal(typeof p.total.pending.oldestClockStart, "string");
       assert.equal(p.hasConfig, false);
       assert.equal(p.total.goal, null);
+      // Por actividad: otra población, en la misma respuesta.
+      assert.equal(p.activity.period.activeCustomer > 0, true);
+      assert.equal(p.activity.days.every((d) => d.day >= "2026-03-02" && d.day <= "2026-03-03"), true);
       const dump = JSON.stringify(p);
       assert.ok(!dump.includes("+549"));
       for (const id of Object.values(ids)) assert.ok(!dump.includes(id), "sin ids de conversación");
