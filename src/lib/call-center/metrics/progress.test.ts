@@ -87,17 +87,26 @@ test("mismo día de la semana anterior, cortado a la misma hora: no se beneficia
   ];
   const cortado = progressSide(rows, "2026-03-03", at("2026-03-03T12:00"), versions);
   assert.deepEqual([cortado.day, cortado.entries, cortado.medianBusinessMinutes], ["2026-03-03", 3, 32.5]);
+  assert.deepEqual([cortado.hasPublicHours, cortado.answered, cortado.pending, cortado.medianClockMinutes], [true, 2, 1, 32.5]);
   assert.equal(Math.round(cortado.compliance! * 100), 33);
   // El día completo da otro número: por eso se corta.
   const completo = progressSide(rows, "2026-03-03", at("2026-03-04T12:00"), versions);
   assert.deepEqual([completo.entries, Math.round(completo.compliance! * 100)], [4, 50]);
 });
 
+test("día sin horario público: la meta no aplica; quedan respondidas, pendientes y la espera real", () => {
+  // 2026-03-08 es domingo.
+  const rows = [entry("2026-03-08T16:00", "2026-03-08T16:40"), entry("2026-03-08T17:00", "2026-03-08T17:20"), entry("2026-03-08T18:00", null)];
+  const s = progressSide(rows, "2026-03-08", at("2026-03-08T19:00"), versions);
+  assert.deepEqual([s.hasPublicHours, s.compliance, s.medianBusinessMinutes], [false, null, null]);
+  assert.deepEqual([s.entries, s.answered, s.pending, s.medianClockMinutes], [3, 2, 1, 30]);
+});
+
 test("sin entradas o sin configuración vigente: sin dato, no cero", () => {
   const vacio = progressSide([], "2026-03-03", at("2026-03-03T12:00"), versions);
   assert.deepEqual([vacio.entries, vacio.compliance, vacio.medianBusinessMinutes], [0, null, null]);
   const sinConfig = progressSide([entry("2026-03-03T10:00", "2026-03-03T10:05")], "2026-03-03", at("2026-03-03T12:00"), []);
-  assert.deepEqual([sinConfig.entries, sinConfig.compliance, sinConfig.medianBusinessMinutes], [1, null, null]);
+  assert.deepEqual([sinConfig.entries, sinConfig.compliance, sinConfig.medianBusinessMinutes, sinConfig.hasPublicHours], [1, null, null, null]);
 });
 
 console.log(`\nmetrics/progress: ${passed} ok, ${failures.length} fail`);

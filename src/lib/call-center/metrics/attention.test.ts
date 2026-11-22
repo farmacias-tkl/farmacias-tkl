@@ -218,5 +218,60 @@ test("período sin conversaciones: ceros en los conteos y null en las medianas",
   assert.deepEqual(r.days, []);
 });
 
+// ── Días sin horario público ──────────────────────────────────────────────────────────
+
+test("domingo: respondida el mismo día no cuenta como cumplida con cero minutos; se informa aparte con su espera real", () => {
+  const r = report([row("2026-03-08T16:00", { answered: "2026-03-08T16:42" })], "2026-03-08T20:00");
+  const t = r.total;
+  assert.deepEqual([t.entries, t.answered], [1, 1]);
+  assert.equal(t.goal, null, "sin conversaciones evaluables no hay cumplimiento, ni 100 %");
+  assert.equal(t.firstResponseBusiness, null, "tampoco una mediana hábil de cero");
+  assert.deepEqual([t.noPublicHours.answered, t.noPublicHours.clock.median], [1, 40]);
+  assert.equal(t.withoutConfig, 0, "no es falta de configuración");
+  assert.equal(r.hasConfig, true);
+});
+
+test("domingo sin respuesta que sigue al lunes: entra en la meta y el reloj corre desde que abre", () => {
+  const rows = [row("2026-03-01T16:00"), row("2026-03-01T17:00", { answered: "2026-03-02T10:10" }), row("2026-03-01T18:00", { answered: "2026-03-02T11:00" })];
+  // Lunes 10:30: el horario público abrió a las 10:00.
+  const t = buildAttentionReport(rows, { now: at("2026-03-02T11:30"), from: "2026-03-01", to: "2026-03-02", versions }).total;
+  assert.equal(t.noPublicHours.answered, 0);
+  assert.deepEqual([t.goal!.answeredWithin, t.goal!.answeredLate, t.goal!.pendingOverdue], [1, 1, 1]);
+  // 10 y 60 minutos hábiles desde las 10:00 del lunes.
+  assert.deepEqual([t.firstResponseBusiness!.n, t.firstResponseBusiness!.median], [2, 35]);
+});
+
+test("domingo todavía sin respuesta, el mismo domingo: pendiente en plazo, no vencido ni cumplido", () => {
+  const t = report([row("2026-03-08T16:00")], "2026-03-08T20:00").total;
+  assert.deepEqual([t.goal!.pendingWithin, t.goal!.pendingOverdue, t.goal!.compliance, t.noPublicHours.answered], [1, 0, null, 0]);
+});
+
+test("feriado: igual que un domingo", () => {
+  // 23/11/2026 es feriado y cae lunes: sin horario público aunque el horario semanal lo tenga.
+  const rows = [row("2026-11-23T11:00", { answered: "2026-11-23T11:30" }), row("2026-11-24T11:00", { answered: "2026-11-24T11:05" })];
+  const r = buildAttentionReport(rows, { now: at("2026-11-24T18:00"), from: "2026-11-23", to: "2026-11-24", versions });
+  assert.deepEqual([r.total.noPublicHours.answered, r.total.noPublicHours.clock.median], [1, 28]);
+  assert.deepEqual([r.total.goal!.answeredWithin, r.total.goal!.compliance], [1, 1]);
+  const feriado = r.days.find((d) => d.day === "2026-11-23")!;
+  assert.deepEqual([feriado.goal, feriado.noPublicHours.answered], [null, 1]);
+});
+
+test("día hábil: responder antes de abrir sigue contando cero minutos dentro de la meta", () => {
+  const t = report([row("2026-03-03T08:00", { answered: "2026-03-03T08:30" })], "2026-03-03T12:00").total;
+  assert.deepEqual([t.goal!.answeredWithin, t.goal!.answeredBeforeOpening, t.noPublicHours.answered], [1, 1, 0]);
+});
+
+test("semana con domingo: el cumplimiento se calcula sin las respondidas del domingo", () => {
+  const rows = [
+    row("2026-03-03T11:00", { answered: "2026-03-03T11:10" }),
+    row("2026-03-03T11:00", { answered: "2026-03-03T13:00" }),
+    row("2026-03-08T16:00", { answered: "2026-03-08T16:05" }),
+    row("2026-03-08T17:00", { answered: "2026-03-08T19:00" }),
+  ];
+  const t = report(rows, "2026-03-08T21:00").total;
+  assert.equal(t.goal!.compliance, 0.5, "1 de 2, no 3 de 4");
+  assert.deepEqual([t.noPublicHours.answered, t.firstResponseBusiness!.n, t.answered], [2, 2, 4]);
+});
+
 console.log(`\nmetrics/attention: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

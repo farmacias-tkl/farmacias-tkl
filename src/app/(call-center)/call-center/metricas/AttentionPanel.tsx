@@ -129,7 +129,15 @@ function Headline({ total }: { total: Summary }) {
   const goal = total.goal;
   const median = total.firstResponseBusiness?.median ?? null;
   if (total.entries === 0) return null;
+  const offHours = total.noPublicHours.answered > 0 ? (
+    <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
+      {nf.format(total.noPublicHours.answered)} {total.noPublicHours.answered === 1 ? "conversación salió" : "conversaciones salieron"} del bot en días sin horario
+      público (domingos y feriados) y se {total.noPublicHours.answered === 1 ? "respondió" : "respondieron"} ese mismo día. La meta pública no aplica:
+      no cuentan en el cumplimiento. La mitad esperó <span className="font-semibold">{formatMinutesOrMissing(total.noPublicHours.clock.median)}</span> de tiempo real.
+    </p>
+  ) : null;
   if (!goal || goal.compliance === null) {
+    if (offHours) return offHours;
     return (
       <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
         No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
@@ -137,11 +145,14 @@ function Headline({ total }: { total: Summary }) {
     );
   }
   return (
+    <>
     <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-base text-gray-900">
       El <span className="font-semibold">{formatRatio(goal.compliance)}</span> de las conversaciones evaluables recibió respuesta dentro de la meta
       {goal.goalMinutes !== null ? ` de ${goal.goalMinutes} minutos hábiles` : " vigente cada día (cambió dentro del período)"} desde la salida del bot.
       {median !== null && <> Entre las respondidas, la mitad esperó <span className="font-semibold">{formatMinutes(median)} hábiles</span>.</>}
     </p>
+    {offHours}
+    </>
   );
 }
 
@@ -492,8 +503,8 @@ function DaysTable({ data }: { data: AttentionPayload }) {
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.entries)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.answered)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.pending.total)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{d.goal ? formatRatio(d.goal.compliance) : NO_CONFIG}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseBusiness ? formatMinutesOrMissing(d.firstResponseBusiness.median) : NO_CONFIG}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{d.goal ? formatRatio(d.goal.compliance) : d.noPublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseBusiness ? formatMinutesOrMissing(d.firstResponseBusiness.median) : d.noPublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseClock.median !== null ? formatMinutes(d.firstResponseClock.median) : "Sin datos"}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">
                   {d.pendingAtClose ? `${nf.format(d.pendingAtClose.pending)} de ${nf.format(d.pendingAtClose.leftBotInHours)}` : "—"}

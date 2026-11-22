@@ -26,7 +26,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildAttentionReport, loadEntryRows, type EntryRow } from "./attention";
 import { arDayISO, arDayStartUTC, utcTimestampParam, type DayRanges } from "./business-time";
-import type { ConfigVersion } from "./config";
+import { configForDay, type ConfigVersion } from "./config";
+import { publicHours } from "./schedule";
 import { addDaysISO } from "./period";
 import { QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import type { NowProgress, ProgressSide } from "./now-types";
@@ -91,6 +92,10 @@ export function progressSide(rows: readonly EntryRow[], day: string, at: Date, v
     entries: total.entries,
     compliance: total.goal?.compliance ?? null,
     medianBusinessMinutes: total.firstResponseBusiness?.median ?? null,
+    hasPublicHours: configForDay(versions, day) ? publicHours(versions)(day).length > 0 : null,
+    answered: total.answered,
+    pending: total.pending.total,
+    medianClockMinutes: total.firstResponseClock.median,
   };
 }
 
