@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { BarChart3 } from "lucide-react";
+import { auth } from "@/lib/auth";
+import { canViewCallCenterMetrics } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { STATUS_META, STATUS_ORDER, parseStatus } from "@/lib/call-center/status-display";
 import { formatDateTimeAR } from "@/lib/dates/format";
@@ -24,6 +27,11 @@ export default async function CallCenterPage({
 }: {
   searchParams: { status?: string; page?: string };
 }) {
+  // El layout ya exige sesión y acceso al Call Center; acá solo se decide si se ofrece el
+  // acceso a las métricas. La pantalla de métricas vuelve a comprobar el permiso por su cuenta.
+  const session = await auth();
+  const showMetricsLink = !!session?.user && canViewCallCenterMetrics(session.user);
+
   const status = parseStatus(searchParams.status);
   const where = status ? { status } : undefined;
 
@@ -51,7 +59,18 @@ export default async function CallCenterPage({
 
   return (
     <main style={{ maxWidth: 960, margin: "0 auto", padding: "40px 24px" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: "#111827" }}>Conversaciones</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#111827" }}>Conversaciones</h1>
+        {showMetricsLink && (
+          <Link
+            href="/call-center/metricas"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[#1E2D5A] px-3 text-xs font-semibold text-[#1E2D5A] hover:bg-[#1E2D5A] hover:text-white transition-colors"
+          >
+            <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+            <span>Métricas</span>
+          </Link>
+        )}
+      </div>
       <p style={{ marginTop: 6, marginBottom: 20, color: "#6b7280", fontSize: 13 }}>
         Conversaciones de WhatsApp que llegan por Emozion, de la más reciente a la más antigua. Para responderle al cliente, usá Emozion.
       </p>
