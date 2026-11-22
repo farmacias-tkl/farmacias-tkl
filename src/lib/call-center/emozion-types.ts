@@ -72,6 +72,11 @@ export interface EmozionConversation {
   updated_at?: string | number | null;
   resolved_at?: string | number | null;
   labels?: string[] | null;
+  // Tipo de cierre que el operador elige al resolver (catálogo). Visto en la raíz de
+  // conversation_status_changed. closure_comment NO se tipa a propósito: es texto libre del
+  // operador y nunca se ingiere.
+  closure_type_id?: number | string | null;
+  closure_type_name?: string | null;
   meta?: EmozionConversationMeta | null;
   contact?: EmozionContact | null; // algunos payloads lo traen top-level
   messages?: EmozionMessage[] | null; // conversation_*: mensajes embebidos (+ account_id en [0])
@@ -106,6 +111,9 @@ export interface NormalizedConversation {
   externalCreatedAt: Date | null;
   externalLabels: string[]; // crudas; staging hacia futuro ConversationTag
   contact: NormalizedContact;
+  // id crudo del agente asignado en Emozion (meta.assignee.id). Opcional: los WebhookEvent
+  // guardados antes de este campo no lo traen → se lee como null.
+  externalAssigneeId?: string | null;
 }
 
 /**
@@ -139,6 +147,11 @@ export interface NormalizedStatusEvent {
   closedAt: Date | null;
   // assignedToUserId NO se deriva de Emozion: el cruce agente Emozion → User TKL es
   // dominio futuro. Una conversación ingerida puede quedar ASIGNADA con assignee null.
+  // Los tres siguientes son opcionales: los WebhookEvent guardados antes de estos campos
+  // (p. ej. los que quedaron en ERROR) no los traen → se leen como null.
+  externalAssigneeId?: string | null; // meta.assignee.id crudo; null = sin asignado
+  closureTypeId?: string | null;      // closure_type_id → string
+  closureTypeName?: string | null;    // closure_type_name (catálogo); NUNCA closure_comment
 }
 
 // ── Resultados ────────────────────────────────────────────────────────────────────

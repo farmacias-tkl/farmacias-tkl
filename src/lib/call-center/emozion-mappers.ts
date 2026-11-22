@@ -143,6 +143,58 @@ export function mapAuthor(m: EmozionMessage): { author: NormalizedAuthor; fallba
   return { author: "OPERATOR", fallback: true };
 }
 
+/** Largo máximo del nombre del tipo de cierre: es un valor de catálogo, no texto libre. */
+export const CLOSURE_TYPE_NAME_MAX = 120;
+
+/** Id técnico → string: número finito, o string de 1 a 64 caracteres sin espacios. Si no, null. */
+function technicalId(v: unknown): string | null {
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : null;
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t.length > 0 && t.length <= 64 && !/\s/.test(t) ? t : null;
+  }
+  return null;
+}
+
+/**
+ * id crudo del agente asignado (meta.assignee.id) → string. Solo número finito o string
+ * corto sin espacios; cualquier otra cosa → null (no se inventa ni se guarda texto libre).
+ */
+export function normalizeExternalAssigneeId(conv: EmozionConversation | null | undefined): string | null {
+  return technicalId(conv?.meta?.assignee?.id);
+}
+
+/**
+ * Tipo de cierre que el operador elige al resolver en Emozion: SOLO código y nombre de
+ * catálogo. closure_comment NO se lee en ningún punto (texto libre, posible dato personal).
+ * Lectura defensiva (los valores reales no están confirmados): id = número finito o string
+ * corto sin espacios; nombre = string no vacío, recortado a CLOSURE_TYPE_NAME_MAX. Los
+ * warnings no incluyen valores.
+ */
+export function normalizeClosure(conv: EmozionConversation | null | undefined): {
+  closureTypeId: string | null;
+  closureTypeName: string | null;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const closureTypeId = technicalId(conv?.closure_type_id);
+  if (conv?.closure_type_id != null && closureTypeId === null) {
+    warnings.push("closure_type_id con forma inesperada → null");
+  }
+  let closureTypeName: string | null = null;
+  const rawName: unknown = conv?.closure_type_name;
+  if (typeof rawName === "string") {
+    const trimmed = rawName.trim();
+    if (trimmed.length > CLOSURE_TYPE_NAME_MAX) {
+      warnings.push(`closure_type_name supera ${CLOSURE_TYPE_NAME_MAX} caracteres → recortado`);
+    }
+    closureTypeName = trimmed.length > 0 ? trimmed.slice(0, CLOSURE_TYPE_NAME_MAX) : null;
+  } else if (rawName != null) {
+    warnings.push("closure_type_name con forma inesperada → null");
+  }
+  return { closureTypeId, closureTypeName, warnings };
+}
+
 /** labels crudas → string[] limpio (sin unificar). Staging hacia futuro ConversationTag. */
 export function normalizeLabels(conv: EmozionConversation | null | undefined): string[] {
   const labels = conv?.labels;
@@ -196,6 +248,7 @@ export function normalizeConversation(conv: EmozionConversation | null | undefin
       externalCreatedAt: parseTimestamp(conv?.created_at),
       externalLabels: normalizeLabels(conv),
       contact,
+      externalAssigneeId: normalizeExternalAssigneeId(conv),
     },
     warnings,
     authorFallbackCount: 0,
@@ -273,10 +326,18 @@ export function normalizeStatusEvent(conv: EmozionConversation | null | undefine
   }
   const hasAssignee = Boolean(conv?.meta?.assignee && conv.meta.assignee.id != null);
   const st = mapStatus(conv?.status, hasAssignee);
+  const closure = normalizeClosure(conv);
   return {
     outcome: "processed",
-    data: { externalConversationId: id, status: st.status, closedAt: parseTimestamp(conv?.resolved_at) },
-    warnings: st.warnings,
+    data: {
+      externalConversationId: id,
+      status: st.status,
+      closedAt: parseTimestamp(conv?.resolved_at),
+      externalAssigneeId: normalizeExternalAssigneeId(conv),
+      closureTypeId: closure.closureTypeId,
+      closureTypeName: closure.closureTypeName,
+    },
+    warnings: [...st.warnings, ...closure.warnings],
     authorFallbackCount: 0,
   };
 }

@@ -235,6 +235,72 @@ async function main() {
       assert.ok(conv!.stateHistory.some((h) => h.toStatus === "RESUELTA"));
     });
 
+    // 5b. Tipo de cierre y asignado de Emozion (datos inventados).
+    const CLOSE = 39500;
+    const rawStatus = (status: string, assigneeId: number | null, closure: Record<string, unknown> = {}) => ({
+      ...rawConvCreated(CLOSE, "+5491100000004", "Cliente Ficticio Cierre", status, [], assigneeId, "conversation_status_changed"),
+      ...closure,
+    });
+    await check("5b. conversation_created con asignado → externalAssigneeId en la conversación y en la fila de nacimiento", async () => {
+      const { id } = await fromRaw(rawConvCreated(CLOSE, "+5491100000004", "Cliente Ficticio Cierre", "open", [], 77));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const conv = await prisma.conversation.findUnique({ where: { externalConversationId: String(CLOSE) }, include: { stateHistory: true } });
+      assert.equal(conv!.externalAssigneeId, "77");
+      assert.equal(conv!.closureTypeId, null);
+      assert.equal(conv!.stateHistory[0].externalAssigneeId, "77");
+    });
+    await check("5c. resolved con tipo de cierre → código y nombre en conversación e historial; el comentario NO se guarda", async () => {
+      const { id } = await fromRaw(rawStatus("resolved", 77, {
+        closure_type_id: 3, closure_type_name: "Tipo inventado", closure_comment: "SENTINEL_CLOSURE_COMMENT",
+      }));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const conv = await prisma.conversation.findUnique({ where: { externalConversationId: String(CLOSE) }, include: { stateHistory: { orderBy: { changedAt: "asc" } } } });
+      assert.equal(conv!.status, "RESUELTA");
+      assert.equal(conv!.closureTypeId, "3");
+      assert.equal(conv!.closureTypeName, "Tipo inventado");
+      const last = conv!.stateHistory[conv!.stateHistory.length - 1];
+      assert.equal(last.toStatus, "RESUELTA");
+      assert.equal(last.closureTypeId, "3");
+      assert.equal(last.closureTypeName, "Tipo inventado");
+      assert.equal(last.externalAssigneeId, "77");
+      const dump = JSON.stringify([conv, await prisma.webhookEvent.findMany({ where: { externalConversationId: String(CLOSE) } })]);
+      assert.ok(!dump.includes("SENTINEL_CLOSURE_COMMENT"), "closure_comment no llega a ninguna tabla");
+    });
+    await check("5d. reapertura → el cierre vuelve a null en la conversación, se conserva en el historial; el asignado sigue al evento", async () => {
+      const { id } = await fromRaw(rawStatus("open", null));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const conv = await prisma.conversation.findUnique({ where: { externalConversationId: String(CLOSE) }, include: { stateHistory: { orderBy: { changedAt: "asc" } } } });
+      assert.equal(conv!.status, "SIN_ASIGNAR");
+      assert.equal(conv!.closureTypeId, null);
+      assert.equal(conv!.closureTypeName, null);
+      assert.equal(conv!.externalAssigneeId, null);
+      assert.ok(conv!.stateHistory.some((h) => h.toStatus === "RESUELTA" && h.closureTypeId === "3"), "el cierre anterior queda en el historial");
+      const last = conv!.stateHistory[conv!.stateHistory.length - 1];
+      assert.equal(last.closureTypeId, null);
+      assert.equal(last.externalAssigneeId, null);
+    });
+    await check("5e. resolved SIN tipo de cierre → no arrastra el cierre anterior", async () => {
+      await processWebhookEvent((await fromRaw(rawStatus("resolved", 78, { closure_type_id: 5, closure_type_name: "Otro tipo inventado" }))).id);
+      await processWebhookEvent((await fromRaw(rawStatus("open", 78))).id);
+      const { id } = await fromRaw(rawStatus("resolved", 78));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const conv = await prisma.conversation.findUnique({ where: { externalConversationId: String(CLOSE) } });
+      assert.equal(conv!.status, "RESUELTA");
+      assert.equal(conv!.closureTypeId, null);
+      assert.equal(conv!.closureTypeName, null);
+      assert.equal(conv!.externalAssigneeId, "78");
+    });
+    await check("5f. statusEvent guardado con el formato anterior (sin los campos nuevos) → se procesa, todo en null", async () => {
+      const id = await fromNormalized("conversation_status_changed",
+        { event: "conversation_status_changed", statusEvent: { externalConversationId: String(CLOSE), status: "SIN_ASIGNAR", closedAt: null } },
+        String(CLOSE));
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      const conv = await prisma.conversation.findUnique({ where: { externalConversationId: String(CLOSE) } });
+      assert.equal(conv!.status, "SIN_ASIGNAR");
+      assert.equal(conv!.externalAssigneeId, null);
+      assert.equal(conv!.closureTypeId, null);
+    });
+
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)
     await check("6. fallo de dominio → ERROR persiste; dominio rolled back", async () => {
       // status inválido (no producible por el mapper) → fuerza error de Prisma DENTRO de la tx.
