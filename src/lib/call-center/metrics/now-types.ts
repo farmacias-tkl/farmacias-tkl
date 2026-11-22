@@ -104,6 +104,19 @@ export interface NowProgress {
   firstResponse: { today: ProgressSide; previous: ProgressSide };
 }
 
+/** Controles de "Calidad de datos" sobre los últimos `days` días. */
+export interface QualityChecks {
+  days: number;
+  /** Eventos de Emozion: con error, recibidos sin procesar y total recibido. */
+  events: { error: number; received: number; total: number };
+  /** Conversaciones creadas en la ventana y cuántas tienen registrada la salida del bot. */
+  botExit: { entries: number; withExit: number };
+  /** Números de cuenta con mensajes que no están en la configuración. null sin configuración vigente. */
+  unknownAccounts: string[] | null;
+  /** Último día con ventas de SIAF cargadas. null si no hay ninguno. */
+  salesLastDay: string | null;
+}
+
 export interface NowGroup extends Omit<QueueGroupCounts, "oldestWaitStart"> {
   oldestWaitStart: string | null;
 }
@@ -171,5 +184,7 @@ export interface NowPayload {
     /** No son clientes, en los últimos días de closedUnanswered. null si no se pudo calcular. */
     notCustomers: number | null;
     notCustomersDays: number;
+    /** null si no se pudieron calcular. */
+    checks: QualityChecks | null;
   };
 }

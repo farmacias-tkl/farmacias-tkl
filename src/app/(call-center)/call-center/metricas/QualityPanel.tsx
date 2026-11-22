@@ -27,6 +27,7 @@ export default function QualityPanel() {
 
   const q = state.data.quality;
   const closed = q.closedUnanswered;
+  const c = q.checks;
   const since = dayFmt.format(new Date(q.closedSince));
   const ages: Array<[string, number]> = [
     ["Menos de 24 horas", closed.byAge.lt24h], ["Entre 24 y 72 horas", closed.byAge.h24to72],
@@ -41,6 +42,46 @@ export default function QualityPanel() {
         <Line label="Último aviso de Emozion" value={when(q.freshness.lastWebhookAt)} />
         <Line label="Último mensaje guardado" value={when(q.freshness.lastMessageAt)} />
         <Note>Fuera del horario de atención es normal que pasen varios minutos sin avisos.</Note>
+      </Box>
+
+      <Box title="Eventos de Emozion sin procesar" evidence={c ? "Medido" : "No disponible"}>
+        {c ? (
+          <>
+            <Line label={`Con error, últimos ${c.days} días`} value={nf.format(c.events.error)} strong />
+            <Line label="Recibidos y todavía sin procesar" value={nf.format(c.events.received)} />
+            <Line label="Eventos recibidos en total" value={nf.format(c.events.total)} />
+            <Note>Un evento con error es un mensaje o un cambio de estado que falta en la plataforma. Lo normal es cero.</Note>
+          </>
+        ) : <Note>No se pudo calcular.</Note>}
+      </Box>
+
+      <Box title="Conversaciones con salida del bot registrada" evidence={c ? "Medido" : "No disponible"}>
+        {c ? (
+          <>
+            <Line label={`De las que entraron en los últimos ${c.days} días`}
+              value={c.botExit.entries > 0 ? `${Math.round((c.botExit.withExit / c.botExit.entries) * 100)} %` : "Sin datos"} strong />
+            <Line label="Con salida registrada" value={`${nf.format(c.botExit.withExit)} de ${nf.format(c.botExit.entries)}`} />
+            <Note>La meta de primera respuesta se cuenta desde la salida del bot. Las que no la tienen pueden seguir en el bot o ser un aviso que no llegó.</Note>
+          </>
+        ) : <Note>No se pudo calcular.</Note>}
+      </Box>
+
+      <Box title="Cuentas sin configurar" evidence={c && c.unknownAccounts ? "Medido" : "No disponible"}>
+        {c && c.unknownAccounts ? (
+          <>
+            <Line label={`Escribieron en los últimos ${c.days} días y no están en la configuración`} value={nf.format(c.unknownAccounts.length)} strong />
+            {c.unknownAccounts.length > 0 && <Note>Cuentas: {c.unknownAccounts.join(", ")}. Se cargan en Configuración.</Note>}
+          </>
+        ) : <Note>{c ? "Todavía no hay configuración cargada." : "No se pudo calcular."}</Note>}
+      </Box>
+
+      <Box title="Ventas de SIAF" evidence={c ? "Medido" : "No disponible"}>
+        {c ? (
+          <>
+            <Line label="Último día cargado" value={c.salesLastDay ? dayFmt.format(new Date(`${c.salesLastDay}T12:00:00.000-03:00`)) : "Sin datos"} strong />
+            <Note>Se actualizan una vez por día, de madrugada.</Note>
+          </>
+        ) : <Note>No se pudo calcular.</Note>}
       </Box>
 
       <Box title="Cerradas con el último mensaje del cliente" evidence="Medido">

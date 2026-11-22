@@ -22,8 +22,11 @@ import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
 import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
-import { NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress } from "./now-types";
+import {
+  NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress, type QualityChecks,
+} from "./now-types";
 import { loadProgress } from "./progress";
+import { loadQualityChecks } from "./quality";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -46,6 +49,7 @@ export interface NowExtras {
   /** Marcas del último bloque de las abiertas, para clasificar las antiguas. null si no se pudieron leer. */
   openBlocks: readonly ClosedBlockRow[] | null;
   progress: NowProgress | null;
+  checks: QualityChecks | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -84,7 +88,7 @@ export function toNowPayload(
   const waiting = open.filter((it) => it.waitHours <= windowHours);
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
-  const { history, today, closed, wait, accounts, openBlocks, progress } = extras;
+  const { history, today, closed, wait, accounts, openBlocks, progress, checks } = extras;
   const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
   // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
   const staleItems = stale.map((it) => {
@@ -147,6 +151,7 @@ export function toNowPayload(
         : null,
       notCustomers: closed ? closed.notCustomers : null,
       notCustomersDays: closed ? closed.days : CLOSED_UNANSWERED_DAYS,
+      checks,
     },
   };
 }
@@ -198,7 +203,9 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
   ]);
   const wait = waitContext(versions, now);
-  const accounts = configForDay(versions, arDayISO(now))?.data.accounts ?? [];
+  const current = configForDay(versions, arDayISO(now));
+  const accounts = current?.data.accounts ?? [];
+  const checks = await loadQualityChecks(now, current ? accounts : null).catch(() => null);
   const progress = await loadProgress(now, versions, wait?.ops ?? null).catch(() => null);
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
@@ -217,7 +224,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }
