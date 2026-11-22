@@ -57,6 +57,16 @@ export function arDayStartUTC(dayISO: string): Date {
   return new Date(new Date(`${dayISO}T00:00:00.000Z`).getTime() - AR_UTC_OFFSET_MINUTES * MS_MIN);
 }
 
+/**
+ * Instante → literal "timestamp" en UTC para una consulta cruda. Las columnas son
+ * timestamp SIN zona y guardan UTC; si el parámetro viajara como timestamptz, Postgres lo
+ * convertiría con la zona horaria de la sesión y la comparación se correría (en Neon la
+ * sesión está en GMT, pero no hay que depender de eso). Usar siempre con ::timestamp.
+ */
+export function utcTimestampParam(d: Date): string {
+  return d.toISOString().replace("T", " ").replace("Z", "");
+}
+
 /** Día siguiente de calendario. */
 export function nextDayISO(dayISO: string): string {
   return new Date(new Date(`${dayISO}T00:00:00.000Z`).getTime() + MS_DAY).toISOString().slice(0, 10);

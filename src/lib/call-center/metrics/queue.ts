@@ -21,6 +21,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { utcTimestampParam } from "./business-time";
 import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, isThanksCandidate } from "./patterns";
 
 const MS_HOUR = 3_600_000;
@@ -156,7 +157,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     WITH scope AS (
       SELECT c.id, c.status, c."customerId", c."createdAt"
       FROM "Conversation" c
-      WHERE c.status <> 'RESUELTA' OR c."createdAt" >= ${closedSince}
+      WHERE c.status <> 'RESUELTA' OR c."createdAt" >= ${utcTimestampParam(closedSince)}::timestamp
     ), agg AS (
       SELECT m."conversationId" AS cid,
         max(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate") AS last_op,
@@ -242,7 +243,7 @@ export async function countClosedUnansweredBefore(before: Date): Promise<ClosedU
         bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done
       FROM "ConversationMessage" m
       JOIN "Conversation" c ON c.id = m."conversationId"
-      WHERE c.status = 'RESUELTA' AND c."createdAt" < ${before}
+      WHERE c.status = 'RESUELTA' AND c."createdAt" < ${utcTimestampParam(before)}::timestamp
       GROUP BY 1
     )
     SELECT
