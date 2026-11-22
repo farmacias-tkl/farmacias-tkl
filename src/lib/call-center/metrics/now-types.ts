@@ -80,6 +80,30 @@ export interface ClosedUnansweredReport {
   items: NowClosedItem[];
 }
 
+/** Primera respuesta de un día, vista a una hora dada. */
+export interface ProgressSide {
+  day: string;
+  entries: number;
+  /** Cumplimiento de la meta entre las evaluables. null sin configuración o sin evaluables. */
+  compliance: number | null;
+  /** Mediana hábil de la primera respuesta, entre las respondidas. null si no hay. */
+  medianBusinessMinutes: number | null;
+}
+
+/** "Avances": el turno de hoy y la primera respuesta frente al mismo día de la semana anterior. */
+export interface NowProgress {
+  /** null antes del primer turno del día, un día sin turno o sin configuración: no hay dato, no es cero. */
+  shift: {
+    startedAt: string;
+    /** Abiertas con el último mensaje del cliente y hasta 72 horas de espera, al empezar el turno. */
+    pendingAtStart: number;
+    /** De esas, las que recibieron una respuesta pública de un operador desde entonces. */
+    attendedSince: number;
+  } | null;
+  /** Hoy hasta ahora, y el mismo día de la semana anterior cortado a la misma hora. */
+  firstResponse: { today: ProgressSide; previous: ProgressSide };
+}
+
 export interface NowGroup extends Omit<QueueGroupCounts, "oldestWaitStart"> {
   oldestWaitStart: string | null;
 }
@@ -131,6 +155,8 @@ export interface NowPayload {
   };
   /** null si no se pudo calcular. */
   closedUnanswered: Omit<ClosedUnansweredReport, "notCustomers"> | null;
+  /** null si no se pudo calcular. */
+  progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */
   quality: {
     /** Evidencia de actualización. null si no hay ningún evento o mensaje. */

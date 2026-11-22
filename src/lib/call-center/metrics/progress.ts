@@ -1,0 +1,151 @@
+/**
+ * "Avances" del bloque "Ahora": cómo viene el turno y la primera respuesta frente a un
+ * período comparable.
+ *
+ *  - Pendientes al comenzar el turno: conversaciones que, al inicio de la primera franja del
+ *    horario de operadores de hoy, estaban abiertas, con el último mensaje público del
+ *    cliente y hasta 72 horas de espera (la misma ventana de "Ahora"). El estado a esa hora
+ *    se reconstruye con el historial de cambios de estado.
+ *  - Atrasados atendidos durante el turno: de ese grupo, los que recibieron una respuesta
+ *    pública de un operador desde que empezó el turno.
+ *  - Primera respuesta: lo que entró hoy, hasta ahora, contra el mismo día de la semana
+ *    anterior cortado a la misma hora. El corte se simula: de la semana anterior solo
+ *    cuentan las conversaciones creadas antes de esa hora y las respuestas dadas antes de
+ *    esa hora.
+ *
+ * Antes del primer turno del día (o un día sin turno, o sin configuración) no hay dato de
+ * turno: null, nunca cero.
+ *
+ * Límite: la hora del historial de estados es la de procesamiento del evento, no la del
+ * cambio en Emozion.
+ *
+ * Las funciones build* y cut* son PURAS. Las load* son de solo lectura y no traen teléfono,
+ * nombre ni texto.
+ */
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+import { buildAttentionReport, loadEntryRows, type EntryRow } from "./attention";
+import { arDayISO, arDayStartUTC, utcTimestampParam, type DayRanges } from "./business-time";
+import type { ConfigVersion } from "./config";
+import { addDaysISO } from "./period";
+import { QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
+import type { NowProgress, ProgressSide } from "./now-types";
+
+const MS_MIN = 60_000;
+const MS_HOUR = 3_600_000;
+const MS_DAY = 86_400_000;
+const SCOPE_DAYS = 30;
+
+/** Inicio del primer turno de operadores del día de `now`; null si hoy no hay turno o todavía no empezó. PURO. */
+export function shiftStartOf(now: Date, ops: DayRanges): Date | null {
+  const day = arDayISO(now);
+  const ranges = ops(day);
+  if (ranges.length === 0) return null;
+  const start = new Date(arDayStartUTC(day).getTime() + ranges[0].from * MS_MIN);
+  return start.getTime() <= now.getTime() ? start : null;
+}
+
+/** Una conversación cuyo último mensaje público anterior al inicio del turno era del cliente. */
+export interface ShiftRow {
+  /** Primer mensaje del bloque sin responder a esa hora. */
+  waitStart: Date;
+  /** Último estado registrado antes del inicio del turno; null si no hay historial previo. */
+  statusAtStart: string | null;
+  /** Recibió una respuesta pública de un operador desde el inicio del turno. */
+  attendedSince: boolean;
+}
+
+/** PURO. Abiertas a esa hora y con hasta `windowHours` de espera. */
+export function buildShiftProgress(rows: readonly ShiftRow[], shiftStart: Date, windowHours: number = QUEUE_LIST_DEFAULT_HOURS): NonNullable<NowProgress["shift"]> {
+  const pending = rows.filter((r) =>
+    r.statusAtStart !== "RESUELTA" && shiftStart.getTime() - r.waitStart.getTime() <= windowHours * MS_HOUR);
+  return {
+    startedAt: shiftStart.toISOString(),
+    pendingAtStart: pending.length,
+    attendedSince: pending.filter((r) => r.attendedSince).length,
+  };
+}
+
+/**
+ * Deja las filas como se veían en el instante `cutoff`: fuera las creadas después, y sin la
+ * respuesta (ni la salida del bot) que todavía no había ocurrido. PURO.
+ */
+export function cutEntryRowsAt(rows: readonly EntryRow[], cutoff: Date): EntryRow[] {
+  const t = cutoff.getTime();
+  return rows
+    .filter((r) => r.createdAt.getTime() <= t)
+    .map((r) => ({
+      ...r,
+      botExitAt: r.botExitAt && r.botExitAt.getTime() <= t ? r.botExitAt : null,
+      botOrderCompleteAt: r.botOrderCompleteAt && r.botOrderCompleteAt.getTime() <= t ? r.botOrderCompleteAt : null,
+      firstHumanAt: r.firstHumanAt && r.firstHumanAt.getTime() <= t ? r.firstHumanAt : null,
+      firstHumanAccount: r.firstHumanAt && r.firstHumanAt.getTime() <= t ? r.firstHumanAccount : null,
+    }));
+}
+
+/** Resumen de primera respuesta de un día, visto en el instante `at`. PURO. */
+export function progressSide(rows: readonly EntryRow[], day: string, at: Date, versions: readonly ConfigVersion[]): ProgressSide {
+  const total = buildAttentionReport(cutEntryRowsAt(rows, at), { now: at, from: day, to: day, versions }).total;
+  return {
+    day,
+    entries: total.entries,
+    compliance: total.goal?.compliance ?? null,
+    medianBusinessMinutes: total.firstResponseBusiness?.median ?? null,
+  };
+}
+
+/**
+ * Conversaciones creadas antes de `shiftStart` cuyo último mensaje público anterior a esa
+ * hora es del cliente. Solo lectura; sin ids, teléfono, nombre ni texto.
+ */
+export async function loadShiftRows(shiftStart: Date): Promise<ShiftRow[]> {
+  const t = utcTimestampParam(shiftStart);
+  const scopeFrom = utcTimestampParam(new Date(shiftStart.getTime() - SCOPE_DAYS * MS_DAY));
+  return prisma.$queryRaw<ShiftRow[]>(Prisma.sql`
+    WITH scope AS (
+      SELECT c.id FROM "Conversation" c
+      WHERE c."createdAt" < ${t}::timestamp
+        AND (c.status <> 'RESUELTA' OR c."createdAt" >= ${scopeFrom}::timestamp)
+    ), agg AS (
+      SELECT m."conversationId" AS cid,
+        max(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate" AND m."sentAt" < ${t}::timestamp) AS last_op,
+        max(m."sentAt") FILTER (WHERE m.author = 'CUSTOMER' AND m."sentAt" < ${t}::timestamp) AS last_cust,
+        coalesce(bool_or(m.author = 'OPERATOR' AND NOT m."isPrivate" AND m."sentAt" >= ${t}::timestamp), false) AS attended
+      FROM "ConversationMessage" m
+      JOIN scope s ON s.id = m."conversationId"
+      GROUP BY 1
+    )
+    SELECT
+      (SELECT min(m."sentAt") FROM "ConversationMessage" m
+        WHERE m."conversationId" = a.cid AND m.author = 'CUSTOMER' AND m."sentAt" < ${t}::timestamp
+          AND (a.last_op IS NULL OR m."sentAt" > a.last_op)) AS "waitStart",
+      (SELECT h."toStatus"::text FROM "ConversationStateHistory" h
+        WHERE h."conversationId" = a.cid AND h."changedAt" < ${t}::timestamp
+        ORDER BY h."changedAt" DESC, h.id DESC LIMIT 1) AS "statusAtStart",
+      a.attended AS "attendedSince"
+    FROM agg a
+    WHERE a.last_cust IS NOT NULL AND (a.last_op IS NULL OR a.last_cust > a.last_op)
+  `);
+}
+
+/** Avances al momento `now`. `ops` es el horario de operadores; null sin configuración vigente. */
+export async function loadProgress(now: Date, versions: readonly ConfigVersion[], ops: DayRanges | null): Promise<NowProgress> {
+  const today = arDayISO(now);
+  const previousDay = addDaysISO(today, -7);
+  const previousAt = new Date(now.getTime() - 7 * MS_DAY);
+  const shiftStart = ops ? shiftStartOf(now, ops) : null;
+
+  const [shiftRows, todayRows, previousRows] = await Promise.all([
+    shiftStart ? loadShiftRows(shiftStart) : Promise.resolve(null),
+    loadEntryRows(today, today),
+    loadEntryRows(previousDay, previousDay),
+  ]);
+
+  return {
+    shift: shiftStart && shiftRows ? buildShiftProgress(shiftRows, shiftStart) : null,
+    firstResponse: {
+      today: progressSide(todayRows, today, now, versions),
+      previous: progressSide(previousRows, previousDay, previousAt, versions),
+    },
+  };
+}

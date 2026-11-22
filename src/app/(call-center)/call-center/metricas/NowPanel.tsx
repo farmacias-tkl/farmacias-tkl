@@ -13,6 +13,9 @@ const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-d
 const dayFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit", timeZone: TZ });
 const dayKeyFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ });
 
+const pct = (v: number | null) => (v === null ? "Sin datos" : `${Math.round(v * 100)} %`);
+const mins = (v: number | null) => (v === null ? "Sin datos" : formatWait(v));
+
 const minutesSince = (iso: string, nowMs: number) => Math.max(0, Math.round((nowMs - new Date(iso).getTime()) / 60000));
 
 /** "hoy 12:22", "ayer 18:40" o "19/11 09:10", en hora de Buenos Aires. */
@@ -141,6 +144,8 @@ export default function NowPanel() {
         </div>
       </div>
 
+      <ProgressCard d={d} />
+
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
         Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" ? d.listTotal : shown.length)})` : ""}
         <span className="ml-2 text-xs font-normal text-gray-600">del que más espera al que menos</span>
@@ -182,6 +187,100 @@ function ActionButton({ label, value, tone, active, disabled, onClick }: {
       <span className={`text-xl font-semibold tabular-nums ${tone === "critical" ? "text-red-900" : "text-gray-900"}`}>{value}</span>
       <span className="mt-0.5 text-[11px] leading-tight text-gray-700">{label}</span>
     </button>
+  );
+}
+
+/** Flecha de avance: verde si mejora, naranja con la palabra "Peor" si empeora, gris solo si no cambia. */
+function Trend({ better, same, text }: { better: boolean; same: boolean; text: string }) {
+  if (same) return <span className="text-xs text-gray-700">Igual que la semana pasada</span>;
+  return (
+    <span className={`text-xs font-medium ${better ? "text-green-800" : "text-orange-800"}`}>
+      <span aria-hidden>{better ? "▲" : "▼"}</span> {better ? "Mejor" : "Peor"}: {text}
+    </span>
+  );
+}
+
+/** "Avances": el turno de hoy y la primera respuesta contra el mismo día de la semana anterior. */
+function ProgressCard({ d }: { d: NowPayload }) {
+  const p = d.progress;
+  if (!p) {
+    return (
+      <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+        <h2 className="text-sm font-semibold text-gray-800">Avances</h2>
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+      </div>
+    );
+  }
+  const { today, previous } = p.firstResponse;
+  const pendingNow = d.waiting.total;
+  const critical = d.waiting.critical;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">Avances</h2>
+
+      <h3 className="mt-2 text-xs font-semibold text-gray-700">El turno de hoy</h3>
+      {p.shift ? (
+        <dl className="mt-1 space-y-1 text-sm text-gray-800">
+          <div className="flex items-baseline justify-between gap-3">
+            <dt>Pendientes al empezar, a las {timeFmt.format(new Date(p.shift.startedAt))}</dt>
+            <dd className="shrink-0 text-lg font-semibold tabular-nums text-gray-900">{nf.format(p.shift.pendingAtStart)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt>Pendientes ahora</dt>
+            <dd className="shrink-0 text-lg font-semibold tabular-nums text-gray-900">{nf.format(pendingNow)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt>Atrasados atendidos durante el turno</dt>
+            <dd className="shrink-0 text-lg font-semibold tabular-nums text-gray-900">{nf.format(p.shift.attendedSince)} de {nf.format(p.shift.pendingAtStart)}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-1 text-sm text-gray-600">Sin datos: el turno de hoy todavía no empezó, o hoy no hay turno.</p>
+      )}
+      {p.shift && pendingNow !== p.shift.pendingAtStart && (
+        <p className="mt-1">
+          <Trend better={pendingNow < p.shift.pendingAtStart} same={false}
+            text={`${nf.format(Math.abs(pendingNow - p.shift.pendingAtStart))} ${pendingNow < p.shift.pendingAtStart ? "menos" : "más"} que al empezar`} />
+        </p>
+      )}
+      {critical !== null && critical > 0 && (
+        <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-900">
+          {nf.format(critical)} {critical === 1 ? "caso sigue" : "casos siguen"} en demora crítica.
+        </p>
+      )}
+
+      <h3 className="mt-3 border-t border-gray-100 pt-2 text-xs font-semibold text-gray-700">
+        Primera respuesta: hoy contra el {dayFmt.format(new Date(`${previous.day}T12:00:00.000-03:00`))}, a esta misma hora
+      </h3>
+      <dl className="mt-1 space-y-2 text-sm text-gray-800">
+        <div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt>Respondidas dentro de la meta</dt>
+            <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{pct(today.compliance)} <span className="font-normal text-gray-600">· antes {pct(previous.compliance)}</span></dd>
+          </div>
+          {today.compliance !== null && previous.compliance !== null && (
+            <Trend better={today.compliance > previous.compliance} same={pct(today.compliance) === pct(previous.compliance)}
+              text={`${Math.abs(Math.round((today.compliance - previous.compliance) * 100))} puntos`} />
+          )}
+        </div>
+        <div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt>La mitad esperó (minutos hábiles)</dt>
+            <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{mins(today.medianBusinessMinutes)} <span className="font-normal text-gray-600">· antes {mins(previous.medianBusinessMinutes)}</span></dd>
+          </div>
+          {today.medianBusinessMinutes !== null && previous.medianBusinessMinutes !== null && (
+            <Trend better={today.medianBusinessMinutes < previous.medianBusinessMinutes} same={mins(today.medianBusinessMinutes) === mins(previous.medianBusinessMinutes)}
+              text={formatWait(Math.abs(today.medianBusinessMinutes - previous.medianBusinessMinutes))} />
+          )}
+        </div>
+      </dl>
+      <More>
+        Pendientes al empezar el turno: conversaciones abiertas, con el último mensaje del cliente y hasta {d.windowHours} horas de espera, a la hora en que empieza el
+        horario de operadores. La comparación toma lo que había entrado y lo que se había respondido el mismo día de la semana pasada a esta misma hora
+        ({nf.format(today.entries)} entradas hoy, {nf.format(previous.entries)} ese día). &quot;Sin datos&quot; quiere decir que no hay con qué calcularlo, no que sea cero.
+      </More>
+      <Evidence level="MEDIDO" />
+    </div>
   );
 }
 
