@@ -12,6 +12,7 @@
  */
 import {
   can, canAccessOwnerPanel, canAccessRoute, canViewCallCenter, canViewExecutive,
+  canViewCallCenterMetrics, canViewCallCenterSales, canConfigureCallCenterMetrics,
   CALL_CENTER_ROLE_ACCESS, MENU_BY_ROLE, ROUTE_PERMISSIONS, visibleMenu,
 } from "./permissions";
 import type { UserRole } from "@prisma/client";
@@ -183,6 +184,43 @@ for (const r of ROLES.filter((x) => x !== "OWNER")) {
   assert(`menú: ${r} no tiene /owner`, !MENU_BY_ROLE[r].includes("/owner"));
 }
 assert("panel de Dirección: OWNER sí", canAccessOwnerPanel({ role: "OWNER" }));
+
+console.log("=== Métricas del Call Center ===");
+const CC_METRICS: Record<string, { fn: (u: { role: UserRole } | null | undefined) => boolean; allowed: string }> = {
+  canViewCallCenterMetrics: { fn: canViewCallCenterMetrics, allowed: "OAS" },
+  canViewCallCenterSales: { fn: canViewCallCenterSales, allowed: "OAS" },
+  canConfigureCallCenterMetrics: { fn: canConfigureCallCenterMetrics, allowed: "O" },
+};
+for (const [name, { fn, allowed }] of Object.entries(CC_METRICS)) {
+  const ok = roles(allowed);
+  for (const r of ROLES) {
+    assert(`${name}: ${r} ${ok.includes(r) ? "sí" : "no"}`, fn({ role: r }) === ok.includes(r));
+  }
+  assert(`${name}: sin usuario no`, !fn(null) && !fn(undefined));
+  assert(`${name}: Dirección sí`, fn({ role: "OWNER" }));
+}
+// Entrar a la bandeja por flag no abre las métricas, las ventas ni la configuración.
+for (const r of ROLES.filter((x) => !CALL_CENTER_ROLE_ACCESS.includes(x))) {
+  const porFlag = { role: r, callCenterAccess: true };
+  assert(`${r} con callCenterAccess: entra a la bandeja`, canViewCallCenter(porFlag));
+  assert(`${r} con callCenterAccess: no ve métricas`, !canViewCallCenterMetrics(porFlag));
+  assert(`${r} con callCenterAccess: no ve ventas`, !canViewCallCenterSales(porFlag));
+  assert(`${r} con callCenterAccess: no configura`, !canConfigureCallCenterMetrics(porFlag));
+}
+// Ver las ventas del Call Center no abre el Dashboard Ejecutivo, y al revés.
+for (const r of ["ADMIN", "SUPERVISOR"] as UserRole[]) {
+  assert(`${r} sin executiveAccess: ve ventas del Call Center`, canViewCallCenterSales({ role: r }));
+  assert(`${r} sin executiveAccess: no ve el Dashboard Ejecutivo`, !canViewExecutive({ role: r, executiveAccess: false }));
+}
+for (const r of ["HR", "BRANCH_MANAGER", "MAINTENANCE"] as UserRole[]) {
+  assert(`${r} con executiveAccess: no ve ventas del Call Center`, !canViewCallCenterSales({ role: r }));
+}
+// Quien ve métricas siempre puede entrar a /call-center (si no, el middleware lo frenaría antes).
+for (const r of ROLES) {
+  if (canViewCallCenterMetrics({ role: r })) {
+    assert(`${r}: ve métricas ⇒ entra al Call Center`, canViewCallCenter({ role: r }));
+  }
+}
 
 console.log(`\n=== Resultado: ${passed} pasaron, ${failed} fallaron ===`);
 process.exit(failed === 0 ? 0 : 1);
