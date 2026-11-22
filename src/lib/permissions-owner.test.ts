@@ -13,6 +13,7 @@
 import {
   can, canAccessOwnerPanel, canAccessRoute, canViewCallCenter, canViewExecutive,
   canViewCallCenterMetrics, canViewCallCenterSales, canConfigureCallCenterMetrics,
+  callCenterMetricsConfigAccess,
   canSeePlatformLinkFromCallCenter, PLATFORM_HOME_ROUTE,
   CALL_CENTER_ROLE_ACCESS, MENU_BY_ROLE, ROUTE_PERMISSIONS, visibleMenu,
 } from "./permissions";
@@ -190,7 +191,7 @@ console.log("=== Métricas del Call Center ===");
 const CC_METRICS: Record<string, { fn: (u: { role: UserRole } | null | undefined) => boolean; allowed: string }> = {
   canViewCallCenterMetrics: { fn: canViewCallCenterMetrics, allowed: "OAS" },
   canViewCallCenterSales: { fn: canViewCallCenterSales, allowed: "OAS" },
-  canConfigureCallCenterMetrics: { fn: canConfigureCallCenterMetrics, allowed: "O" },
+  canConfigureCallCenterMetrics: { fn: canConfigureCallCenterMetrics, allowed: "OAS" },
 };
 for (const [name, { fn, allowed }] of Object.entries(CC_METRICS)) {
   const ok = roles(allowed);
@@ -221,6 +222,36 @@ for (const r of ROLES) {
   if (canViewCallCenterMetrics({ role: r })) {
     assert(`${r}: ve métricas ⇒ entra al Call Center`, canViewCallCenter({ role: r }));
   }
+}
+
+console.log("=== Configuración de las métricas: página y API ===");
+// El mismo control decide la página y la API (lectura y guardado). Seis roles, con y sin flag.
+const CONFIG_OK = roles("OAS");
+for (const r of ROLES) {
+  for (const flag of [true, false]) {
+    const u = { role: r, callCenterAccess: flag };
+    const esperado = CONFIG_OK.includes(r) ? 200 : 403;
+    assert(`configuración: ${r} flag=${flag} → ${esperado}`, callCenterMetricsConfigAccess(u) === esperado);
+    // El flag no cambia nada: con y sin callCenterAccess da lo mismo.
+    assert(
+      `configuración: ${r} el flag no interviene`,
+      callCenterMetricsConfigAccess({ role: r, callCenterAccess: true } as { role: UserRole }) ===
+        callCenterMetricsConfigAccess({ role: r, callCenterAccess: false } as { role: UserRole }),
+    );
+    // Quien puede configurar siempre pasa el middleware de /call-center y de /api/call-center.
+    if (esperado === 200) assert(`configuración: ${r} flag=${flag} pasa el gate de Call Center`, canViewCallCenter(u));
+  }
+}
+for (const r of ["HR", "BRANCH_MANAGER", "MAINTENANCE"] as UserRole[]) {
+  const soloFlag = { role: r, callCenterAccess: true };
+  assert(`${r} con callCenterAccess: entra a la bandeja`, canViewCallCenter(soloFlag));
+  assert(`${r} con callCenterAccess: 403 en la configuración`, callCenterMetricsConfigAccess(soloFlag) === 403);
+  assert(`${r} con executiveAccess: 403 en la configuración`, callCenterMetricsConfigAccess({ role: r, executiveAccess: true } as { role: UserRole }) === 403);
+}
+assert("configuración: sin sesión → 401", callCenterMetricsConfigAccess(null) === 401 && callCenterMetricsConfigAccess(undefined) === 401);
+// Quien configura también ve las métricas (la pantalla de métricas es la que enlaza a la configuración).
+for (const r of ROLES) {
+  if (canConfigureCallCenterMetrics({ role: r })) assert(`${r}: configura ⇒ ve métricas`, canViewCallCenterMetrics({ role: r }));
 }
 
 console.log("=== Volver a la plataforma desde Call Center ===");

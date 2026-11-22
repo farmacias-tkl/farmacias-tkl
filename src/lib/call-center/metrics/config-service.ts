@@ -1,6 +1,6 @@
 /**
  * Guardar una versión de la configuración de las métricas y leer las opciones que ofrece
- * el formulario. La autorización (solo Dirección) la aplica quien llama: la ruta de la API
+ * el formulario. La autorización (callCenterMetricsConfigAccess) la aplica quien llama: la ruta de la API
  * y la página. Acá no se lee la sesión.
  *
  * Guardar NUNCA edita ni borra: crea una fila nueva, vigente desde `validFrom`. Queda en

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canConfigureCallCenterMetrics } from "@/lib/permissions";
+import { callCenterMetricsConfigAccess } from "@/lib/permissions";
 import { loadConfigVersions, configForDay, versionPeriods, versionPeriodLabel } from "@/lib/call-center/metrics/config";
 import { loadConfigOptions } from "@/lib/call-center/metrics/config-service";
 import { arDayISO } from "@/lib/call-center/metrics/business-time";
@@ -12,12 +12,13 @@ export const metadata = { title: "Call Center — Configuración de métricas" }
 export const dynamic = "force-dynamic";
 
 // Configuración de las métricas: horarios, meta, cuentas de Emozion y vendedores de SIAF.
-// Solo Dirección. Guardar crea una versión nueva vigente desde la fecha elegida; las
+// Dirección, Administrador y Supervisión. Guardar crea una versión nueva vigente desde la fecha elegida; las
 // anteriores no se editan ni se borran.
 export default async function CallCenterMetricsConfigPage() {
   const session = await auth();
-  if (!session?.user) redirect("/login");
-  if (!canConfigureCallCenterMetrics(session.user)) redirect("/sin-acceso");
+  const access = callCenterMetricsConfigAccess(session?.user);
+  if (access === 401) redirect("/login");
+  if (access === 403) redirect("/sin-acceso");
 
   const [{ versions, invalid }, options] = await Promise.all([loadConfigVersions(), loadConfigOptions(prisma)]);
   const today = arDayISO(new Date());

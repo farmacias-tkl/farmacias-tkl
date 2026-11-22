@@ -87,8 +87,13 @@ export const CALL_CENTER_METRICS_ROLES: readonly UserRole[] = ["OWNER", "ADMIN",
  */
 export const CALL_CENTER_SALES_ROLES: readonly UserRole[] = ["OWNER", "ADMIN", "SUPERVISOR"];
 
-/** Roles que cambian la configuración de las métricas (horarios, meta, cuentas, vendedores). */
-export const CALL_CENTER_METRICS_CONFIG_ROLES: readonly UserRole[] = ["OWNER"];
+/**
+ * Roles que ven y cambian la configuración de las métricas (horarios, meta, cuentas,
+ * vendedores). Decisión de Dirección (22/11/2026): Dirección, Administrador y Supervisión.
+ * La pantalla lista los vendedores de SIAF por sucursal con su nombre. Cada guardado crea
+ * una versión nueva (nunca edita ni borra) y queda en AuditLog con el usuario que lo hizo.
+ */
+export const CALL_CENTER_METRICS_CONFIG_ROLES: readonly UserRole[] = ["OWNER", "ADMIN", "SUPERVISOR"];
 
 /** ¿Puede ver las métricas del Call Center? */
 export function canViewCallCenterMetrics(u: { role: UserRole } | null | undefined): boolean {
@@ -100,9 +105,22 @@ export function canViewCallCenterSales(u: { role: UserRole } | null | undefined)
   return !!u && CALL_CENTER_SALES_ROLES.includes(u.role);
 }
 
-/** ¿Puede cambiar la configuración de las métricas del Call Center? Solo Dirección. */
+/**
+ * ¿Puede ver y cambiar la configuración de las métricas del Call Center? Por rol: el flag
+ * callCenterAccess no interviene, así que entrar a la bandeja por flag no alcanza.
+ */
 export function canConfigureCallCenterMetrics(u: { role: UserRole } | null | undefined): boolean {
   return !!u && CALL_CENTER_METRICS_CONFIG_ROLES.includes(u.role);
+}
+
+/**
+ * Resultado del control de acceso a la configuración de las métricas, igual para la página y
+ * para la API (lectura y guardado): 401 sin sesión, 403 sin permiso, 200 si puede. La API
+ * responde con ese código; la página manda al login o a "sin acceso".
+ */
+export function callCenterMetricsConfigAccess(u: { role: UserRole } | null | undefined): 200 | 401 | 403 {
+  if (!u) return 401;
+  return canConfigureCallCenterMetrics(u) ? 200 : 403;
 }
 
 /** Ruta de entrada de la plataforma operativa: adonde lleva "Volver a la plataforma". */

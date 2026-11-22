@@ -5,14 +5,14 @@
  *        vendedores de SIAF con ventas recientes).
  *  POST  { validFrom: "AAAA-MM-DD", data } → crea una versión NUEVA. Nunca edita ni borra.
  *
- * Solo Dirección (canConfigureCallCenterMetrics), en los dos métodos: la respuesta del GET
+ * Dirección, Administrador y Supervisión (callCenterMetricsConfigAccess), en los dos métodos: la respuesta del GET
  * trae nombres de vendedores y números de cuenta. El middleware ya exige canViewCallCenter;
  * este es el corte fino. Cada guardado queda en AuditLog.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canConfigureCallCenterMetrics } from "@/lib/permissions";
+import { callCenterMetricsConfigAccess } from "@/lib/permissions";
 import { loadConfigVersions } from "@/lib/call-center/metrics/config";
 import { loadConfigOptions, saveConfigVersion } from "@/lib/call-center/metrics/config-service";
 
@@ -21,8 +21,9 @@ export const dynamic = "force-dynamic";
 
 async function authorize() {
   const session = await auth();
-  if (!session?.user) return { error: NextResponse.json({ error: "No autenticado" }, { status: 401 }) };
-  if (!canConfigureCallCenterMetrics(session.user)) return { error: NextResponse.json({ error: "Sin permisos" }, { status: 403 }) };
+  const access = callCenterMetricsConfigAccess(session?.user);
+  if (access === 401 || !session?.user) return { error: NextResponse.json({ error: "No autenticado" }, { status: 401 }) };
+  if (access === 403) return { error: NextResponse.json({ error: "Sin permisos" }, { status: 403 }) };
   return { user: session.user };
 }
 
