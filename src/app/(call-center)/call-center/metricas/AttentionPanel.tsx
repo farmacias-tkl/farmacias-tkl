@@ -113,6 +113,7 @@ function Report({ data }: { data: AttentionPayload }) {
   return (
     <>
       <p className="mt-4 text-xs text-gray-500">Calculado a las {timeFmt.format(new Date(data.generatedAt))}.</p>
+      <Headline total={data.total} />
 
       <SectionTitle title="Por entrada" badge={POPULATION_LABELS.ENTRADA}
         note="Sigue a las conversaciones creadas en el período, hasta su primera respuesta, aunque esa respuesta haya llegado otro día." />
@@ -124,6 +125,30 @@ function Report({ data }: { data: AttentionPayload }) {
         note="Cuenta lo que pasó cada día, se haya creado cuando se haya creado la conversación. Es otra población: estos números no se comparan con los de entrada." />
       <ActivityReportView activity={data.activity} />
     </>
+  );
+}
+
+/**
+ * Frase-resumen del período. "Evaluables" son las conversaciones respondidas más las
+ * pendientes con la meta ya vencida: las pendientes todavía en plazo no entran.
+ */
+function Headline({ total }: { total: Summary }) {
+  const goal = total.goal;
+  const median = total.firstResponseBusiness?.median ?? null;
+  if (total.entries === 0) return null;
+  if (!goal || goal.compliance === null) {
+    return (
+      <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
+        No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-base text-gray-900">
+      El <span className="font-semibold">{formatRatio(goal.compliance)}</span> de las conversaciones evaluables recibió respuesta dentro de la meta
+      {goal.goalMinutes !== null ? ` de ${goal.goalMinutes} minutos hábiles` : " vigente cada día (cambió dentro del período)"} desde la salida del bot.
+      {median !== null && <> Entre las respondidas, la mitad esperó <span className="font-semibold">{formatMinutes(median)} hábiles</span>.</>}
+    </p>
   );
 }
 

@@ -74,7 +74,7 @@ export default function QualityPanel() {
           &quot;Cerradas sin responder&quot; busca preguntas, pedidos y adjuntos. No toma los reclamos escritos sin signo de pregunta
           (por ejemplo, un cliente que avisa que le corresponde otro descuento). Un agradecimiento con una foto sí entra, porque la foto puede ser una receta o un comprobante.
         </Note>
-        <Note>Las abiertas con más de {state.data.windowHours} horas de espera ({nf.format(state.data.stale.total)}) no cuentan como clientes esperando: están en &quot;Para cerrar en Emozion&quot;.</Note>
+        <Note>Las abiertas con más de {state.data.windowHours} horas de espera ({nf.format(state.data.stale.total)}) no cuentan como conversaciones esperando: están en &quot;Casos antiguos por revisar&quot;.</Note>
       </Box>
     </section>
   );

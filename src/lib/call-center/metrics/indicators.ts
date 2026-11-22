@@ -159,10 +159,10 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
   {
     key: "queue.waiting_now",
     block: "AHORA",
-    label: "Clientes esperando respuesta",
+    label: "Conversaciones esperando respuesta",
     definition:
       "Abiertas esperando cuya espera empezó hace 72 horas o menos. Las abiertas con más espera se muestran " +
-      "aparte, para cerrar en Emozion, y no cuentan como clientes esperando.",
+      "aparte, como casos antiguos por revisar, y no cuentan como conversaciones esperando.",
     source: "Conversation.status, ConversationMessage",
     population: "AHORA",
     denominator: null,
