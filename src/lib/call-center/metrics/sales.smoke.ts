@@ -78,6 +78,21 @@ async function main() {
       assert.deepEqual(rep.daysWithoutConfig, []);
       assert.equal(rep.lastLoadedDay, "2026-03-11");
     });
+    await check("respuesta de la API: la nota de crédito del 11/03 queda señalada y hay caché por período", async () => {
+      const { getSalesPayload } = await import("./sales-service");
+      const now = new Date("2026-03-13T15:00:00.000Z");
+      const p = await getSalesPayload("2026-03-08", "2026-03-12", now);
+      assert.deepEqual([p.total.gross, p.negativeVendorDays, p.hasConfig], [3970, 1, true]);
+      // Sin conversaciones cargadas no hay pedidos: la relación queda sin dato, no en cero.
+      assert.deepEqual([p.orders, p.receiptsPer100Orders], [0, null]);
+      assert.equal(p.byDay.every((d) => d.receiptsPer100Orders === null), true);
+      assert.equal(await getSalesPayload("2026-03-08", "2026-03-12", new Date(now.getTime() + 30_000)), p);
+      assert.notEqual(await getSalesPayload("2026-03-08", "2026-03-12", new Date(now.getTime() + 61_000)), p);
+    });
+    await check("el registro de la vista se puede guardar como VIEW_CALL_CENTER_SALES", async () => {
+      await prisma.accessLog.create({ data: { userId: owner.id, action: "VIEW_CALL_CENTER_SALES", ipAddress: "203.0.113.7", userAgent: "prueba" } });
+      assert.equal(await prisma.accessLog.count({ where: { userId: owner.id, action: "VIEW_CALL_CENTER_SALES" } }), 1);
+    });
   });
 
   console.log(`\nmetrics/sales.smoke: ${pass} ok, ${fails.length} fail`);

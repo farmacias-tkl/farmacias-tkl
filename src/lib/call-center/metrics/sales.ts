@@ -78,6 +78,11 @@ export interface SalesReport {
   configVersionsUsed: Array<{ id: string; validFrom: string }>;
   /** Último día con ventas cargadas dentro del período; null si no hay ninguno. */
   lastLoadedDay: string | null;
+  /**
+   * Vendedor y día con importe negativo: ese día las notas de crédito superaron a las ventas.
+   * Es lo único que la fuente deja ver de las notas de crédito: no las informa por separado.
+   */
+  negativeVendorDays: number;
 }
 
 const zero = (): SalesTotals => ({ gross: 0, receipts: 0, discounts: 0, units: 0 });
@@ -121,6 +126,7 @@ export function buildSalesReport(
   const withoutConfig = new Set<string>();
   const used = new Map<string, string>();
   let lastLoadedDay: string | null = null;
+  let negativeVendorDays = 0;
 
   for (const r of rows) {
     if (r.day < opts.from || r.day > opts.to) continue;
@@ -133,6 +139,7 @@ export function buildSalesReport(
     if (!setFor(version).has(key)) continue;
 
     add(total, r);
+    if (r.gross < 0) negativeVendorDays++;
 
     const d = byDay.get(r.day) ?? { ...zero(), vendors: new Set<string>() };
     add(d, r); d.vendors.add(key);
@@ -166,6 +173,7 @@ export function buildSalesReport(
     daysWithoutConfig: [...withoutConfig].sort(),
     configVersionsUsed: [...used.entries()].map(([id, validFrom]) => ({ id, validFrom })).sort((a, b) => a.validFrom.localeCompare(b.validFrom)),
     lastLoadedDay,
+    negativeVendorDays,
   };
 }
 
