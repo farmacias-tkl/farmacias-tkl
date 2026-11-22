@@ -190,11 +190,11 @@ function ActionButton({ label, value, tone, active, disabled, onClick }: {
   );
 }
 
-/** Flecha de avance: verde solo cuando mejora. Si empeora o no cambia va en gris, con el texto que lo dice. */
+/** Flecha de avance: verde si mejora, naranja con la palabra "Peor" si empeora, gris solo si no cambia. */
 function Trend({ better, same, text }: { better: boolean; same: boolean; text: string }) {
   if (same) return <span className="text-xs text-gray-700">Igual que la semana pasada</span>;
   return (
-    <span className={`text-xs font-medium ${better ? "text-green-800" : "text-gray-800"}`}>
+    <span className={`text-xs font-medium ${better ? "text-green-800" : "text-orange-800"}`}>
       <span aria-hidden>{better ? "▲" : "▼"}</span> {better ? "Mejor" : "Peor"}: {text}
     </span>
   );
