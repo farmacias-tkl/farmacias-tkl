@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { parseConfigData, hhmmToMinutes, isSystemAccount, type CallCenterMetricsConfigData } from "./config-schema";
-import { configForDay, sortVersions, type ConfigVersion } from "./config";
+import { configForDay, sortVersions, versionPeriodLabel, versionPeriods, type ConfigVersion } from "./config";
 
 let passed = 0;
 const failures: string[] = [];
@@ -152,6 +152,52 @@ test("vigencia: a igual fecha gana la creada más tarde", () => {
 test("vigencia: una versión futura no afecta el pasado", () => {
   const conFutura = [...versions, v("z", "2027-01-01", "2026-06-02T12:00:00Z")];
   assert.equal(configForDay(conFutura, "2026-12-31")?.id, "c");
+});
+
+// ── Período de cada versión (tabla de versiones) ─────────────────────────────────────
+test("períodos: la corregida reemplaza a la de su misma fecha; las que rigen llegan hasta el día anterior a la siguiente", () => {
+  const p = versionPeriods(versions);
+  assert.deepEqual(p.get("a"), { superseded: false, from: "2026-01-01", to: "2026-02-28" });
+  assert.deepEqual(p.get("b"), { superseded: true });
+  assert.deepEqual(p.get("b2"), { superseded: false, from: "2026-03-01", to: "2026-06-14" });
+  assert.deepEqual(p.get("c"), { superseded: false, from: "2026-06-15", to: null });
+  assert.equal(p.size, versions.length);
+});
+
+test("períodos: coinciden con configForDay en el primer y el último día de cada uno", () => {
+  for (const [id, period] of versionPeriods(versions)) {
+    if (period.superseded) continue;
+    assert.equal(configForDay(versions, period.from)?.id, id, `${id} primer día`);
+    if (period.to) assert.equal(configForDay(versions, period.to)?.id, id, `${id} último día`);
+  }
+  // Una versión reemplazada no rige ningún día: nunca es la respuesta de configForDay.
+  for (const day of ["2026-03-01", "2026-04-15", "2026-06-14"]) assert.notEqual(configForDay(versions, day)?.id, "b");
+});
+
+test("períodos: tres versiones de la misma fecha → rige la última creada y las otras dos quedan reemplazadas", () => {
+  const tres = [
+    v("x1", "2026-09-01", "2026-11-22T14:48:00Z"), v("x2", "2026-09-01", "2026-11-22T14:58:00Z"),
+    v("x3", "2026-09-01", "2026-11-22T15:01:00Z"), v("y", "2026-11-06", "2026-11-22T15:01:00Z"),
+  ];
+  const p = versionPeriods(tres);
+  assert.deepEqual([p.get("x1"), p.get("x2")], [{ superseded: true }, { superseded: true }]);
+  assert.deepEqual(p.get("x3"), { superseded: false, from: "2026-09-01", to: "2026-11-05" });
+  assert.deepEqual(p.get("y"), { superseded: false, from: "2026-11-06", to: null });
+  assert.equal(versionPeriodLabel(p.get("x3")!, "2026-11-22"), "Rige del 01/09 al 05/11");
+  assert.equal(versionPeriodLabel(p.get("y")!, "2026-11-22"), "Rige desde el 06/11");
+  assert.equal(versionPeriodLabel(p.get("x1")!, "2026-11-22"), "Reemplazada");
+});
+
+test("períodos: texto con el año cuando no es el actual, y en futuro si todavía no empezó", () => {
+  assert.equal(versionPeriodLabel({ superseded: false, from: "2025-12-01", to: "2026-01-31" }, "2026-11-22"), "Rige del 01/12/2025 al 31/01");
+  assert.equal(versionPeriodLabel({ superseded: false, from: "2027-01-01", to: null }, "2026-11-22"), "Regirá desde el 01/01/2027");
+  assert.equal(versionPeriodLabel({ superseded: false, from: "2026-12-01", to: "2026-12-31" }, "2026-11-22"), "Regirá del 01/12 al 31/12");
+  assert.equal(versionPeriodLabel({ superseded: false, from: "2026-11-22", to: null }, "2026-11-22"), "Rige desde el 22/11");
+});
+
+test("períodos: sin versiones no hay nada; con una sola, rige sin fecha de fin", () => {
+  assert.equal(versionPeriods([]).size, 0);
+  assert.deepEqual(versionPeriods([versions[0]]).get("a"), { superseded: false, from: "2026-01-01", to: null });
 });
 
 console.log(`\nmetrics/config: ${passed} ok, ${failures.length} fail`);
