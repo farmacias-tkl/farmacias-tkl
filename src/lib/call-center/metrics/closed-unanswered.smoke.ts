@@ -67,6 +67,8 @@ async function main() {
     // Creada hoy (Buenos Aires) con respuesta; "pregunta" y demás son de ayer o antes.
     ids.hoy = await conv(prisma, "hoy", { status: "ASIGNADA", createdH: 2, msgs: [{ author: C, h: 2, body: "Hola" }, { author: O, h: 1 }] });
     ids.hoySin = await conv(prisma, "hoy-sin", { status: "SIN_ASIGNAR", createdH: 14, msgs: [{ author: C, h: 14, body: "Hola" }, { author: O, h: 13, isPrivate: true }] });
+    // Creada ayer y respondida hoy: no entró hoy, pero se atendió hoy.
+    ids.atrasada = await conv(prisma, "atrasada", { status: "ASIGNADA", createdH: 40, msgs: [{ author: C, h: 40, body: "Hola" }, { author: O, h: 3 }] });
     // 23:30 de ayer en Buenos Aires: no es de hoy.
     ids.anoche = await conv(prisma, "anoche", { status: "SIN_ASIGNAR", createdH: 15.5, msgs: [{ author: C, h: 15.5, body: "Hola" }] });
 
@@ -111,7 +113,8 @@ async function main() {
       assert.ok(!/inventad|stock|gracias/i.test(dump));
     });
     await check("hoy: creadas desde las 00:00 de Buenos Aires y, de esas, las respondidas por una persona", async () => {
-      assert.deepEqual(await loadToday(NOW), { entered: 2, answered: 1 });
+      // Atendidas hoy: "hoy" más las de ayer que recibieron una respuesta pública hoy.
+      assert.deepEqual(await loadToday(NOW), { entered: 2, answered: 1, attended: 2 });
     });
   });
 

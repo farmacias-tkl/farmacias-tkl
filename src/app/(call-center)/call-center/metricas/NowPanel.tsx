@@ -114,9 +114,15 @@ export default function NowPanel() {
         <div className="rounded-lg border border-gray-200 bg-white p-3">
           <h2 className="text-xs font-medium text-gray-600">Hoy</h2>
           {d.today ? (
-            <dl className="mt-1 space-y-1 text-sm text-gray-700">
-              <div className="flex items-baseline justify-between gap-2"><dt>Entraron</dt><dd className="text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.entered)}</dd></div>
-              <div className="flex items-baseline justify-between gap-2"><dt>Respondidos</dt><dd className="text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.answered)}</dd></div>
+            <dl className="mt-1 space-y-2 text-sm text-gray-800">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt>Entraron hoy y ya recibieron respuesta</dt>
+                <dd className="shrink-0 text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.answered)} de {nf.format(d.today.entered)}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt>Conversaciones atendidas hoy<span className="block text-xs text-gray-600">Incluye las que venían de días anteriores.</span></dt>
+                <dd className="shrink-0 text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.attended)}</dd>
+              </div>
             </dl>
           ) : (
             <p className="mt-1 text-sm text-gray-500">No disponible</p>

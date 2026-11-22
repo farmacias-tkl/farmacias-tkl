@@ -17,6 +17,7 @@ import {
 import { CLOSED_UNANSWERED_DAYS, QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered } from "./closed-unanswered";
+import { loadDailyActivityRows } from "./activity";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
 import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
 import { operatorHours, publicHours } from "./schedule";
@@ -35,7 +36,7 @@ const group = (g: QueueGroupCounts): NowGroup => ({ ...g, oldestWaitStart: g.old
 /** Lo que se calcula aparte de la cola. null = no se pudo calcular. */
 export interface NowExtras {
   history: ClosedUnansweredHistory | null;
-  today: { entered: number; answered: number } | null;
+  today: { entered: number; answered: number; attended: number } | null;
   closed: ClosedUnansweredReport | null;
   /** Horario y umbrales del semáforo. null si no hay configuración vigente hoy. */
   wait: WaitContext | null;
@@ -137,10 +138,15 @@ export function toNowPayload(
 
 /**
  * Conversaciones creadas hoy (día de Buenos Aires) y, de esas, las que ya tienen al menos
- * una respuesta pública de un operador. Es una sola población. Solo lectura.
+ * una respuesta pública de un operador: una sola población. Aparte, las atendidas hoy por
+ * actividad, que incluyen conversaciones de días anteriores. Solo lectura.
  */
-export async function loadToday(now: Date): Promise<{ entered: number; answered: number }> {
-  const from = arDayStartUTC(arDayISO(now));
+export async function loadToday(now: Date): Promise<{ entered: number; answered: number; attended: number }> {
+  const day = arDayISO(now);
+  const from = arDayStartUTC(day);
+  // Atendidas hoy: la consulta por actividad ya validada, para un solo día.
+  const activity = await loadDailyActivityRows(day, day);
+  const attended = activity.filter((r) => r.operator).length;
   const rows = await prisma.$queryRaw<Array<{ entered: number; answered: number }>>`
     SELECT count(*)::int AS "entered",
       (count(*) FILTER (WHERE EXISTS (
@@ -149,7 +155,7 @@ export async function loadToday(now: Date): Promise<{ entered: number; answered:
     FROM "Conversation" c
     WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp
   `;
-  return rows[0] ?? { entered: 0, answered: 0 };
+  return { ...(rows[0] ?? { entered: 0, answered: 0 }), attended };
 }
 
 async function loadFreshness(): Promise<{ lastWebhookAt: Date | null; lastMessageAt: Date | null }> {

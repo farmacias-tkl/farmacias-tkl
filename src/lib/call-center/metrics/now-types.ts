@@ -100,8 +100,13 @@ export interface NowPayload {
     critical: number | null;
     oldestWaitStart: string | null;
   };
-  /** Creadas hoy (día de Buenos Aires) y, de esas, las que ya tienen respuesta de una persona. null si no se pudo calcular. */
-  today: { entered: number; answered: number } | null;
+  /**
+   * Hoy, día de Buenos Aires. null si no se pudo calcular. Son dos poblaciones:
+   *  - entered / answered: las creadas hoy y, de esas, las que ya tienen respuesta de una persona;
+   *  - attended: conversaciones con al menos una respuesta pública de un operador hoy, se
+   *    hayan creado cuando se hayan creado (incluye el atraso de días anteriores).
+   */
+  today: { entered: number; answered: number; attended: number } | null;
   /** Las de `waiting`, de la espera más vieja a la más nueva. */
   list: NowListItem[];
   /** Filas de la lista antes del tope. */

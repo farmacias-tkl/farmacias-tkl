@@ -131,8 +131,8 @@ test("hoy, cerradas sin responder e histórico pasan tal cual; los que no son cl
     blockHasAttachment: false, blockHasQuestion: false, blockHasOrderRequest: false, blockAlreadyBought: false, blockNotCustomer: false, ...over,
   });
   const closed = buildClosedUnanswered([block("q", { blockHasQuestion: true }), block("prov", { blockNotCustomer: true, blockHasAttachment: true })]);
-  const p = payload([], { wait: null, accounts: [], today: { entered: 12, answered: 9 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
-  assert.deepEqual(p.today, { entered: 12, answered: 9 });
+  const p = payload([], { wait: null, accounts: [], today: { entered: 12, answered: 9, attended: 20 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
+  assert.deepEqual(p.today, { entered: 12, answered: 9, attended: 20 });
   assert.deepEqual(p.closedUnanswered, { days: 7, total: 1, question: 1, order: 0, attachment: 0, items: [{ conversationId: "q", lastCustomerAt: hoursAgo(3).toISOString(), reason: "QUESTION" }] });
   assert.deepEqual(p.quality.closedBefore, { total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 });
   assert.deepEqual([p.quality.notCustomers, p.quality.notCustomersDays], [1, 7]);
