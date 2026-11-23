@@ -26,9 +26,15 @@ export const ORDER_CONFIRMED_OPERATOR =
   "n[uú]mero de control|ya (puede|pueden|pod[eé]s|podr[ií]a) pasar a (buscar|retirar)|pasar a (retirar|buscar) (su|tu|el) pedido|confirmamos para retirar|podr[aá] retirar" +
   "|ya (est[aá]|se encuentra) (listo|disponible|preparado)|\\msale (hoy|ma[nñ]ana)\\M|en camino|ser[aá] entregado|entrega(mos)? (hoy|ma[nñ]ana)|\\m(cadete|moto|repartidor)\\M" +
   "|link de pago|\\m(alias|cbu|cvu)\\M" +
-  // Cierre fijo de venta y avisos de retiro o de envío.
-  "|gracias por confiar en farmacias tkl|podr[aá]s retirar|pued(e|en|es) pasar a (buscar|retirar)|c[oó]digo de retiro|a nombre de [^|]{0,40}[0-9]{3,}" +
+  // Avisos de retiro o de envío.
+  "|podr[aá]s retirar|pued(e|en|es) pasar a (buscar|retirar)|c[oó]digo de retiro|a nombre de [^|]{0,40}[0-9]{3,}" +
   "|el env[ií]o lo realizamos|realizando el env[ií]o|receta fue validada|comunicamos al cadete";
+/**
+ * Cierre fijo de venta. Es la evidencia más débil: vale solo si el operador no dejó el pedido
+ * en espera ni lo canceló en ningún momento de la conversación.
+ */
+export const ORDER_CLOSING_OPERATOR = "gracias por confiar en farmacias tkl";
+
 /**
  * Evidencia firme: número de control o pago recibido. Con esto el pedido sigue confirmado
  * aunque después el operador escriba que queda a la espera.
@@ -74,7 +80,7 @@ export const SALE_LOST_PROBABLE = "(voy|vamos|iba) a (ver|buscar|probar|fijarme|
 export const NOT_A_LOSS = "me confund[ií]|me equivoqu[eé]|en (verdad|realidad) no necesito";
 
 /** El cliente avisa que pasa a pagar o a comprar por la sucursal. Cuenta si el operador ofreció stock o reserva. */
-export const CUSTOMER_GOES_TO_BRANCH = "voy a pagar(lo|la)? en efectivo|paso a (pagar|comprar|buscar)|pas[oó] a (pagar|comprar)(lo|la)?";
+export const CUSTOMER_GOES_TO_BRANCH = "voy a pagar(lo|la)?|paso a (pagar|comprar|buscar)|pas[oó] a (pagar|comprar)(lo|la)?";
 /** El operador ofreció stock o una reserva en una sucursal. */
 export const OPERATOR_OFFERED_STOCK = "(tenemos|contamos con|cuenta con|hay|tiene) stock|\\mreserv";
 

@@ -8,8 +8,9 @@
  *  2. Pedido confirmado: el operador da el número de control, avisa que ya se puede retirar,
  *     confirma el retiro o la salida del envío, o hay evidencia de pago. Elegir "Pedir
  *     medicamentos" NO alcanza, y que el operador informe un precio tampoco.
- *     El cierre "gracias por confiar" no vale si después el operador deja el pedido en
- *     espera o lo cancela, salvo que haya número de control o pago recibido.
+ *     Si el operador deja el pedido en espera o lo cancela después de la última evidencia,
+ *     no queda confirmado, salvo con número de control o pago recibido. El cierre "gracias
+ *     por confiar" solo vale si el operador no lo dejó en espera en ningún momento.
  *  3. El cliente dice, en cualquier momento, que ya lo compró, que ya fue o que cancela:
  *     "Compró presencial en TKL" si en ese mensaje nombra a TKL o a una sucursal, o si avisa
  *     que pasa a pagar después de que le ofrecieron stock; si no, venta perdida (confirmada
@@ -42,7 +43,7 @@ import { branchNamesRegex } from "./detected-patterns";
 import {
   BOT_BUTTONS, BUTTON_HOME, BUTTON_PICKUP,
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
-  BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_ON_HOLD, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_DERIVED, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
+  BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_ON_HOLD, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_DERIVED, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
 } from "./kinds-patterns";
 import {
@@ -210,6 +211,7 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   // Evidencia firme (número de control, pago recibido) y evidencia de venta en general.
   const strong = Prisma.sql`(${op} AND m.body ~* ${ORDER_STRONG_OPERATOR}) OR (${cust} AND m.body ~* ${PAYMENT_CUSTOMER})`;
   const evidence = Prisma.sql`${op} AND m.body ~* ${ORDER_CONFIRMED_OPERATOR}`;
+  const hold = Prisma.sql`${op} AND m.body ~* ${OPERATOR_ON_HOLD}`;
   // Los nombres de las sucursales salen de la tabla, no del código.
   const branches = await prisma.branch.findMany({ select: { name: true } });
   const branchRegex = branchNamesRegex(branches.map((b) => b.name));
@@ -223,7 +225,8 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_PICKUP}`)} AS "pickup",
         ${flag(Prisma.sql`m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}`)} AS "botOrderComplete",
         (${flag(strong)} OR (max(m."sentAt") FILTER (WHERE ${evidence}) IS NOT NULL
-          AND coalesce(max(m."sentAt") FILTER (WHERE ${op} AND m.body ~* ${OPERATOR_ON_HOLD}) < max(m."sentAt") FILTER (WHERE ${evidence}), true))) AS "confirmed",
+          AND coalesce(max(m."sentAt") FILTER (WHERE ${hold}) < max(m."sentAt") FILTER (WHERE ${evidence}), true))
+          OR (${flag(Prisma.sql`${op} AND m.body ~* ${ORDER_CLOSING_OPERATOR}`)} AND NOT ${flag(hold)})) AS "confirmed",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_PROBABLE}`)} AS "saleProbable",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${NOT_A_LOSS}`)} AS "notALoss",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleLost",

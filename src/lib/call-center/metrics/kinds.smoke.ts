@@ -54,6 +54,7 @@ async function main() {
     await add("probable", [[C, "Tienen el producto inventado"], [C, "Bueno, voy a ver si consigo en otra farmacia"]]);
     await add("noPreparen", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [C, "No lo preparen, gracias"]]);
     await add("enCamino", [[C, "Hola, a qué hora llega"], [O, "En un rato"]]);
+    await add("esperaYSoloCierre", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "Aguardamos contacto por la otra receta"], [O, "¡Muchas gracias por confiar en Farmacias TKL!"]]);
     await add("soloPrecio", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "El producto tiene un valor de $ 100, el total es 100"]]);
     await add("recetaMeducar", [[C, "Hola, quiero realizar un pedido sobre esta receta: https://cdn.meducar.com/r/inventada"], [B, "Texto del bot"]]);
     await add("recetaOtra", [[C, "¡Hola! Quiero hacer un pedido. Tengo esta receta para descargar https://recetas.inventada.example/r/1"], [O, "Hola, ¿en qué te ayudo?"]]);
@@ -106,7 +107,7 @@ async function main() {
       assert.deepEqual([k("seguimiento"), k("graciasLargo")], ["SEGUIMIENTO", "SALUDO"]);
     });
     await check("el cierre de venta no vale si después el operador deja el pedido en espera; con número de control sí, y si la espera fue antes también", () => {
-      assert.deepEqual([k("cierreEnEspera"), k("controlYEspera"), k("esperaYCierre")], ["PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO", "PEDIDO/RETIRO"]);
+      assert.deepEqual([k("cierreEnEspera"), k("controlYEspera"), k("esperaYCierre"), k("esperaYSoloCierre")], ["PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO", "PEDIDO/RETIRO", "PEDIDO_SIN_CONFIRMAR"]);
     });
     await check("compró en TKL: pasa a pagar después de que le ofrecieron stock, o dice que lo compró ahí", () => {
       assert.deepEqual([k("pasaAPagar"), k("comproAhi")], ["COMPRO_TKL", "COMPRO_TKL"]);
