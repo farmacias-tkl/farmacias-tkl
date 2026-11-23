@@ -15,9 +15,6 @@ export const BOT_BUTTONS = [
 
 export const BUTTON_PICKUP = "Retiro en sucursal";
 export const BUTTON_HOME = "A mi domicilio";
-export const BUTTON_HOURS = "Suc. y Horarios";
-export const BUTTON_ONLINE_STORE = "Tienda online";
-export const BUTTON_ADVISOR = "Asesor";
 
 // ── Evidencia de un pedido confirmado ────────────────────────────────────────────────
 // Elegir "Pedir medicamentos" no alcanza, y que el operador informe un precio tampoco: hay
@@ -28,7 +25,10 @@ export const BUTTON_ADVISOR = "Asesor";
 export const ORDER_CONFIRMED_OPERATOR =
   "n[uú]mero de control|ya (puede|pueden|pod[eé]s|podr[ií]a) pasar a (buscar|retirar)|pasar a (retirar|buscar) (su|tu|el) pedido|confirmamos para retirar|podr[aá] retirar" +
   "|ya (est[aá]|se encuentra) (listo|disponible|preparado)|\\msale (hoy|ma[nñ]ana)\\M|en camino|ser[aá] entregado|entrega(mos)? (hoy|ma[nñ]ana)|\\m(cadete|moto|repartidor)\\M" +
-  "|link de pago|\\malias\\M|\\mcbu\\M";
+  "|link de pago|\\m(alias|cbu|cvu)\\M" +
+  // Cierre fijo de venta y avisos de retiro o de envío.
+  "|gracias por confiar en farmacias tkl|podr[aá]s retirar|pued(e|en|es) pasar a (buscar|retirar)|c[oó]digo de retiro|a nombre de [^|]{0,40}[0-9]{3,}" +
+  "|el env[ií]o lo realizamos|realizando el env[ií]o|receta fue validada|comunicamos al cadete";
 /** El cliente dice que pagó o manda el comprobante. */
 export const PAYMENT_CUSTOMER = "ya (pagu[eé]|abon[eé]|transfer[ií])|comprobante|te (paso|env[ií]o) el pago";
 
@@ -43,7 +43,26 @@ export const PRESCRIPTION_ORDER = "quiero (hacer|realizar) un pedido[^|]{0,40}re
 
 /** Venta perdida, por lo que dice el cliente en cualquier momento: ya lo compró, ya fue, cancela. */
 export const SALE_LOST_CUSTOMER =
-  "\\mya\\M[^|]{0,25}(compr|fui\\M|consegu)|\\m(lo|la) compr[eé]\\M|acabo de comprar|\\mcancel(o|ó|ar|en|amos)\\M|fue alguien|otra farmacia|ya no (lo|la|los|las) necesito";
+  "vine directo|\\mya\\M[^|]{0,25}(compr|fui\\M|consegu)|\\m(lo|la) compr[eé]\\M|acabo de comprar|\\mcancel(o|ó|ar|en|amos)\\M|fue alguien|otra farmacia|ya no (lo|la|los|las) necesito";
+
+/** Venta perdida confirmada: lo compró en otra farmacia o en otro lado, o cancela. Sin esto, "no dice dónde". */
+export const SALE_LOST_ELSEWHERE = "otra farmacia|otro lado|\\mcancel(o|ó|ar|en|amos)\\M|ya no (lo|la|los|las) necesito";
+
+/**
+ * Menciona a TKL en el mismo mensaje en que dice que compró: es una venta presencial de TKL,
+ * no una venta perdida. Se completa con los nombres de las sucursales (branchNamesRegex).
+ */
+export const BOUGHT_AT_TKL = "\\m(tkl|sucursal|mostrador|local)\\M|vine directo";
+
+/** El cliente pregunta por un pago o un pedido ya hecho, o avisa que espera algo para seguir. */
+export const FOLLOW_UP_CUSTOMER =
+  "se pudo registrar el pago|pudieron (registrar|ver) (el|mi) pago|\\m(s[ií]+|ya) (me )?lleg[oó]|lleg[oó] el pedido|espero el contacto|quedo a la espera|estoy esperando (una|la) receta";
+
+/** El cliente avisa que al final no necesita nada. */
+export const CUSTOMER_DECLINED = "^[^[:alnum:]]*(en nada|nada|no necesito nada|no,? nada)[^[:alnum:]]*(,? ?(muchas )?gracias)?[^[:alnum:]]*$";
+
+/** Un agradecimiento largo sin otro contenido: empieza agradeciendo y no pregunta nada. */
+export const THANKS_MESSAGE = "^[^[:alnum:]]*((hola|buen[oa]s?( d[ií]as| tardes| noches)?)[^[:alnum:]]+)?(much[ií]simas |muchas |mil )?gracias";
 
 /** El operador avisa que no hay stock o que falta del laboratorio. */
 export const OPERATOR_NO_STOCK =
@@ -53,6 +72,9 @@ export const OPERATOR_NO_STOCK =
  * El operador deriva al cliente a comprar en la sucursal: no hay personal de pedidos, o desde
  * esa sucursal no se hacen envíos ni retiros.
  */
+/** El medicamento solo se vende en forma presencial en una sucursal. */
+export const OPERATOR_IN_PERSON_ONLY = "(se )?vende [uú]nicamente|[uú]nicamente se vende|(solo|s[oó]lo|solamente) se vende (de forma presencial|en la sucursal)|venta (es )?(solo |[uú]nicamente )?presencial";
+
 export const OPERATOR_DERIVED =
   "no cuenta con personal|no hay personal|no ofrece servicio de env[ií]o|no (se )?(hacen|realizan|realiza|hacemos|realizamos) (env[ií]os|retiros|pedidos)" +
   "|compra de forma presencial|no podemos tomar el pedido|acercarte a comprar|dirigirse a la farmacia";

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import {
-  CONSULT_KINDS, NO_TAKE_KINDS, ORDER_KINDS,
-  type ConsultKind, type KindCounts, type KindsPayload, type MainKind, type NoTakeKind, type OrderKind,
+  CONSULT_KINDS, LOST_KINDS, NO_TAKE_KINDS, ORDER_KINDS,
+  type ConsultKind, type KindCounts, type KindsPayload, type LostKind, type MainKind, type NoTakeKind, type OrderKind,
 } from "@/lib/call-center/metrics/kinds-types";
 import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
 import { formatShortDay } from "@/lib/call-center/metrics/format";
@@ -14,7 +14,10 @@ const nf = new Intl.NumberFormat("es-AR");
 const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
 
 const ORDER_LABELS: Record<OrderKind, string> = { DOMICILIO: "A domicilio", RETIRO: "Retiro en sucursal", RECETA: "Receta digital", SIN_MODALIDAD: "Sin modalidad" };
-const NO_TAKE_LABELS: Record<NoTakeKind, string> = { SIN_STOCK: "Sin stock o falta del laboratorio", DERIVADO_PRESENCIAL: "Derivado a compra presencial" };
+const NO_TAKE_LABELS: Record<NoTakeKind, string> = {
+  SIN_STOCK: "Sin stock o falta del laboratorio", DERIVADO_PRESENCIAL: "Derivado a compra presencial", DERIVADO_MEDICAMENTO: "Derivado a compra presencial por tipo de medicamento",
+};
+const LOST_LABELS: Record<LostKind, string> = { OTRO_LADO: "Compró en otro lado o canceló", NO_DICE_DONDE: "No dice dónde compró" };
 const CONSULT_LABELS: Record<ConsultKind, string> = {
   SERVICIOS: "Vacunas y servicios", PRECIO: "Precio", STOCK: "Stock o disponibilidad", HORARIOS: "Horarios y sucursales", COBERTURA: "Obra social o cobertura",
   PAGO: "Modalidad de pago", TIENDA_ONLINE: "Tienda online", OTRAS: "Otras",
@@ -30,8 +33,8 @@ const BANDS: Array<{ label: string; hours: number[] }> = [
 /** Los tres tipos que se comparan entre sí. El resto va aparte. */
 const COMPARED: MainKind[] = ["RECLAMO", "PEDIDO", "CONSULTA"];
 const SHORT: Record<MainKind, string> = {
-  RECLAMO: "Reclamos", PEDIDO: "Pedidos", CONSULTA: "Consultas", VENTA_PERDIDA: "Venta perdida", NO_SE_PUDO_TOMAR: "No se pudo tomar",
-  PEDIDO_SIN_CONFIRMAR: "Sin confirmar", SALUDO: "Saludo", SIN_MOTIVO: "Sin motivo claro",
+  RECLAMO: "Reclamos", PEDIDO: "Pedidos", CONSULTA: "Consultas", COMPRO_TKL: "Compró en TKL", VENTA_PERDIDA: "Venta perdida", NO_SE_PUDO_TOMAR: "No se pudo tomar",
+  PEDIDO_SIN_CONFIRMAR: "Sin confirmar", SEGUIMIENTO: "Seguimiento", SALUDO: "Saludo", SIN_MOTIVO: "Sin motivo claro",
 };
 
 type State =
@@ -108,17 +111,23 @@ function Report({ data }: { data: KindsPayload }) {
 
       <Box title={`Pedidos no concretados (${nf.format(notCompleted)} · ${pct(notCompleted, base)})`} note="El cliente quería pedir y la venta no quedó confirmada. No suman como pedidos.">
         <Line label="Venta perdida" value={`${nf.format(t.VENTA_PERDIDA)} · ${pct(t.VENTA_PERDIDA, base)}`}
-          note="El cliente dice que ya lo compró, que ya fue a la farmacia o que cancela." />
+          note="El cliente dice que ya lo compró, que ya fue o que cancela, sin nombrar a TKL." />
+        {LOST_KINDS.map((k) => <Line key={k} label={`· ${LOST_LABELS[k]}`} value={nf.format(data.lost[k])} />)}
         <Line label="No se pudo tomar" value={`${nf.format(t.NO_SE_PUDO_TOMAR)} · ${pct(t.NO_SE_PUDO_TOMAR, base)}`} />
         {NO_TAKE_KINDS.map((k) => (
           <Line key={k} label={`· ${NO_TAKE_LABELS[k]}`} value={nf.format(data.noTake[k])}
-            note={k === "DERIVADO_PRESENCIAL" ? "El operador avisa que no hay personal de pedidos, o que desde esa sucursal no se hacen envíos ni retiros." : undefined} />
+            note={k === "DERIVADO_PRESENCIAL" ? "El operador avisa que no hay personal de pedidos, o que desde esa sucursal no se hacen envíos ni retiros."
+              : k === "DERIVADO_MEDICAMENTO" ? "El medicamento solo se vende en forma presencial en una sucursal." : undefined} />
         ))}
         <Line label="El cliente no respondió o quedó en volver" value={`${nf.format(t.PEDIDO_SIN_CONFIRMAR)} · ${pct(t.PEDIDO_SIN_CONFIRMAR, base)}`}
           note="Completó el recorrido del bot y la conversación terminó sin confirmación, sin aviso de falta y sin que diga que compró en otro lado." />
       </Box>
 
       <Box title="Aparte">
+        <Line label="Compró presencial en TKL" value={`${nf.format(t.COMPRO_TKL)} · ${pct(t.COMPRO_TKL, base)}`}
+          note="El cliente dice que lo compró en una sucursal TKL. Es una venta de TKL, no una venta perdida, aunque el pedido no se tomó por acá." />
+        <Line label="Seguimiento / postventa" value={`${nf.format(t.SEGUIMIENTO)} · ${pct(t.SEGUIMIENTO, base)}`}
+          note="Pregunta por un pago o un pedido ya hecho, o avisa que espera algo para seguir." />
         <Line label="Sin motivo claro" value={`${nf.format(t.SIN_MOTIVO)} · ${pct(t.SIN_MOTIVO, base)}`}
           note="No hay evidencia de qué quería el cliente. Que un operador haya respondido no alcanza para contarla como consulta." />
         <Line label="Saludo / agradecimiento" value={nf.format(t.SALUDO)} note="Solo saludos, agradecimientos o botones. No entra en los porcentajes." />
@@ -128,7 +137,7 @@ function Report({ data }: { data: KindsPayload }) {
         {ORDER_KINDS.map((k) => <Line key={k} label={ORDER_LABELS[k]} value={`${nf.format(data.orders[k])} · ${pct(data.orders[k], t.PEDIDO)}`} />)}
       </Box>
 
-      <Box title={`Consultas (${nf.format(t.CONSULTA)})`} note="Necesita un tema reconocible, una pregunta o un adjunto. El subtipo sale de las palabras del cliente.">
+      <Box title={`Consultas (${nf.format(t.CONSULTA)})`} note={`El cliente pregunta por un tema; el subtipo sale de sus palabras. Los botones del bot sin texto no alcanzan. ${nf.format(data.consultsAnswered)} de ${nf.format(t.CONSULTA)} tuvieron respuesta de un operador.`}>
         {CONSULT_KINDS.map((k) => <Line key={k} label={CONSULT_LABELS[k]} value={`${nf.format(data.consults[k])} · ${pct(data.consults[k], t.CONSULTA)}`} />)}
       </Box>
 
