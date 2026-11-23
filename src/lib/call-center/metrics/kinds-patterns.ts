@@ -41,4 +41,4 @@ export const CONSULT_ONLINE_STORE = "p[aá]gina|\\mweb\\M|online";
 
 /** Un mensaje que es solo un saludo, un agradecimiento o un sí/no: no tiene contenido. */
 export const EMPTY_MESSAGE =
-  "^[^[:alnum:]]*((gracias+|much[ií]simas|muchas|mil|grax|gcs|genial|perfecto|listo|dale|oka?y?|okey|buen[ií]simo|b[aá]rbaro|igualmente|saludos|de acuerdo|excelente|muy amable|a vos|a ustedes|hola+|buen[oa]s?|d[ií]as?|tardes|noches|s[ií]+|no)[^[:alnum:]]*)*$";
+  "^[^[:alnum:]]*((gracias+|much[ií]simas|muchas|mil|grax|gcs|genial|perfecto|listo|dale|oka?y?|okey|buen[ií]simo|b[aá]rbaro|igualmente|saludos|de acuerdo|excelente|muy amable|a vos|a ustedes|hola+|buen[oa]s?|d[ií]as?|tardes|noches|qu[eé] tal|c[oó]mo (est[aá]n?|and[aá]n?|va)|todo bien|s[ií]+|no)[^[:alnum:]]*)*$";

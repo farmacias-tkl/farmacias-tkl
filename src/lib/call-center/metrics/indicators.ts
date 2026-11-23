@@ -239,7 +239,7 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     limitations: [
       "Mira solo la primera respuesta: no cuenta las ventanas que se cierran más adelante en la conversación, " +
         "porque ahí el último mensaje del cliente suele ser un agradecimiento.",
-      "Incluye conversaciones en las que el cliente solo saludó o agradeció y nadie respondió.",
+      "No cuenta las conversaciones en las que el cliente solo saludó, agradeció o tocó botones del bot.",
       "Las conversaciones de los últimos dos días pueden no haber llegado todavía a las 24 horas.",
     ],
     needsConfig: false,

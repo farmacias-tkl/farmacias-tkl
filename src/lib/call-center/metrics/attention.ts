@@ -26,6 +26,7 @@ import {
 import { configForDay, type ConfigVersion } from "./config";
 import { publicHours } from "./schedule";
 import { windowClosedUnanswered } from "./whatsapp-window";
+import { BOT_BUTTONS, EMPTY_MESSAGE } from "./kinds-patterns";
 import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, isThanksCandidate } from "./patterns";
 import {
   BOT_ORDER_FLOW_LIKE, CUSTOMER_ORDER_OPTION, MEDUCAR_LINK_REGEX, MEDUCAR_PHRASE_REGEX,
@@ -49,6 +50,12 @@ export interface EntryRow {
    * respuesta): desde acá corre la ventana de 24 horas de WhatsApp. Ausente o null: no se evalúa.
    */
   lastCustomerBeforeResponseAt?: Date | null;
+  /**
+   * Todo lo que escribió el cliente son saludos, agradecimientos o botones del bot, sin
+   * adjuntos (el mismo criterio de "Saludo / agradecimiento" de Tipos). No pedía una
+   * respuesta: no cuenta como ventana de WhatsApp cerrada sin respuesta.
+   */
+  customerOnlyGreeting?: boolean;
   orderFlow: boolean;
   firstCustomerMessageIsMeducar: boolean;
   customerChars: number;
@@ -86,7 +93,8 @@ export interface EntryFact extends EntryRow {
   /**
    * La ventana de 24 horas de WhatsApp se cerró sin la primera respuesta: pasaron más de 24
    * horas de reloj desde el último mensaje del cliente y nadie había respondido (o la primera
-   * respuesta llegó después). Para retomarla hizo falta una plantilla.
+   * respuesta llegó después). Para retomarla hizo falta una plantilla. No cuentan las
+   * conversaciones en las que el cliente solo saludó o agradeció.
    */
   windowClosed: boolean;
   answeredSameDay: boolean;
@@ -222,7 +230,8 @@ export function toEntryFact(row: EntryRow, now: Date, versions: readonly ConfigV
       : null,
     botMinutes: row.botExitAt ? Math.max(0, (row.botExitAt.getTime() - row.createdAt.getTime()) / MS_MIN) : null,
     outsidePublicHours,
-    windowClosed: row.lastCustomerBeforeResponseAt ? windowClosedUnanswered(row.lastCustomerBeforeResponseAt, answered, now) : false,
+    windowClosed: row.lastCustomerBeforeResponseAt && !row.customerOnlyGreeting
+      ? windowClosedUnanswered(row.lastCustomerBeforeResponseAt, answered, now) : false,
     goal: version && !outsidePublicHours
       ? {
           ...classifyAgainstGoal(clockStart, answered, now, version.data.firstResponseGoalMinutes, pub),
@@ -400,6 +409,8 @@ interface RawEntryRow {
   custChars: number | null;
   custMedia: boolean | null;
   custLink: boolean | null;
+  freeMessages: number | null;
+  emptyMessages: number | null;
   prevResolved: boolean;
 }
 
@@ -412,6 +423,8 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
   const from = arDayStartUTC(fromDay);
   const to = new Date(arDayStartUTC(toDayInclusive).getTime() + 24 * 60 * MS_MIN);
   const prevHours = `${THANKS_CANDIDATE.previousResolvedWithinHours} hours`;
+  // Texto libre del cliente: lo que escribió, sin los botones del bot.
+  const free = Prisma.sql`m.author = 'CUSTOMER' AND m.body IS NOT NULL AND m.body NOT IN (${Prisma.join([...BOT_BUTTONS])})`;
 
   const rows = await prisma.$queryRaw<RawEntryRow[]>(Prisma.sql`
     WITH scope AS (
@@ -427,7 +440,9 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
              OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})) AS order_flow,
         coalesce(sum(length(coalesce(m.body, ''))) FILTER (WHERE m.author = 'CUSTOMER'), 0)::int AS cust_chars,
         bool_or(m.author = 'CUSTOMER' AND (m.body IS NULL OR m."mediaType" IS NOT NULL)) AS cust_media,
-        bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link
+        bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link,
+        (count(*) FILTER (WHERE ${free}))::int AS free_n,
+        (count(*) FILTER (WHERE ${free} AND m.body ~* ${EMPTY_MESSAGE}))::int AS empty_n
       FROM "ConversationMessage" m
       JOIN scope s ON s.id = m."conversationId"
       GROUP BY 1
@@ -455,6 +470,8 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       a.cust_chars AS "custChars",
       a.cust_media AS "custMedia",
       a.cust_link AS "custLink",
+      a.free_n AS "freeMessages",
+      a.empty_n AS "emptyMessages",
       EXISTS (
         SELECT 1 FROM "Conversation" p
         JOIN "ConversationStateHistory" h ON h."conversationId" = p.id AND h."toStatus" = 'RESUELTA'
@@ -479,6 +496,7 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
     customerChars: Number(r.custChars ?? 0),
     customerSentMedia: r.custMedia === true,
     customerSentLink: r.custLink === true,
+    customerOnlyGreeting: r.custMedia !== true && Number(r.freeMessages ?? 0) === Number(r.emptyMessages ?? 0),
     previousResolvedRecently: r.prevResolved,
   }));
 }

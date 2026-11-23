@@ -96,6 +96,9 @@ async function main() {
       assert.equal(r.firstCustomerMessageIsMeducar, false);
       // Último mensaje del cliente anterior a la primera respuesta: desde ahí corre la ventana de WhatsApp.
       assert.equal(r.lastCustomerBeforeResponseAt?.toISOString(), at("2026-03-02T10:00").toISOString());
+      // Solo tocó un botón del bot: sin texto propio ni adjuntos.
+      assert.equal(r.customerOnlyGreeting, true);
+      assert.equal(byId.get(ids.meducar)!.customerOnlyGreeting, false);
     });
     await check("Meducar: solo por el primer mensaje del cliente", () => {
       assert.equal(byId.get(ids.meducar)!.firstCustomerMessageIsMeducar, true);

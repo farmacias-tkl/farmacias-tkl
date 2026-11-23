@@ -316,6 +316,8 @@ test("ventana de WhatsApp cerrada sin respuesta: 24 horas de reloj desde el últ
     row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-03T15:00") }),
     // Sin el dato no se evalúa.
     row("2026-03-02T11:00"),
+    // El cliente solo saludó o agradeció: no pedía respuesta, no cuenta.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-02T11:05"), customerOnlyGreeting: true }),
   ];
   const r = report(rows, "2026-03-04T10:00");
   assert.equal(r.total.windowClosed, 2);

@@ -97,13 +97,16 @@ async function main() {
     await conv(prisma, "v-a-tiempo", { status: "ASIGNADA", createdH: 40, msgs: [{ author: C, h: 30 }, { author: O, h: 20 }, { author: C, h: 19 }] }); // respondida dentro de la ventana
     await conv(prisma, "v-insistio", { status: "SIN_ASIGNAR", createdH: 40, msgs: [{ author: C, h: 30 }, { author: C, h: 12 }] });                  // volvió a escribir: sigue abierta
     await conv(prisma, "v-ayer", { status: "SIN_ASIGNAR", createdH: 60, msgs: [{ author: C, h: 50 }] });                                           // cerró antes del tramo
+    // Solo saludó: su ventana también cerró en el tramo, pero no cuenta.
+    const saludo = await conv(prisma, "v-saludo", { status: "SIN_ASIGNAR", createdH: 40, msgs: [{ author: C, h: 29.5 }] });
+    await prisma.conversationMessage.updateMany({ where: { conversationId: saludo }, data: { body: "Hola, buenas tardes" } });
     const FROM = hoursAgo(10);
     const win = await loadWindowRows(FROM, NOW);
 
     await check("ventana cerrada sin respuesta: último mensaje del cliente antes de la primera respuesta pública", () => {
       assert.equal(countWindowClosures(win, FROM, NOW), 3);
       // La respondida a tiempo llega como candidata (su ventana cerraba en el tramo) y el conteo la descarta.
-      assert.deepEqual(win.map((r) => r.lastCustomerAt.getTime()).sort(), [hoursAgo(30), hoursAgo(30), hoursAgo(29), hoursAgo(28)].map((d) => d.getTime()).sort());
+      assert.deepEqual(win.map((r) => r.lastCustomerAt.getTime()).sort(), [hoursAgo(30), hoursAgo(30), hoursAgo(29.5), hoursAgo(29), hoursAgo(28)].map((d) => d.getTime()).sort());
       assert.equal(win.filter((r) => r.firstHumanAt !== null).length, 2);
     });
     await check("ventana: vista a una hora anterior, solo cuentan los mensajes y los cierres hasta esa hora", async () => {
@@ -112,7 +115,8 @@ async function main() {
       assert.equal(countWindowClosures(await loadWindowRows(FROM, cut), FROM, cut), 1);
     });
     await check("ventana: las filas no traen ids, teléfono ni texto", () => {
-      assert.deepEqual(Object.keys(win[0]).sort(), ["firstHumanAt", "lastCustomerAt"]);
+      assert.deepEqual(Object.keys(win[0]).sort(), ["firstHumanAt", "lastCustomerAt", "onlyGreeting"]);
+      assert.equal(win.filter((r) => r.onlyGreeting).length, 1);
     });
   });
 

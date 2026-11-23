@@ -37,6 +37,7 @@ import { addDaysISO } from "./period";
 import { QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import type { NowProgress, ProgressSide } from "./now-types";
 import { windowClosesAt } from "./whatsapp-window";
+import { BOT_BUTTONS, EMPTY_MESSAGE } from "./kinds-patterns";
 
 const MS_MIN = 60_000;
 const MS_HOUR = 3_600_000;
@@ -145,6 +146,8 @@ export async function loadShiftRows(shiftStart: Date): Promise<ShiftRow[]> {
 export interface WindowRow {
   lastCustomerAt: Date;
   firstHumanAt: Date | null;
+  /** El cliente solo saludó, agradeció o tocó botones (sin adjuntos): no cuenta. */
+  onlyGreeting: boolean;
 }
 
 /**
@@ -154,7 +157,7 @@ export interface WindowRow {
 export function countWindowClosures(rows: readonly WindowRow[], from: Date, to: Date): number {
   return rows.filter((r) => {
     const closes = windowClosesAt(r.lastCustomerAt).getTime();
-    return closes >= from.getTime() && closes < to.getTime() && (r.firstHumanAt === null || r.firstHumanAt.getTime() > closes);
+    return !r.onlyGreeting && closes >= from.getTime() && closes < to.getTime() && (r.firstHumanAt === null || r.firstHumanAt.getTime() > closes);
   }).length;
 }
 
@@ -168,24 +171,28 @@ export async function loadWindowRows(from: Date, to: Date): Promise<WindowRow[]>
   const scopeFrom = utcTimestampParam(new Date(from.getTime() - SCOPE_DAYS * MS_DAY));
   const lcFrom = utcTimestampParam(new Date(from.getTime() - MS_DAY));
   const lcTo = utcTimestampParam(new Date(to.getTime() - MS_DAY));
+  const cust = Prisma.sql`m.author = 'CUSTOMER' AND m."sentAt" < ${t}::timestamp`;
+  const free = Prisma.sql`${cust} AND m.body IS NOT NULL AND m.body NOT IN (${Prisma.join([...BOT_BUTTONS])})`;
   return prisma.$queryRaw<WindowRow[]>(Prisma.sql`
     WITH scope AS (
       SELECT c.id FROM "Conversation" c
       WHERE c."createdAt" >= ${scopeFrom}::timestamp AND c."createdAt" < ${t}::timestamp
     ), agg AS (
       SELECT m."conversationId" AS cid,
-        min(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate" AND m."sentAt" < ${t}::timestamp) AS first_op
+        min(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate" AND m."sentAt" < ${t}::timestamp) AS first_op,
+        (NOT coalesce(bool_or(${cust} AND (m.body IS NULL OR m."mediaType" IS NOT NULL)), false)
+          AND count(*) FILTER (WHERE ${free}) = count(*) FILTER (WHERE ${free} AND m.body ~* ${EMPTY_MESSAGE})) AS only_greeting
       FROM "ConversationMessage" m
       JOIN scope s ON s.id = m."conversationId"
       GROUP BY 1
     ), lc AS (
-      SELECT a.first_op,
+      SELECT a.first_op, a.only_greeting,
         (SELECT max(m."sentAt") FROM "ConversationMessage" m
           WHERE m."conversationId" = a.cid AND m.author = 'CUSTOMER' AND m."sentAt" < ${t}::timestamp
             AND (a.first_op IS NULL OR m."sentAt" < a.first_op)) AS last_cust
       FROM agg a
     )
-    SELECT last_cust AS "lastCustomerAt", first_op AS "firstHumanAt"
+    SELECT last_cust AS "lastCustomerAt", first_op AS "firstHumanAt", only_greeting AS "onlyGreeting"
     FROM lc
     WHERE last_cust >= ${lcFrom}::timestamp AND last_cust < ${lcTo}::timestamp
   `);
