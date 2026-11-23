@@ -9,6 +9,7 @@
  */
 import type { QueueGroupCounts } from "./queue-types";
 import type { WindowState } from "./whatsapp-window";
+import type { ClaimMotive } from "./detected-patterns";
 
 /** Segundos de caché del bloque en el servidor y de refresco en la pantalla. */
 export const NOW_CACHE_SECONDS = 60;
@@ -144,6 +145,12 @@ export interface NowListItem {
   botOrderComplete: boolean;
   thanksCandidate: boolean;
   /**
+   * Motivos de reclamo DETECTADOS por palabras en los mensajes del cliente (las reglas de
+   * "Reclamos y pérdidas"). Vacío si no hay ninguno; null si no se pudieron revisar. No es un
+   * reclamo confirmado: todavía no hay un registro de reclamos.
+   */
+  claims: ClaimMotive[] | null;
+  /**
    * Posible pendiente antiguo: espera hace más de `windowHours` y su último mensaje no parece
    * un cierre. Es una detección por palabras, por eso "posible".
    */
@@ -275,6 +282,8 @@ export interface NowPayload {
     /** Clientes urgentes (por palabras) e insistiendo (sin contar los urgentes), sin respuesta de un operador. */
     urgent: number;
     insisting: number;
+    /** Pendientes con algún reclamo detectado. null si no se pudieron revisar. */
+    claims: number | null;
   };
   /**
    * Hoy, día de Buenos Aires. null si no se pudo calcular. Son dos poblaciones:

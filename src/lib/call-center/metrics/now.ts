@@ -35,6 +35,8 @@ import { isWithinHours } from "./business-time";
 import { shiftStartOf } from "./progress";
 import { getQueueTrend } from "./queue-trend";
 import type { NowTrend } from "./now-types";
+import { loadClaimMotives } from "./detected";
+import type { ClaimMotive } from "./detected-patterns";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -64,6 +66,8 @@ export interface NowExtras {
   observed?: ObservedInput | null;
   /** Evolución de la cola, ya calculada. null u omitido si no se pudo calcular. */
   trend?: NowTrend | null;
+  /** Motivos de reclamo detectados, por conversación pendiente. null u omitido si no se pudieron revisar. */
+  claims?: ReadonlyMap<string, ClaimMotive[]> | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -146,6 +150,7 @@ export function toNowPayload(
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
     thanksCandidate: it.thanksCandidate,
+    claims: extras.claims ? extras.claims.get(it.conversationId) ?? [] : null,
     oldPending: oldPendingIds.has(it.conversationId),
     };
   });
@@ -170,6 +175,7 @@ export function toNowPayload(
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
       urgent: items.filter((it) => it.alert === "URGENTE").length,
       insisting: items.filter((it) => it.alert === "INSISTIENDO").length,
+      claims: extras.claims ? items.filter((it) => it.claims !== null && it.claims.length > 0).length : null,
     },
     today,
     list: closedFirst.slice(0, maxRows),
@@ -279,6 +285,8 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   const observed = await loadObservedRows(observedSince, now)
     .then((rows) => ({ rows, since: observedSince, sinceIsShift: shiftStart !== null }))
     .catch(() => null);
+  // Reclamos detectados: solo en las abiertas que esperan respuesta.
+  const claims = await loadClaimMotives(snapshot.items.filter((it) => it.open).map((it) => it.conversationId)).catch(() => null);
   // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
   const trend = await getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null);
 
@@ -298,7 +306,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

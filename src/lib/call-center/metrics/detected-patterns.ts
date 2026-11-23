@@ -130,3 +130,20 @@ export const CLAIM_GROUP_OF: Record<ClaimMotive, ClaimGroup> = {
 };
 
 export const CLAIM_MOTIVES = Object.keys(CLAIM_PATTERNS) as ClaimMotive[];
+
+/** Texto de cada motivo de reclamo. */
+export const CLAIM_LABELS: Record<ClaimMotive, string> = {
+  DEMORA: "Demora",
+  SIN_NOVEDADES: "Pedido sin novedades",
+  INCORRECTO: "Producto o cantidad incorrectos",
+  STOCK: "Stock",
+  FACTURA: "Factura",
+  PRECIO: "Precio o cobertura",
+  PAGO: "Pago o devolución",
+  TRATO: "Trato",
+  OTROS: "Otros",
+  ENVIO_NO_LLEGO: "No llegó el pedido",
+  ENVIO_ENTREGA: "Problema con la entrega",
+  WEB_SIN_CONFIRMACION: "Pagó y no recibió la confirmación",
+  WEB_PAGINA: "Problemas con la página",
+};

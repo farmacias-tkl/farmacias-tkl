@@ -5,6 +5,7 @@ import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
 import type { ClosedReason, NowListItem, NowOwnerRow, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
+import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
 import { useNowData } from "./useNowData";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -44,7 +45,7 @@ const REASON_LABELS: Record<ClosedReason, string> = {
   ATTACHMENT: "Mandó una receta o un comprobante",
 };
 
-type CaseFilter = "all" | "urgent" | "insisting" | "closing" | "closed" | "critical" | "orders" | "longest";
+type CaseFilter = "all" | "claims" | "urgent" | "insisting" | "closing" | "closed" | "critical" | "orders" | "longest";
 
 /** "3 h 20 min" o "45 min" que faltan para que se cierre la ventana de WhatsApp. */
 function windowLeftLabel(lastCustomerAt: string, nowMs: number, hours: number): string {
@@ -62,6 +63,7 @@ function windowClosedAgoLabel(lastCustomerAt: string, nowMs: number, hours: numb
 }
 
 const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
+  claims: "pendientes con un reclamo detectado",
   urgent: "clientes urgentes",
   insisting: "clientes insistiendo",
   closing: "con la ventana de WhatsApp por vencer, de la que vence antes a la que vence después",
@@ -94,7 +96,8 @@ export default function NowPanel() {
   const ownerRow = ownerKey ? d.owners?.rows.find((r) => r.key === ownerKey) ?? null : null;
   const byOwner = (list: NowListItem[]) => (ownerKey ? list.filter((it) => it.ownerKey === ownerKey) : list);
   const shown = byOwner(
-    filter === "urgent" ? d.list.filter((it) => it.alert === "URGENTE")
+    filter === "claims" ? d.list.filter((it) => it.claims !== null && it.claims.length > 0)
+    : filter === "urgent" ? d.list.filter((it) => it.alert === "URGENTE")
     : filter === "insisting" ? d.list.filter((it) => it.alert === "INSISTIENDO")
     : filter === "closing" ? d.list.filter((it) => it.window === "POR_VENCER").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : 1))
     : filter === "closed" ? d.list.filter((it) => it.window === "CERRADA")
@@ -136,6 +139,10 @@ export default function NowPanel() {
           <ActionButton label="Cliente insistiendo" value={nf.format(w.insisting)} tone={w.insisting ? "warning" : "plain"}
             active={filter === "insisting"} onClick={() => toggle("insisting")} />
         </div>
+        <div className="mt-2 grid grid-cols-1 gap-2">
+          <ActionButton label="Reclamos pendientes de atención · detectados por palabras, para revisar" value={w.claims === null ? "—" : nf.format(w.claims)}
+            tone={w.claims ? "warning" : "plain"} active={filter === "claims"} disabled={w.claims === null} onClick={() => toggle("claims")} />
+        </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <ActionButton label={`Ventana de WhatsApp por vencer (menos de ${d.window.warningHours} h)`} value={nf.format(d.window.closing)} tone={d.window.closing ? "warning" : "plain"}
             active={filter === "closing"} onClick={() => toggle("closing")} />
@@ -167,6 +174,9 @@ export default function NowPanel() {
         <More>
           Cliente urgente: en mensajes que todavía no tuvieron respuesta de un operador, pide urgencia o avisa que se va a otro lado. Cliente insistiendo: después de
           completar el bot escribió 2 mensajes o más, separados por más de 10 minutos, y sigue sin respuesta. Los dos dejan de mostrarse cuando un operador responde.
+          {" "}Reclamos pendientes: conversaciones que esperan respuesta y en las que algún mensaje del cliente coincide con un motivo de reclamo de la pestaña
+          &quot;Reclamos y pérdidas&quot; (demora, pedido sin novedades, pago, entrega y los demás). Son detectados por palabras, no confirmados: todavía no hay un
+          registro de reclamos. Cuentan los que entraron cualquier día y siguen sin respuesta, no solo los de hoy.
           {" "}Ventana de WhatsApp: desde el último mensaje del cliente hay {d.window.hours} horas de reloj para responder libremente, también de noche, los fines de semana y
           los feriados. Pasado ese plazo la conversación solo se reabre con una plantilla aprobada. &quot;Por vencer&quot; son las que todavía se pueden responder y les
           quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
@@ -716,6 +726,9 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
         {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
       </p>
+      {it.claims !== null && it.claims.length > 0 && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-900">Reclamo detectado · {it.claims.map((c) => CLAIM_LABELS[c]).join(" · ")}</span></p>
+      )}
       {it.detectedOwner && (
         <p className="mt-1 text-xs text-gray-700">
           <span className="mr-1 rounded border border-gray-300 px-1 text-[11px] font-semibold text-gray-700">Detectado</span>

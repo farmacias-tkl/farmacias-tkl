@@ -160,6 +160,21 @@ async function main() {
       assert.equal(by.get(ids.abierta)!.open, true);
       assert.equal(conversations, Object.keys(ids).length - 1);
     });
+    await check("motivos de reclamo de un conjunto dado de conversaciones (\"Ahora\"): las mismas reglas que el informe, solo para esas", async () => {
+      const { loadClaimMotives } = await import("./detected");
+      const keys = Object.keys(ids);
+      const some = await loadClaimMotives(keys.map((k) => ids[k]));
+      // Coincide con el informe en todas las conversaciones del período que tienen un reclamo.
+      for (const k of keys) {
+        const r = by.get(ids[k]);
+        if (r) assert.deepEqual(some.get(ids[k]) ?? [], claimsOf(r), k);
+      }
+      assert.deepEqual(some.get(ids["demora"]), ["DEMORA"]);
+      // Solo las pedidas, y las que no tienen reclamo no aparecen.
+      const one = await loadClaimMotives([ids["demora"], ids["abierta"]]);
+      assert.deepEqual([...one.keys()].sort(), [ids["demora"], ids["abierta"]].sort());
+      assert.equal((await loadClaimMotives([])).size, 0);
+    });
     await check("respuesta de la API: grupos, conteos y lista con enlace; sin teléfono ni texto", async () => {
       const p = await getDetectedPayload("2026-03-02", "2026-03-04", at("2026-03-05T12:00"));
       const n = (k: string) => p.sales.byMotive.find((b) => b.motive === k)!.count;

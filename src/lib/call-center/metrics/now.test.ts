@@ -37,7 +37,7 @@ test("clientes esperando: recientes hasta 72 horas; las más viejas son posibles
     open("mas-vieja", { waitStart: hoursAgo(24 * 90) }),
     row("cerrada", { waitStart: hoursAgo(10) }),
   ]);
-  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0 });
+  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0, claims: null });
   // Las antiguas sin señal de cierre entran en la lista, marcadas, antes que las recientes.
   assert.deepEqual(p.list.map((i) => [i.conversationId, i.oldPending]), [["mas-vieja", true], ["vieja", true], ["otra", false], ["reciente", false]]);
   assert.equal(p.listTotal, 4);
@@ -57,7 +57,7 @@ test("los conteos completos de la cola no cambian: quedan en calidad de datos", 
 
 test("sin nadie esperando: cero y sin espera más larga", () => {
   const p = payload([row("cerrada")]);
-  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0 });
+  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0, claims: null });
   assert.deepEqual([p.list.length, p.stale.total, p.stale.oldestWaitStart], [0, 0, null]);
 });
 
@@ -276,6 +276,18 @@ test("actividad observada: última respuesta de un operador, aviso para revisar 
   assert.equal(payload([open("vieja", { waitStart: hoursAgo(200) })], { ...NONE, accounts, wait: wait(always), observed: rows }).observed!.review, true);
   // Sin la lectura no hay bloque.
   assert.equal(payload([open("a")], { ...NONE, accounts }).observed, null);
+});
+
+test("reclamos pendientes: pendientes con un reclamo detectado; sin la revisión queda sin dato", () => {
+  const rows = [open("a"), open("b", { hasHumanResponse: true }), open("c"), open("vieja", { waitStart: hoursAgo(200) }), row("cerrada")];
+  const claims = new Map([["a", ["DEMORA" as const]], ["vieja", ["SIN_NOVEDADES" as const, "PAGO" as const]], ["cerrada", ["DEMORA" as const]]]);
+  const p = payload(rows, { ...NONE, claims });
+  const by = Object.fromEntries(p.list.map((i) => [i.conversationId, i.claims]));
+  assert.deepEqual(by, { a: ["DEMORA"], b: [], c: [], vieja: ["SIN_NOVEDADES", "PAGO"] });
+  // Cuenta conversaciones, no motivos; las cerradas no son pendientes.
+  assert.equal(p.waiting.claims, 2);
+  const sin = payload(rows);
+  assert.deepEqual([sin.waiting.claims, sin.list[0].claims], [null, null]);
 });
 
 console.log(`\nmetrics/now: ${passed} ok, ${failures.length} fail`);
