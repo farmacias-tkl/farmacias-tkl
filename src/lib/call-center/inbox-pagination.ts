@@ -42,10 +42,11 @@ export function inboxPageInfo(total: number, requestedPage: number, pageSize: nu
   };
 }
 
-/** Enlace de la bandeja conservando el filtro de estado. La página 1 no lleva ?page. */
-export function inboxHref(status: string | null, page: number): string {
+/** Enlace de la bandeja conservando los filtros de estado y de operador. La página 1 no lleva ?page. */
+export function inboxHref(status: string | null, page: number, operator: string | null = null): string {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
+  if (operator) params.set("operator", operator);
   if (page > 1) params.set("page", String(page));
   const qs = params.toString();
   return qs ? `/call-center?${qs}` : "/call-center";
