@@ -113,7 +113,7 @@ function Report({ data }: { data: AccountsPayload }) {
             Cuentas del sistema<span className="ml-2 text-xs font-normal text-gray-600">no son operadores y no suman en el equipo</span>
           </h2>
           <ul className="mt-2 grid gap-3 lg:grid-cols-2">
-            {data.systemAccounts.map((a) => <AccountCard key={a.account ?? "sin-cuenta"} a={a} />)}
+            {data.systemAccounts.map((a) => <AccountCard key={a.account ?? "sin-cuenta"} a={a} system />)}
           </ul>
         </>
       )}
@@ -135,13 +135,18 @@ function Report({ data }: { data: AccountsPayload }) {
   );
 }
 
-function AccountCard({ a }: { a: Account }) {
+function AccountCard({ a, system }: { a: Account; system?: boolean }) {
   const act = a.activity;
   const hours = act.inPublicHours !== null && act.inOperatorHoursOnly !== null && act.outsideAllHours !== null;
   return (
     <li className="rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-900">{accountName(a)}</h3>
+        {/* El alias sale de la configuración. Sin alias, o en una cuenta del sistema, queda el nombre de siempre. */}
+        {a.alias && a.account !== null && !system ? (
+          <h3 className="text-sm font-semibold text-gray-900">{a.alias}<span className="block text-xs font-normal text-gray-600">cuenta {a.account}</span></h3>
+        ) : (
+          <h3 className="text-sm font-semibold text-gray-900">{accountName(a)}</h3>
+        )}
         <span className="flex shrink-0 flex-wrap gap-1">
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{STATUS_LABELS[a.status]}</span>
           {a.borrowed && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">Prestada</span>}
