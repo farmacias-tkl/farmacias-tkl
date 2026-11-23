@@ -88,6 +88,13 @@ export interface ProgressSide {
   compliance: number | null;
   /** Mediana hábil de la primera respuesta, entre las respondidas. null si no hay. */
   medianBusinessMinutes: number | null;
+  /** ¿Ese día tiene horario público? null sin configuración. Si no tiene, la meta pública no aplica a sus entradas. */
+  hasPublicHours: boolean | null;
+  /** Recibieron la primera respuesta de una persona, y siguen sin ella, vistas a esa hora. */
+  answered: number;
+  pending: number;
+  /** Mediana de la espera real (de reloj) hasta la primera respuesta, entre las respondidas. null si no hay. */
+  medianClockMinutes: number | null;
 }
 
 /** "Avances": el turno de hoy y la primera respuesta frente al mismo día de la semana anterior. */

@@ -252,28 +252,56 @@ function ProgressCard({ d }: { d: NowPayload }) {
       <h3 className="mt-3 border-t border-gray-100 pt-2 text-xs font-semibold text-gray-700">
         Primera respuesta: hoy contra el {dayFmt.format(new Date(`${previous.day}T12:00:00.000-03:00`))}, a esta misma hora
       </h3>
+      {today.hasPublicHours === false ? (
+        <>
+          <p className="mt-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800">
+            Hoy no hay horario público: la meta pública no aplica a las entradas de hoy. Se muestra la espera real.
+          </p>
+          <dl className="mt-2 space-y-2 text-sm text-gray-800">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>Recibieron respuesta</dt>
+              <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(today.answered)} de {nf.format(today.entries)} <span className="font-normal text-gray-600">· antes {nf.format(previous.answered)} de {nf.format(previous.entries)}</span></dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>Siguen sin primera respuesta</dt>
+              <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(today.pending)} <span className="font-normal text-gray-600">· antes {nf.format(previous.pending)}</span></dd>
+            </div>
+            <div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt>La mitad esperó (tiempo real)</dt>
+                <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{mins(today.medianClockMinutes)} <span className="font-normal text-gray-600">· antes {mins(previous.medianClockMinutes)}</span></dd>
+              </div>
+              {today.medianClockMinutes !== null && previous.medianClockMinutes !== null && (
+                <Trend better={today.medianClockMinutes < previous.medianClockMinutes} same={mins(today.medianClockMinutes) === mins(previous.medianClockMinutes)}
+                  text={formatWait(Math.abs(today.medianClockMinutes - previous.medianClockMinutes))} />
+              )}
+            </div>
+          </dl>
+        </>
+      ) : (
       <dl className="mt-1 space-y-2 text-sm text-gray-800">
-        <div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt>Respondidas dentro de la meta</dt>
-            <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{pct(today.compliance)} <span className="font-normal text-gray-600">· antes {pct(previous.compliance)}</span></dd>
+          <div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>Respondidas dentro de la meta</dt>
+              <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{pct(today.compliance)} <span className="font-normal text-gray-600">· antes {pct(previous.compliance)}</span></dd>
+            </div>
+            {today.compliance !== null && previous.compliance !== null && (
+              <Trend better={today.compliance > previous.compliance} same={pct(today.compliance) === pct(previous.compliance)}
+                text={`${Math.abs(Math.round((today.compliance - previous.compliance) * 100))} puntos`} />
+            )}
           </div>
-          {today.compliance !== null && previous.compliance !== null && (
-            <Trend better={today.compliance > previous.compliance} same={pct(today.compliance) === pct(previous.compliance)}
-              text={`${Math.abs(Math.round((today.compliance - previous.compliance) * 100))} puntos`} />
-          )}
-        </div>
-        <div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt>La mitad esperó (minutos hábiles)</dt>
-            <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{mins(today.medianBusinessMinutes)} <span className="font-normal text-gray-600">· antes {mins(previous.medianBusinessMinutes)}</span></dd>
+          <div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>La mitad esperó (minutos hábiles)</dt>
+              <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{mins(today.medianBusinessMinutes)} <span className="font-normal text-gray-600">· antes {mins(previous.medianBusinessMinutes)}</span></dd>
+            </div>
+            {today.medianBusinessMinutes !== null && previous.medianBusinessMinutes !== null && (
+              <Trend better={today.medianBusinessMinutes < previous.medianBusinessMinutes} same={mins(today.medianBusinessMinutes) === mins(previous.medianBusinessMinutes)}
+                text={formatWait(Math.abs(today.medianBusinessMinutes - previous.medianBusinessMinutes))} />
+            )}
           </div>
-          {today.medianBusinessMinutes !== null && previous.medianBusinessMinutes !== null && (
-            <Trend better={today.medianBusinessMinutes < previous.medianBusinessMinutes} same={mins(today.medianBusinessMinutes) === mins(previous.medianBusinessMinutes)}
-              text={formatWait(Math.abs(today.medianBusinessMinutes - previous.medianBusinessMinutes))} />
-          )}
-        </div>
-      </dl>
+        </dl>
+      )}
       <More>
         Pendientes al empezar el turno: conversaciones abiertas, con el último mensaje del cliente y hasta {d.windowHours} horas de espera, a la hora en que empieza el
         horario de operadores. La comparación toma lo que había entrado y lo que se había respondido el mismo día de la semana pasada a esta misma hora
