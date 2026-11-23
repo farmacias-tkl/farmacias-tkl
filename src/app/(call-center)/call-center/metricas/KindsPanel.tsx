@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import {
-  CONSULT_KINDS, LOST_KINDS, NO_TAKE_KINDS, ORDER_KINDS,
-  type ConsultKind, type KindCounts, type KindsPayload, type LostKind, type MainKind, type NoTakeKind, type OrderKind,
+  CLOSURE_OUTCOME_LIST, CONSULT_KINDS, LOST_KINDS, MAIN_KINDS, NO_TAKE_KINDS, ORDER_KINDS,
+  type ClosureOutcome, type ConsultKind, type KindCounts, type KindsPayload, type LostKind, type MainKind, type NoTakeKind, type OrderKind,
 } from "@/lib/call-center/metrics/kinds-types";
 import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
 import { formatShortDay } from "@/lib/call-center/metrics/format";
@@ -22,6 +22,11 @@ const LOST_LABELS: Record<LostKind, string> = { OTRO_LADO: "Compró en otro lado
 const CONSULT_LABELS: Record<ConsultKind, string> = {
   SERVICIOS: "Vacunas y servicios", PRECIO: "Precio", STOCK: "Stock o disponibilidad", HORARIOS: "Horarios y sucursales", COBERTURA: "Obra social o cobertura",
   PAGO: "Modalidad de pago", TIENDA_ONLINE: "Tienda online", OTRAS: "Otras",
+};
+
+const OUTCOME_LABELS: Record<ClosureOutcome, string> = {
+  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_SE_PUDO_VENDER: "No se pudo vender",
+  SOLO_BOT: "Solo bot, sin atención de una persona", OTRO: "Otro",
 };
 
 /** Franjas del día, por hora de entrada en Buenos Aires. */
@@ -100,6 +105,27 @@ function Report({ data }: { data: KindsPayload }) {
         Calculado a las {timeFmt.format(new Date(data.generatedAt))} · {nf.format(data.conversations)} conversaciones ·{" "}
         {data.source === "MEDIDO" ? "Medido: tipo de cierre de Emozion" : `${EVIDENCE_LABELS.DETECTADO}: recorrido del bot y palabras`}
       </p>
+
+      {data.operator && (
+        <Box title={`Confirmado por el operador (${nf.format(data.operator.confirmed)} de ${nf.format(data.conversations)})`}
+          note="Resultado que el operador eligió al resolver, tomado de la etiqueta de cierre de Emozion. Es un dato confirmado; todo lo demás de esta pestaña es detectado por palabras.">
+          {data.operator.confirmed === 0 ? (
+            <p className="text-sm text-gray-700">Ninguna conversación del período tiene etiqueta de cierre todavía.</p>
+          ) : (
+            <>
+              {CLOSURE_OUTCOME_LIST.filter((o) => data.operator!.byOutcome[o] > 0).map((o) => {
+                const row = data.operator!.matrix[o];
+                const detected = MAIN_KINDS.filter((k) => row[k] > 0).sort((a, b) => row[b] - row[a]).map((k) => `${SHORT[k]} ${nf.format(row[k])}`).join(" · ");
+                return <Line key={o} label={OUTCOME_LABELS[o]} value={`${nf.format(data.operator!.byOutcome[o])} · ${pct(data.operator!.byOutcome[o], data.operator!.confirmed)}`} note={`Detectado: ${detected}`} />;
+              })}
+              <p className="border-t border-gray-100 pt-2 text-sm text-gray-800">
+                Coincidencia con lo detectado: <span className="font-semibold">{pct(data.operator.agree, data.operator.compared)}</span>{" "}
+                ({nf.format(data.operator.agree)} de {nf.format(data.operator.compared)}). Sirve para validar la clasificación detectada, no para reemplazarla.
+              </p>
+            </>
+          )}
+        </Box>
+      )}
 
       <div className="mt-3 grid grid-cols-3 gap-2">
         <Stat label="Pedidos" value={t.PEDIDO} share={pct(t.PEDIDO, base)} />

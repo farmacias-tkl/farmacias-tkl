@@ -186,6 +186,7 @@ async function main() {
       assert.equal(p.conversations, Object.keys(ids).length - 1);
       assert.equal(p.byDay.find((d) => d.day === "2026-03-04")!.CONSULTA, 1);
       assert.equal(p.byHour[23].CONSULTA, 1);
+      assert.equal(p.operator, null, "sin etiquetas de cierre en la configuración no hay dato del operador");
       const dump = JSON.stringify(p);
       assert.ok(!dump.includes("+549") && !/inventad|kd-/i.test(dump), "solo conteos");
     });

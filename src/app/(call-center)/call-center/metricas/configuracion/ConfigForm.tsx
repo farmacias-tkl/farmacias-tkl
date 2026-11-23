@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, ISO_WEEKDAYS, criticalWaitMinutesOf, parseConfigData, windowWarningHoursOf,
-  type CallCenterMetricsConfigData, type ConfigAccount, type IsoWeekday,
+  CLOSURE_OUTCOMES, CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, ISO_WEEKDAYS, criticalWaitMinutesOf, parseConfigData, windowWarningHoursOf,
+  type CallCenterMetricsConfigData, type ClosureOutcome, type ConfigAccount, type IsoWeekday,
 } from "@/lib/call-center/metrics/config-schema";
 import {
   WEEKDAY_LABELS, emptyScheduleText, isValidDayISO, proposeAccount, scheduleToText, textToSchedule,
@@ -12,6 +12,11 @@ import {
 import type { KnownAccount, KnownVendor } from "@/lib/call-center/metrics/config-service";
 
 type ScheduleText = Record<IsoWeekday, string>;
+const CLOSURE_OUTCOME_LABELS: Record<ClosureOutcome, string> = {
+  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_SE_PUDO_VENDER: "No se pudo vender",
+  SOLO_BOT: "Solo bot, sin atención de una persona", OTRO: "Otro",
+};
+
 const vendorKey = (branchId: string, code: string) => `${branchId}|${code}`;
 
 /** Cuentas del formulario: las de la versión base más las que escribieron y no están en ella. */
@@ -51,6 +56,8 @@ export default function ConfigForm({
     () => (base?.data.branchOrderHours ?? []).map((b) => ({ branchId: b.branchId, pickup: scheduleToText(b.pickup), delivery: scheduleToText(b.delivery) })),
   );
   const [newOrderBranch, setNewOrderBranch] = useState("");
+  // Etiquetas de cierre de Emozion y el resultado que significa cada una.
+  const [closureLabels, setClosureLabels] = useState<Array<{ label: string; outcome: ClosureOutcome }>>(() => [...(base?.data.closureLabels ?? [])]);
   const branchName = (id: string) => options.branches.find((b) => b.id === id)?.name ?? "Sucursal que ya no existe";
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -119,6 +126,7 @@ export default function ConfigForm({
       windowWarningHours: warningNumber,
       // Sin sucursales cargadas el campo no se guarda, como en las versiones anteriores.
       ...(branchOrderHours.length > 0 ? { branchOrderHours } : {}),
+      ...(closureLabels.some((c) => c.label.trim()) ? { closureLabels: closureLabels.filter((c) => c.label.trim()).map((c) => ({ label: c.label.trim(), outcome: c.outcome })) } : {}),
       // system se guarda siempre explícito, aunque la versión base no lo tuviera.
       accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
       callCenterVendors: [...vendors].map((k) => {
@@ -353,6 +361,29 @@ export default function ConfigForm({
             </div>
           ))}
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-gray-800">Etiquetas de cierre</h2>
+        <p className="text-xs text-gray-500">
+          Etiquetas que Emozion agrega al resolver una conversación, con el resultado que eligió el operador. Escribí el nombre de la etiqueta tal como figura en Emozion
+          (por ejemplo, con guiones bajos) y elegí qué resultado significa. Las demás etiquetas no son de cierre y no hace falta cargarlas.
+        </p>
+        <div className="mt-2 space-y-2">
+          {closureLabels.map((c, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <input aria-label={`Etiqueta de cierre ${i + 1}`} value={c.label} placeholder="nombre_de_la_etiqueta"
+                onChange={(e) => setClosureLabels((list) => list.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} className={`w-64 max-w-full font-mono ${input}`} />
+              <select aria-label={`Resultado de la etiqueta de cierre ${i + 1}`} value={c.outcome}
+                onChange={(e) => setClosureLabels((list) => list.map((x, j) => (j === i ? { ...x, outcome: e.target.value as ClosureOutcome } : x)))} className={`w-56 max-w-full ${input}`}>
+                {CLOSURE_OUTCOMES.map((o) => <option key={o} value={o}>{CLOSURE_OUTCOME_LABELS[o]}</option>)}
+              </select>
+              <button type="button" onClick={() => setClosureLabels((list) => list.filter((_, j) => j !== i))} className="text-xs font-medium text-red-700 underline">Quitar</button>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={() => setClosureLabels((list) => [...list, { label: "", outcome: "VENTA" }])}
+          className="mt-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800">Agregar etiqueta</button>
       </section>
 
       <section>

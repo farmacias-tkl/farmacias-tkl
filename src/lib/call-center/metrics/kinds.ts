@@ -42,6 +42,8 @@ import { BOT_ORDER_COMPLETE_LIKE } from "./patterns";
 import { claimsOf, loadDetectedRows } from "./detected";
 import { branchNamesRegex } from "./detected-patterns";
 import { getDerivations, type DerivationTiming } from "./derivation";
+import { closureMapOf, closureOutcomeOf, type ClosureMap } from "./closure-outcome";
+import { configForDay, loadConfigVersions } from "./config";
 import {
   BOT_BUTTONS, BUTTON_HOME, BUTTON_PICKUP,
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
@@ -49,7 +51,8 @@ import {
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
 } from "./kinds-patterns";
 import {
-  CONSULT_KINDS, LOST_KINDS, MAIN_KINDS, NO_TAKE_KINDS, ORDER_KINDS,
+  CLOSURE_OUTCOME_LIST, CONSULT_KINDS, LOST_KINDS, MAIN_KINDS, NO_TAKE_KINDS, ORDER_KINDS, OUTCOME_MATCHES,
+  type ClosureOutcome, type OperatorConfirmed,
   type ConsultKind, type ConversationKind, type KindCounts, type KindsPayload, type LostKind, type NoTakeKind, type OrderKind,
 } from "./kinds-types";
 
@@ -59,6 +62,10 @@ const MS_DAY = 86_400_000;
 export interface KindRow {
   conversationId: string;
   createdAt: Date;
+  /** Para el resultado de cierre del operador: estado, resultado guardado al resolver y etiquetas. */
+  resolved: boolean;
+  closureTypeName: string | null;
+  labels: string[];
   /** Tiene algún motivo de reclamo (de detected.ts). */
   claim: boolean;
   /** Mandó el mensaje armado de una receta digital para pedir. */
@@ -111,7 +118,7 @@ export interface KindRow {
   onlineStore: boolean;
 }
 
-type Flags = Omit<KindRow, "conversationId" | "createdAt">;
+type Flags = Omit<KindRow, "conversationId" | "createdAt" | "resolved" | "closureTypeName" | "labels">;
 
 function consultKind(r: Flags): ConsultKind {
   if (r.services) return "SERVICIOS";
@@ -160,7 +167,13 @@ export function classifyKind(r: Flags): ConversationKind {
 const zeroCounts = (): KindCounts => Object.fromEntries(MAIN_KINDS.map((k) => [k, 0])) as KindCounts;
 
 /** Informe del período. PURO. */
-export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; from: string; to: string }): KindsPayload {
+export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; from: string; to: string; closureMap?: ClosureMap }): KindsPayload {
+  const closureMap = opts.closureMap ?? new Map<string, ClosureOutcome>();
+  const operator: OperatorConfirmed = {
+    confirmed: 0, compared: 0, agree: 0,
+    byOutcome: Object.fromEntries(CLOSURE_OUTCOME_LIST.map((o) => [o, 0])) as Record<ClosureOutcome, number>,
+    matrix: Object.fromEntries(CLOSURE_OUTCOME_LIST.map((o) => [o, zeroCounts()])) as Record<ClosureOutcome, KindCounts>,
+  };
   const total = zeroCounts();
   const orders = Object.fromEntries(ORDER_KINDS.map((k) => [k, 0])) as Record<OrderKind, number>;
   const lost = Object.fromEntries(LOST_KINDS.map((k) => [k, 0])) as Record<LostKind, number>;
@@ -179,6 +192,16 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
     if (kind.main === "NO_SE_PUDO_TOMAR") noTake[kind.sub as NoTakeKind]++;
     if (kind.sub === "DERIVADO_PRESENCIAL" && r.derivation === "SIN_SUCURSAL") derivedWithoutBranch++;
     if (kind.main === "CONSULTA") { consults[kind.sub as ConsultKind]++; if (r.hasHumanResponse) consultsAnswered++; }
+    const closure = closureOutcomeOf(r, closureMap);
+    if (closure) {
+      operator.confirmed++;
+      operator.byOutcome[closure.outcome]++;
+      operator.matrix[closure.outcome][kind.main]++;
+      if (closure.outcome !== "OTRO") {
+        operator.compared++;
+        if (OUTCOME_MATCHES[closure.outcome].includes(kind.main)) operator.agree++;
+      }
+    }
     const day = arDayISO(r.createdAt);
     const d = byDay.get(day) ?? zeroCounts();
     d[kind.main]++;
@@ -199,6 +222,7 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
     derivedWithoutBranch,
     consults,
     consultsAnswered,
+    operator: closureMap.size > 0 ? operator : null,
     byDay: [...byDay.keys()].sort().map((day) => ({ day, ...byDay.get(day)! })),
     byHour,
   };
@@ -230,6 +254,7 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const [rows, detected, derivations] = await Promise.all([
     prisma.$queryRaw<RawKindRow[]>(Prisma.sql`
       SELECT c.id AS "conversationId", c."createdAt" AS "createdAt",
+        (c.status = 'RESUELTA') AS "resolved", c."closureTypeName" AS "closureTypeName", c."externalLabels" AS "labels",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_ORDER}`)} AS "prescription",
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOME}`)} AS "homeDelivery",
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_PICKUP}`)} AS "pickup",
@@ -262,7 +287,7 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
       FROM "Conversation" c
       LEFT JOIN "ConversationMessage" m ON m."conversationId" = c.id
       WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp AND c."createdAt" < ${utcTimestampParam(to)}::timestamp
-      GROUP BY c.id, c."createdAt"
+      GROUP BY c.id, c."createdAt", c.status, c."closureTypeName", c."externalLabels"
     `),
     loadDetectedRows(fromDay, toDayInclusive),
     getDerivations(fromDay, toDayInclusive),
@@ -290,7 +315,10 @@ export async function getKindsPayload(from: string, to: string, now: Date = new 
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.payload;
 
-  const payload = buildKindsReport(await loadKindRows(from, to), { now, from, to });
+  const [rows, { versions }] = await Promise.all([loadKindRows(from, to), loadConfigVersions()]);
+  // Las etiquetas de cierre son las de la configuración vigente hoy.
+  const closureMap = closureMapOf(configForDay(versions, arDayISO(now))?.data);
+  const payload = buildKindsReport(rows, { now, from, to, closureMap });
 
   if (cache.size >= CACHE_MAX_ENTRIES) {
     for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);

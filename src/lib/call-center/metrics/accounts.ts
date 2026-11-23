@@ -26,7 +26,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, isWithinHours, utcTimestampParam, type DayRanges } from "./business-time";
 import { configForDay, type ConfigVersion } from "./config";
-import { isSystemAccount, type ConfigAccount } from "./config-schema";
+import { CLOSURE_OUTCOMES, isSystemAccount, type ClosureOutcome, type ConfigAccount } from "./config-schema";
 import { publicHours, operatorHours } from "./schedule";
 import { distribution, type Distribution, type EntryFact } from "./attention";
 
@@ -63,6 +63,12 @@ export interface AccountReportRow {
   /** La usa otra persona que su titular: no se atribuye a nadie. */
   borrowed: boolean;
   conversations: number;
+  /**
+   * De esas conversaciones, cuántas tienen cada resultado de cierre confirmado por el operador
+   * (etiqueta de cierre). null si la configuración no define etiquetas de cierre. Una
+   * conversación en la que escribieron dos cuentas cuenta en las dos.
+   */
+  closures: Record<ClosureOutcome, number> | null;
   publicMessages: number;
   privateNotes: number;
   /** Demora de reloj de los casos que tomó, desde la salida del bot. Es demora de la cola. */
@@ -117,7 +123,11 @@ const KEY_NULL = "\u0000sin-remitente";
 
 /** Informe por cuenta. PURO. `facts` son las conversaciones creadas en el período (attention.ts). */
 export function buildAccountsReport(
-  input: { messages: readonly OperatorMessageRow[]; followups: readonly FollowupBlockRow[]; facts: readonly EntryFact[] },
+  input: {
+    messages: readonly OperatorMessageRow[]; followups: readonly FollowupBlockRow[]; facts: readonly EntryFact[];
+    /** Resultado de cierre por conversación; null u omitido si la configuración no define etiquetas de cierre. */
+    outcomes?: ReadonlyMap<string, ClosureOutcome> | null;
+  },
   opts: { now: Date; versions: readonly ConfigVersion[] },
 ): AccountsReport {
   const pub: DayRanges = publicHours(opts.versions);
@@ -187,6 +197,13 @@ export function buildAccountsReport(
     get(b.account).followups.push(minutes);
   }
 
+  const closuresOf = (conversations: ReadonlySet<string>): Record<ClosureOutcome, number> | null => {
+    if (!input.outcomes) return null;
+    const out = Object.fromEntries(CLOSURE_OUTCOMES.map((o) => [o, 0])) as Record<ClosureOutcome, number>;
+    for (const id of conversations) { const o = input.outcomes.get(id); if (o) out[o]++; }
+    return out;
+  };
+
   const all: AccountReportRow[] = [...byKey.entries()].map(([key, a]) => {
     const account = key === KEY_NULL ? null : key;
     const cfg = account ? configured.get(account) : undefined;
@@ -196,6 +213,7 @@ export function buildAccountsReport(
       status: !cfg ? "SIN_CONFIGURAR" : cfg.historical || !cfg.active ? "HISTORICA" : "ACTIVA",
       borrowed: cfg?.borrowed ?? false,
       conversations: a.conversations.size,
+      closures: closuresOf(a.conversations),
       publicMessages: a.publicMessages,
       privateNotes: a.privateNotes,
       firstResponses: distribution(a.firstResponses),
