@@ -9,6 +9,7 @@ import { loadAttachmentsForDetail } from "@/lib/call-center/attachment-detail-re
 import ConversationActions from "./ConversationActions";
 import { loadOperatorDirectory } from "@/lib/call-center/operator-directory";
 import { agoLabel, operatorInfo, shortHistory } from "@/lib/call-center/operator-display";
+import { labelsEverSeen } from "@/lib/call-center/labels-seen";
 import { accountDisplay, accountRef, assigneeAccount } from "@/lib/call-center/metrics/account-label";
 
 export const metadata = { title: "Call Center — Conversación" };
@@ -119,6 +120,8 @@ export default async function ConversationDetailPage({
         <Meta label="Tomada en esta plataforma por" value={conv.assignedTo?.name ?? "—"} />
         <Meta label="Origen" value={conv.source ?? "—"} />
         <Meta label="ID externo" value={conv.externalConversationId ?? "—"} />
+        {/* Vistas + actuales: Emozion quita las de sucursal y modalidad al cerrar. Son nombres de etiqueta, no texto del cliente. */}
+        <Meta label="Etiquetas de Emozion (vistas)" value={labelsEverSeen(conv).join(" · ") || "—"} />
         <Meta label="Creada" value={formatDateTimeAR(conv.createdAt)} />
         <Meta label="Primera respuesta" value={formatDateTimeAR(conv.firstResponseAt)} />
         <Meta label="Cerrada" value={formatDateTimeAR(conv.closedAt)} />
