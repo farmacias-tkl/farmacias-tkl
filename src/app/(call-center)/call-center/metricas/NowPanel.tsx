@@ -235,6 +235,8 @@ export default function NowPanel() {
         </div>
       </div>
 
+      <ObservedCard d={d} nowMs={nowMs} />
+
       <ProgressCard d={d} />
 
       <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
@@ -274,6 +276,59 @@ export default function NowPanel() {
       <StaleCard d={d} nowMs={nowMs} />
       <ClosedCard d={d} nowMs={nowMs} />
     </section>
+  );
+}
+
+/** "Actividad observada": la última respuesta pública de un operador y el detalle por cuenta. No es presencia. */
+function ObservedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
+  const o = d.observed;
+  const pending = d.waiting.total + d.waiting.oldPending;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">Actividad observada</h2>
+      {!o ? (
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-gray-800">
+            Última respuesta pública de un operador:{" "}
+            <span className="text-lg font-semibold tabular-nums text-gray-900">
+              {o.lastResponseAt ? `hace ${formatWait(minutesSince(o.lastResponseAt, nowMs))}` : `ninguna en los últimos ${o.lookbackDays} días`}
+            </span>
+            {o.lastResponseAt ? <span className="text-xs text-gray-600"> · {whenLabel(o.lastResponseAt, nowMs)}</span> : null}
+          </p>
+          {o.review && (
+            <p role="status" className="mt-2 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs text-orange-900">
+              <span className="font-semibold">Para revisar:</span> hay {nf.format(pending)} {pending === 1 ? "pendiente" : "pendientes"}, es horario de operadores y pasaron más de{" "}
+              {formatWait(o.warningMinutes)} sin una respuesta pública. No significa que nadie esté trabajando.
+            </p>
+          )}
+          {o.accounts.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver por cuenta</summary>
+              <ul className="mt-1 divide-y divide-gray-100">
+                {o.accounts.map((a) => (
+                  <li key={a.label} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1 text-xs text-gray-700">
+                    <span className="font-medium text-gray-900">{a.label}</span>
+                    <span className="tabular-nums">
+                      última respuesta {whenLabel(a.lastResponseAt, nowMs)} · <span className="font-semibold text-gray-900">{nf.format(a.conversations)}</span>{" "}
+                      {a.conversations === 1 ? "conversación atendida" : "conversaciones atendidas"} {o.sinceIsShift ? "en el turno" : "hoy"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <More>
+            Es actividad registrada, no presencia: cuenta los mensajes públicos de operador que llegaron, sin el bot, las notas internas ni las cuentas de asignación
+            automática. Conviene leerlo junto con los pendientes y con la hora del último evento recibido. Las conversaciones atendidas se cuentan desde{" "}
+            {o.sinceIsShift ? "el inicio del horario de operadores de hoy" : "el comienzo del día"}, a las {timeFmt.format(new Date(o.since))}; una conversación en la que
+            respondieron dos cuentas cuenta en las dos.{o.inOperatorHours === null ? " Sin configuración cargada no se conoce el horario de operadores y no se muestra el aviso." : ""}
+          </More>
+        </>
+      )}
+      <Evidence level={o ? "MEDIDO" : "NO_DISPONIBLE"} />
+    </div>
   );
 }
 

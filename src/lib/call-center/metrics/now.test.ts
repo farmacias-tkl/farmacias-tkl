@@ -242,5 +242,41 @@ test("quién tiene cada caso: una fila por cuenta asignada, filas especiales y e
   assert.equal(payload(rows, { ...NONE, accounts }).owners, null);
 });
 
+test("actividad observada: última respuesta de un operador, aviso para revisar y detalle por cuenta", () => {
+  const acc = (externalId: string, over: object = {}) => ({ externalId, alias: null, active: true, borrowed: false, historical: false, ...over });
+  const accounts = [acc("9000", { system: true }), acc("9001", { alias: "Alias inventado" }), acc("9002")];
+  const always = () => [{ from: 0, to: 1440 }];
+  const never = () => [];
+  const wait = (ops: typeof always | typeof never, lastResponseWarningMinutes?: number) => ({ pub: never, ops, goalMinutes: 15, criticalMinutes: 60, lastResponseWarningMinutes });
+  const since = hoursAgo(6);
+  const observed = (rows: Array<[string | null, number, number]>) => ({
+    rows: rows.map(([account, h, conversations]) => ({ account, lastAt: hoursAgo(h), conversations })), since, sinceIsShift: true,
+  });
+  // La cuenta de sistema respondió hace 1 minuto: no cuenta. La última de un operador fue hace 45 minutos.
+  const rows = observed([["9000", 1 / 60, 9], ["9002", 0.75, 2], ["9001", 3, 5], [null, 40, 0]]);
+  const p = payload([open("a")], { ...NONE, accounts, wait: wait(always), observed: rows });
+  const o = p.observed!;
+  assert.deepEqual([o.lastResponseAt, o.review, o.warningMinutes, o.inOperatorHours, o.sinceIsShift], [hoursAgo(0.75).toISOString(), true, 30, true, true]);
+  assert.deepEqual(o.accounts, [
+    { label: "Alias inventado", lastResponseAt: hoursAgo(3).toISOString(), conversations: 5 },
+    { label: "Cuenta 9002", lastResponseAt: hoursAgo(0.75).toISOString(), conversations: 2 },
+    { label: "Cuenta no registrada", lastResponseAt: hoursAgo(40).toISOString(), conversations: 0 },
+  ]);
+  // Sin aviso: umbral mayor en la configuración, sin pendientes, o fuera del horario de operadores.
+  assert.equal(payload([open("a")], { ...NONE, accounts, wait: wait(always, 60), observed: rows }).observed!.review, false);
+  assert.equal(payload([], { ...NONE, accounts, wait: wait(always), observed: rows }).observed!.review, false);
+  assert.deepEqual([payload([open("a")], { ...NONE, accounts, wait: wait(never), observed: rows }).observed!.review], [false]);
+  // Sin configuración no se conoce el horario de operadores: sin aviso y null.
+  const sin = payload([open("a")], { ...NONE, accounts, observed: rows }).observed!;
+  assert.deepEqual([sin.review, sin.inOperatorHours], [false, null]);
+  // Ninguna respuesta en los últimos días, con pendientes y en horario: para revisar.
+  const nadie = payload([open("a")], { ...NONE, accounts, wait: wait(always), observed: observed([]) }).observed!;
+  assert.deepEqual([nadie.lastResponseAt, nadie.review, nadie.accounts], [null, true, []]);
+  // Los posibles pendientes antiguos también cuentan como pendientes.
+  assert.equal(payload([open("vieja", { waitStart: hoursAgo(200) })], { ...NONE, accounts, wait: wait(always), observed: rows }).observed!.review, true);
+  // Sin la lectura no hay bloque.
+  assert.equal(payload([open("a")], { ...NONE, accounts }).observed, null);
+});
+
 console.log(`\nmetrics/now: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

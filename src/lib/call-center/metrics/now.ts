@@ -19,7 +19,7 @@ import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered, isProbablyClosed, loadOpenBlockRows, type ClosedBlockRow } from "./closed-unanswered";
 import { loadDailyActivityRows } from "./activity";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
-import { DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
+import { DEFAULT_LAST_RESPONSE_WARNING_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, lastResponseWarningMinutesOf, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
 import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
@@ -30,6 +30,9 @@ import { loadProgress } from "./progress";
 import { loadQualityChecks } from "./quality";
 import { accountRef, ownerKeyOf } from "./account-label";
 import { buildOwners, detectedOwnerLabel, loadOpenOwnerRows, type OpenOwnerRow } from "./owners";
+import { buildObserved, loadObservedRows, type ObservedInput } from "./observed-activity";
+import { isWithinHours } from "./business-time";
+import { shiftStartOf } from "./progress";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -55,6 +58,8 @@ export interface NowExtras {
   checks: QualityChecks | null;
   /** Todas las abiertas con su asignado, para "Quién tiene cada caso". null u omitido si no se pudieron leer. */
   openOwners?: readonly OpenOwnerRow[] | null;
+  /** Respuestas públicas de operador por cuenta, para "Actividad observada". null u omitido si no se pudieron leer. */
+  observed?: ObservedInput | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -74,6 +79,7 @@ export function waitContext(versions: readonly ConfigVersion[], now: Date): Wait
     goalMinutes: current.data.firstResponseGoalMinutes,
     criticalMinutes: criticalWaitMinutesOf(current.data),
     windowWarningHours: windowWarningHoursOf(current.data),
+    lastResponseWarningMinutes: lastResponseWarningMinutesOf(current.data),
   };
 }
 
@@ -184,6 +190,13 @@ export function toNowPayload(
     },
     // Sobre todos los que esperan, no solo sobre las filas que entran en la lista.
     owners: openOwners ? buildOwners(openOwners, items, accounts) : null,
+    observed: extras.observed
+      ? buildObserved(extras.observed, {
+          now, accounts, pending: items.length,
+          inOperatorHours: wait ? isWithinHours(now, wait.ops) : null,
+          warningMinutes: wait?.lastResponseWarningMinutes ?? DEFAULT_LAST_RESPONSE_WARNING_MINUTES,
+        })
+      : null,
     progress,
     quality: {
       freshness: {
@@ -255,6 +268,12 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   const accounts = current?.data.accounts ?? [];
   const checks = await loadQualityChecks(now, current ? accounts : null).catch(() => null);
   const progress = await loadProgress(now, versions, wait?.ops ?? null).catch(() => null);
+  // Actividad observada: desde el inicio del turno de operadores de hoy o, si no hay, desde el comienzo del día.
+  const shiftStart = wait ? shiftStartOf(now, wait.ops) : null;
+  const observedSince = shiftStart ?? arDayStartUTC(arDayISO(now));
+  const observed = await loadObservedRows(observedSince, now)
+    .then((rows) => ({ rows, since: observedSince, sinceIsShift: shiftStart !== null }))
+    .catch(() => null);
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -272,7 +291,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

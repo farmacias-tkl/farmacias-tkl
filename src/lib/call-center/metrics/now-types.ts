@@ -54,6 +54,27 @@ export interface NowOwnerRow {
   detected: { byAccount: Array<{ label: string; open: number }>; none: number } | null;
 }
 
+/**
+ * Actividad observada: respuestas públicas de operador que se registraron. No es presencia.
+ * No cuenta el bot, las notas internas ni las cuentas de sistema.
+ */
+export interface NowObserved {
+  /** ISO. Última respuesta pública de un operador; null si no hubo ninguna en `lookbackDays` días. */
+  lastResponseAt: string | null;
+  /** Para revisar: hay pendientes, es horario de operadores y pasaron más de `warningMinutes` sin una respuesta. */
+  review: boolean;
+  warningMinutes: number;
+  /** null sin configuración vigente: no se conoce el horario de operadores. */
+  inOperatorHours: boolean | null;
+  /** ISO. Desde cuándo se cuentan las conversaciones atendidas por cuenta. */
+  since: string;
+  /** `since` es el inicio del turno de operadores de hoy; si no, el comienzo del día. */
+  sinceIsShift: boolean;
+  lookbackDays: number;
+  /** Por número de cuenta, sin ranking. */
+  accounts: Array<{ label: string; lastResponseAt: string; conversations: number }>;
+}
+
 export interface NowOwners {
   /** Todas las conversaciones abiertas. */
   open: number;
@@ -270,6 +291,8 @@ export interface NowPayload {
   };
   /** "Quién tiene cada caso": abiertas por cuenta asignada. null si no se pudo calcular. */
   owners: NowOwners | null;
+  /** Actividad observada. null si no se pudo calcular. */
+  observed: NowObserved | null;
   /** null si no se pudo calcular. */
   progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */

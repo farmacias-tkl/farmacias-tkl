@@ -5,7 +5,7 @@
  *   npx tsx src/lib/call-center/metrics/config.test.ts
  */
 import assert from "node:assert/strict";
-import { parseConfigData, hhmmToMinutes, isSystemAccount, type CallCenterMetricsConfigData } from "./config-schema";
+import { parseConfigData, hhmmToMinutes, isSystemAccount, lastResponseWarningMinutesOf, type CallCenterMetricsConfigData } from "./config-schema";
 import { configForDay, sortVersions, versionPeriodLabel, versionPeriods, type ConfigVersion } from "./config";
 
 let passed = 0;
@@ -245,6 +245,18 @@ test("etiquetas de cierre: \"no se pudo vender\" va en dos resultados; el result
   assert.equal(parseConfigData(cfg).ok, true);
   cfg.closureLabels = [{ label: "etiqueta_inventada_a", outcome: "NO_SE_PUDO_VENDER" as never }];
   assert.ok(errorsOf(cfg).length > 0);
+});
+
+test("aviso de última respuesta: opcional, 30 minutos por defecto, entero entre 1 y 1440", () => {
+  const cfg = base() as ReturnType<typeof base> & { lastResponseWarningMinutes?: number };
+  const parsed = parseConfigData(cfg);
+  assert.ok(parsed.ok);
+  if (parsed.ok) assert.equal(lastResponseWarningMinutesOf(parsed.data), 30);
+  cfg.lastResponseWarningMinutes = 45;
+  const con = parseConfigData(cfg);
+  assert.ok(con.ok);
+  if (con.ok) assert.equal(lastResponseWarningMinutesOf(con.data), 45);
+  for (const malo of [0, 1.5, 1441]) { cfg.lastResponseWarningMinutes = malo; assert.ok(errorsOf(cfg).length > 0, String(malo)); }
 });
 
 console.log(`\nmetrics/config: ${passed} ok, ${failures.length} fail`);

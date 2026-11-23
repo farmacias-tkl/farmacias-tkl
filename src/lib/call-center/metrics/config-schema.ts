@@ -173,6 +173,12 @@ export const callCenterMetricsConfigSchema = z
      * configuran (whatsapp-window.ts).
      */
     windowWarningHours: z.number().int().min(1).max(23).optional(),
+    /**
+     * Minutos sin una respuesta pública de un operador desde los que "Ahora" muestra el aviso
+     * "para revisar", si además hay pendientes y es horario de operadores. OPCIONAL, igual
+     * que criticalWaitMinutes: ausente vale DEFAULT_LAST_RESPONSE_WARNING_MINUTES.
+     */
+    lastResponseWarningMinutes: z.number().int().min(1).max(1440).optional(),
     accounts: z.array(accountSchema).max(100),
     callCenterVendors: z.array(vendorSchema).max(500),
     /**
@@ -246,6 +252,13 @@ export const DEFAULT_WINDOW_WARNING_HOURS = 4;
 
 export function windowWarningHoursOf(d: Pick<CallCenterMetricsConfigData, "windowWarningHours">): number {
   return d.windowWarningHours ?? DEFAULT_WINDOW_WARNING_HOURS;
+}
+
+/** Aviso de última respuesta de un operador cuando la versión no lo trae. */
+export const DEFAULT_LAST_RESPONSE_WARNING_MINUTES = 30;
+
+export function lastResponseWarningMinutesOf(d: Pick<CallCenterMetricsConfigData, "lastResponseWarningMinutes">): number {
+  return d.lastResponseWarningMinutes ?? DEFAULT_LAST_RESPONSE_WARNING_MINUTES;
 }
 
 export type ParseConfigResult =
