@@ -152,6 +152,8 @@ export interface NormalizedStatusEvent {
   externalAssigneeId?: string | null; // meta.assignee.id crudo; null = sin asignado
   closureTypeId?: string | null;      // closure_type_id → string
   closureTypeName?: string | null;    // closure_type_name (catálogo); NUNCA closure_comment
+  /** Etiquetas de la conversación, si el evento trae la clave `labels`; null u omitido = no la trae, no se tocan. */
+  labels?: string[] | null;
 }
 
 /**
@@ -174,6 +176,8 @@ export interface NormalizedUpdateEvent {
    * Opcional: los eventos guardados antes de este campo no lo traen.
    */
   eventAt?: Date | null;
+  /** Etiquetas de la conversación, si el evento trae la clave `labels`; null u omitido = no la trae, no se tocan. */
+  labels?: string[] | null;
 }
 
 // ── Resultados ────────────────────────────────────────────────────────────────────

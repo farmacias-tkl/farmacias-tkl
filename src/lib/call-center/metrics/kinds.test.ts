@@ -15,7 +15,7 @@ function test(name: string, fn: () => void) {
 const at = (s: string) => new Date(`${s}:00.000-03:00`);
 let n = 0;
 const row = (over: Partial<KindRow> = {}): KindRow => ({
-  conversationId: `k${++n}`, createdAt: at("2026-03-03T10:00"), claim: false, prescription: false, homeDelivery: false, pickup: false,
+  conversationId: `k${++n}`, createdAt: at("2026-03-03T10:00"), resolved: true, closureTypeName: null, labels: [], claim: false, prescription: false, homeDelivery: false, pickup: false,
   botOrderComplete: false, confirmed: false, saleLost: false, saleElsewhere: false, postponed: false, saleProbable: false, notALoss: false, boughtAtTkl: false, declined: false, followUp: false, hasHumanResponse: false,
   operatorInPersonOnly: false, operatorNoStock: false, operatorDerived: false, derivation: null, customerMedia: false, hasFreeText: true, onlyEmptyText: false,
   hasQuestionMark: false, services: false, price: false, stock: false, hours: false, coverage: false, paymentMethod: false, onlineStore: false, ...over,
@@ -138,6 +138,27 @@ test("informe: totales, subtipos, por día y por hora de Buenos Aires", () => {
   // Cada conversación cuenta una sola vez.
   assert.equal(Object.values(r.total).reduce((a, b) => a + b, 0), r.conversations);
   assert.ok(!/k\d+|phone|body/.test(JSON.stringify(r)), "solo conteos: sin ids ni datos del cliente");
+});
+
+test("confirmado por el operador: la etiqueta de cierre da el resultado, y se compara con lo detectado", () => {
+  const closureMap = new Map([["venta_concretada", "VENTA"], ["solo_consulta", "CONSULTA"], ["no_realizo_un_pedido", "PEDIDO_NO_CONCRETADO"], ["otra_inventada", "OTRO"]] as const);
+  const r = buildKindsReport([
+    row({ confirmed: true, closureTypeName: "venta_concretada" }),                       // venta y detectado pedido: coincide
+    row({ botOrderComplete: true, closureTypeName: "venta_concretada" }),                // venta y detectado sin confirmar: no coincide
+    row({ price: true, labels: ["a_mi_domicilio", "solo_consulta"] }),                   // sin resultado guardado: sale de las etiquetas
+    row({ saleLost: true, closureTypeName: "no_realizo_un_pedido" }),                    // coincide
+    row({ price: true, closureTypeName: "otra_inventada" }),                             // "otro" no se compara
+    row({ price: true, labels: ["a_mi_domicilio", "tkl_san_miguel", "dr_app"] }),        // etiquetas que no son de cierre
+    row({ price: true, resolved: false, closureTypeName: null, labels: ["solo_consulta"] }), // reabierta: el resultado no vale
+  ], { now: at("2026-03-05T12:00"), from: "2026-03-03", to: "2026-03-04", closureMap });
+  const o = r.operator!;
+  assert.deepEqual([o.confirmed, o.compared, o.agree], [5, 4, 3]);
+  assert.deepEqual([o.byOutcome.VENTA, o.byOutcome.CONSULTA, o.byOutcome.PEDIDO_NO_CONCRETADO, o.byOutcome.OTRO, o.byOutcome.SOLO_BOT], [2, 1, 1, 1, 0]);
+  assert.deepEqual([o.matrix.VENTA.PEDIDO, o.matrix.VENTA.PEDIDO_SIN_CONFIRMAR, o.matrix.CONSULTA.CONSULTA], [1, 1, 1]);
+  // La clasificación detectada no cambia por tener etiqueta de cierre.
+  assert.equal(r.total.CONSULTA, 4);
+  // Sin etiquetas de cierre en la configuración: sin dato, no cero.
+  assert.equal(buildKindsReport([row({ closureTypeName: "venta_concretada" })], { now: at("2026-03-05T12:00"), from: "2026-03-03", to: "2026-03-04" }).operator, null);
 });
 
 test("sin conversaciones: todo en cero", () => {

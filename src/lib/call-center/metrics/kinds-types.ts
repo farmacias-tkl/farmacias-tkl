@@ -52,6 +52,36 @@ export interface ConversationKind {
 
 export type KindCounts = Record<MainKind, number>;
 
+/** Resultado de cierre que eligió el operador al resolver (ver config-schema.ts). */
+export type ClosureOutcome = "VENTA" | "CONSULTA" | "PEDIDO_NO_CONCRETADO" | "NO_SE_PUDO_VENDER" | "SOLO_BOT" | "OTRO";
+export const CLOSURE_OUTCOME_LIST: readonly ClosureOutcome[] = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_SE_PUDO_VENDER", "SOLO_BOT", "OTRO"];
+
+/**
+ * Qué tipos detectados cuentan como coincidencia con cada resultado del operador. "OTRO" no
+ * se compara. Es una equivalencia aproximada: las dos clasificaciones no usan las mismas
+ * categorías, por eso se muestra también el cruce completo.
+ */
+export const OUTCOME_MATCHES: Record<ClosureOutcome, readonly MainKind[]> = {
+  VENTA: ["PEDIDO"],
+  CONSULTA: ["CONSULTA", "SEGUIMIENTO"],
+  PEDIDO_NO_CONCRETADO: ["VENTA_PERDIDA", "PEDIDO_SIN_CONFIRMAR", "COMPRO_TKL"],
+  NO_SE_PUDO_VENDER: ["NO_SE_PUDO_TOMAR"],
+  SOLO_BOT: ["SALUDO"],
+  OTRO: [],
+};
+
+/** Lo que confirmó el operador con la etiqueta de cierre, y cuánto coincide con lo detectado. */
+export interface OperatorConfirmed {
+  /** Conversaciones del período con etiqueta de cierre. */
+  confirmed: number;
+  byOutcome: Record<ClosureOutcome, number>;
+  /** Por resultado del operador, en qué tipo las clasificó Tipos. */
+  matrix: Record<ClosureOutcome, KindCounts>;
+  /** Conversaciones comparables (sin "otro") y cuántas coinciden según OUTCOME_MATCHES. */
+  compared: number;
+  agree: number;
+}
+
 export interface KindsPayload {
   generatedAt: string;
   from: string;
@@ -69,6 +99,8 @@ export interface KindsPayload {
   consults: Record<ConsultKind, number>;
   /** Consultas con al menos una respuesta pública de un operador. */
   consultsAnswered: number;
+  /** null si la configuración vigente no define etiquetas de cierre. */
+  operator: OperatorConfirmed | null;
   /** Por día de Buenos Aires de entrada, en orden. */
   byDay: Array<{ day: string } & KindCounts>;
   /** Por hora de Buenos Aires de entrada: 24 posiciones. */

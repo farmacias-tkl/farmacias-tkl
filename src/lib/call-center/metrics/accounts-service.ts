@@ -12,6 +12,25 @@ import { arDayISO } from "./business-time";
 import { configForDay, loadConfigVersions } from "./config";
 import { publicHours } from "./schedule";
 import { ACCOUNTS_CACHE_SECONDS, type AccountsPayload } from "./accounts-types";
+import { prisma } from "@/lib/prisma";
+import { closureMapOf, closureOutcomeOf } from "./closure-outcome";
+import type { ClosureOutcome } from "./config-schema";
+
+/** Resultado de cierre de cada conversación, por id. Solo lectura: estado, resultado guardado y etiquetas. */
+async function loadOutcomes(conversationIds: readonly string[], map: ReturnType<typeof closureMapOf>): Promise<Map<string, ClosureOutcome>> {
+  const out = new Map<string, ClosureOutcome>();
+  for (let i = 0; i < conversationIds.length; i += 5000) {
+    const rows = await prisma.conversation.findMany({
+      where: { id: { in: conversationIds.slice(i, i + 5000) }, status: "RESUELTA" },
+      select: { id: true, closureTypeName: true, externalLabels: true },
+    });
+    for (const r of rows) {
+      const o = closureOutcomeOf({ resolved: true, closureTypeName: r.closureTypeName, labels: r.externalLabels }, map);
+      if (o) out.set(r.id, o.outcome);
+    }
+  }
+  return out;
+}
 
 /** Tope de períodos guardados: al llenarse se descartan los vencidos y, si no alcanza, todos. */
 const CACHE_MAX_ENTRIES = 20;
@@ -29,7 +48,12 @@ export async function getAccountsPayload(from: string, to: string, now: Date = n
   ]);
   const pub = publicHours(versions);
   const facts = rows.map((r) => toEntryFact(r, now, versions, pub));
-  const report = buildAccountsReport({ messages, followups, facts }, { now, versions });
+  // Resultado de cierre confirmado por el operador, si la configuración vigente define etiquetas de cierre.
+  const closureMap = closureMapOf(configForDay(versions, arDayISO(now))?.data);
+  const outcomes = closureMap.size > 0
+    ? await loadOutcomes([...new Set(messages.map((m) => m.conversationId))], closureMap).catch(() => null)
+    : null;
+  const report = buildAccountsReport({ messages, followups, facts, outcomes }, { now, versions });
   const payload = JSON.parse(JSON.stringify({
     ...report,
     period: { from, to },

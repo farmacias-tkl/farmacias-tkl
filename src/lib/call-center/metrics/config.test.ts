@@ -221,5 +221,23 @@ test("horario de pedidos por sucursal: opcional, con retiro y envíos por separa
   assert.ok(errorsOf({ ...base(), branchOrderHours: [{ branchId: "branch-inventada-a", pickup: hours }] }).length > 0, "faltan los envíos");
 });
 
+test("etiquetas de cierre: opcionales, con un resultado de la lista; sin espacios ni repetidas", () => {
+  const cfg = { ...base(), closureLabels: [{ label: "venta_concretada", outcome: "VENTA" }, { label: "solo_consulta", outcome: "CONSULTA" }] };
+  assert.equal(parseConfigData(cfg).ok, true);
+  assert.equal(parseConfigData(base()).ok, true, "sin el campo sigue siendo válida");
+  assert.ok(errorsOf({ ...base(), closureLabels: [{ label: "venta_concretada", outcome: "INVENTADO" }] }).length > 0);
+  assert.ok(errorsOf({ ...base(), closureLabels: [{ label: "texto libre con espacios", outcome: "VENTA" }] }).length > 0);
+  cfg.closureLabels.push({ label: "solo_consulta", outcome: "OTRO" });
+  assert.ok(errorsOf(cfg).some((e) => e.startsWith("closureLabels")));
+});
+
+test("cuenta de supervisión: campo opcional; no puede ser de sistema a la vez", () => {
+  const cfg = base();
+  cfg.accounts[0] = { ...cfg.accounts[0], supervision: true } as never;
+  assert.equal(parseConfigData(cfg).ok, true);
+  cfg.accounts[0] = { ...cfg.accounts[0], supervision: true, system: true } as never;
+  assert.ok(errorsOf(cfg).length > 0);
+});
+
 console.log(`\nmetrics/config: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);
