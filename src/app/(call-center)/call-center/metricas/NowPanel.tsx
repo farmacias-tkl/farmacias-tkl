@@ -105,9 +105,28 @@ export default function NowPanel() {
 
   return (
     <section className="mt-4" aria-label="Ahora">
-      <p className="text-xs text-gray-600">
-        Actualizado a las {timeFmt.format(new Date(d.generatedAt))} · últimas {d.windowHours} horas{refreshing ? " · actualizando…" : ""}
-      </p>
+      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+        <p className="text-sm font-medium text-gray-900">
+          {!d.schedule ? "Sin configuración de horarios cargada"
+            : d.schedule.inPublicHours ? "Dentro del horario público"
+            : d.schedule.operatorShiftActive ? "Fuera del horario público · dentro del horario de operadores"
+            : "Fuera del horario público y del horario de operadores"}
+        </p>
+        <p className="mt-0.5 text-xs text-gray-600">
+          Pantalla calculada a las {timeFmt.format(new Date(d.generatedAt))}{refreshing ? " · actualizando…" : ""}
+          {" · "}último evento recibido: {d.quality.freshness.lastWebhookAt ? whenLabel(d.quality.freshness.lastWebhookAt, nowMs) : "sin dato"}
+        </p>
+        {d.quality.checks && d.quality.checks.events.error > 0 && (
+          <p role="status" className="mt-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs text-orange-900">
+            Hay {nf.format(d.quality.checks.events.error)} {d.quality.checks.events.error === 1 ? "evento" : "eventos"} de Emozion con error en los últimos {d.quality.checks.days} días:
+            los indicadores pueden estar incompletos. El detalle está en &quot;Calidad de datos&quot;.
+          </p>
+        )}
+        <More>
+          El horario público determina el cálculo de la meta. El horario de operadores indica cuándo está previsto que trabaje el equipo; no demuestra presencia.
+          La actividad observada son las respuestas que efectivamente se registraron. Que no lleguen eventos nuevos no prueba, por sí solo, una falla: puede no haber movimiento.
+        </More>
+      </div>
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
         <h2 className="text-sm font-semibold text-gray-800">Requiere acción</h2>
@@ -206,17 +225,23 @@ export default function NowPanel() {
           ) : (
             <p className="mt-1 text-sm text-gray-600">No disponible</p>
           )}
+          <More>
+            Son poblaciones distintas y no se restan entre sí. &quot;Nuevas de hoy&quot; son las conversaciones creadas hoy y, de esas, las que ya tienen una respuesta
+            pública de un operador. &quot;Respondidas hoy en total&quot; son todas las conversaciones con una respuesta pública de un operador hoy, también las que entraron
+            días anteriores. El total de pendientes de arriba es otra cosa: las abiertas cuyo último mensaje es del cliente, entren cuando entren. Ninguno cuenta las
+            respuestas del bot ni las notas internas.
+          </More>
           <Evidence level={d.today ? "MEDIDO" : "NO_DISPONIBLE"} />
         </div>
       </div>
 
-      <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
-
       <ProgressCard d={d} />
+
+      <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
 
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
         Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" && !ownerKey ? d.listTotal : shown.length)})` : ""}
-        <span className="ml-2 text-xs font-normal text-gray-600">primero los de ventana cerrada, después del que más espera al que menos</span>
+        <span className="ml-2 text-xs font-normal text-gray-600">ordenados por espera real: primero los de ventana cerrada, después del que más espera al que menos</span>
       </h2>
       {filter !== "all" && (
         <p className="mt-1 text-xs text-gray-700">
@@ -491,7 +516,7 @@ function ConversationLink({ id }: { id: string }) {
 /** Etiqueta del semáforo con el tiempo destacado, en una línea. Sin configuración no hay semáforo: solo la espera real. */
 function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["schedule"] }) {
   if (it.level === null) {
-    return <p className="text-base font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>;
+    return <p className="text-base font-semibold tabular-nums text-gray-900">Espera real: {formatWait(it.waitMinutes)}</p>;
   }
   const l = LEVELS[it.level];
   const paused = schedule !== null && !schedule.inPublicHours;
@@ -501,12 +526,11 @@ function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["sc
         <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
         {l.label}
       </span>
-      <span className="text-base font-semibold tabular-nums text-gray-900">
-        {it.businessMinutes === null || it.window === "CERRADA" ? `${formatWait(it.waitMinutes)} reales` : `${formatWait(it.businessMinutes)} hábiles`}
-      </span>
-      {paused && (
+      <span className="text-base font-semibold tabular-nums text-gray-900">Espera real: {formatWait(it.waitMinutes)}</span>
+      {it.businessMinutes !== null && (
         <span className="basis-full text-xs text-gray-700">
-          Fuera del horario público · reloj hábil pausado{schedule?.operatorShiftActive ? " · turno de operadores activo" : ""}
+          Tiempo hábil acumulado: {formatWait(it.businessMinutes)}
+          {paused ? ` · reloj pausado${schedule?.operatorShiftActive ? " · dentro del horario de operadores" : ""}` : ""}
         </span>
       )}
     </p>
@@ -552,9 +576,7 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <p className="mt-1"><span className="inline-block rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana vence en {windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}</span></p>
       )}
       <p className="mt-1 text-xs text-gray-700">
-        Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>
-        {" "}· espera real <span className="font-semibold text-gray-900">{formatWait(it.waitMinutes)}</span>
-        {it.businessMinutes !== null ? ` · ${formatWait(it.businessMinutes)} hábiles` : ""}
+        Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>, el primer mensaje que quedó sin responder
         {it.thanksCandidate ? " · puede ser solo un agradecimiento" : ""}
       </p>
       <p className="text-xs text-gray-600">
