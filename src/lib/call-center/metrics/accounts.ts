@@ -64,9 +64,10 @@ export interface AccountReportRow {
   borrowed: boolean;
   conversations: number;
   /**
-   * De esas conversaciones, cuántas tienen cada resultado de cierre confirmado por el operador
-   * (etiqueta de cierre). null si la configuración no define etiquetas de cierre. Una
-   * conversación en la que escribieron dos cuentas cuenta en las dos.
+   * Conversaciones que esta cuenta CERRÓ, por resultado de cierre confirmado por el operador
+   * (etiqueta de cierre): las que tenía asignadas al resolverse. Cada conversación cuenta una
+   * sola vez, en la cuenta asignada al resolver, aunque hayan escrito otras. null si la
+   * configuración no define etiquetas de cierre.
    */
   closures: Record<ClosureOutcome, number> | null;
   publicMessages: number;
@@ -102,6 +103,11 @@ export interface AccountsReport {
     followupsUnanswered: number;
     privateNotes: number;
   };
+  /**
+   * Cierres con resultado de conversaciones que se resolvieron sin cuenta asignada: no se
+   * atribuyen a nadie. null si la configuración no define etiquetas de cierre.
+   */
+  closuresWithoutAccount: Record<ClosureOutcome, number> | null;
   /** Cuentas configuradas como activas que no tuvieron mensajes en el período. */
   activeWithoutMessages: Array<{ account: string; alias: string | null; borrowed: boolean }>;
 }
@@ -123,12 +129,21 @@ interface Acc {
 
 const KEY_NULL = "\u0000sin-remitente";
 
+/** Resultado de cierre de una conversación y la cuenta que la tenía asignada al resolverse. */
+export interface ClosureAttribution {
+  outcome: ClosureOutcome;
+  account: string | null;
+}
+
 /** Informe por cuenta. PURO. `facts` son las conversaciones creadas en el período (attention.ts). */
 export function buildAccountsReport(
   input: {
     messages: readonly OperatorMessageRow[]; followups: readonly FollowupBlockRow[]; facts: readonly EntryFact[];
-    /** Resultado de cierre por conversación; null u omitido si la configuración no define etiquetas de cierre. */
-    outcomes?: ReadonlyMap<string, ClosureOutcome> | null;
+    /**
+     * Resultado de cierre por conversación y cuenta asignada al resolverla (null: se resolvió
+     * sin asignado). null u omitido si la configuración no define etiquetas de cierre.
+     */
+    outcomes?: ReadonlyMap<string, ClosureAttribution> | null;
   },
   opts: { now: Date; versions: readonly ConfigVersion[] },
 ): AccountsReport {
@@ -205,12 +220,29 @@ export function buildAccountsReport(
     get(b.account).followups.push(minutes);
   }
 
-  const closuresOf = (conversations: ReadonlySet<string>): Record<ClosureOutcome, number> | null => {
-    if (!input.outcomes) return null;
-    const out = Object.fromEntries(CLOSURE_OUTCOMES.map((o) => [o, 0])) as Record<ClosureOutcome, number>;
-    for (const id of conversations) { const o = input.outcomes.get(id); if (o) out[o]++; }
-    return out;
-  };
+  // Cuentas con actividad en el período, antes de sumar las que solo aparecen por un cierre.
+  const withActivity = new Set(byKey.keys());
+
+  // Cierres: cada conversación con mensajes de operador en el período cuenta UNA vez, en la
+  // cuenta que tenía asignada al resolverse. Sin asignado no se atribuye a nadie.
+  const zeroClosures = () => Object.fromEntries(CLOSURE_OUTCOMES.map((o) => [o, 0])) as Record<ClosureOutcome, number>;
+  const closuresByAccount = new Map<string, Record<ClosureOutcome, number>>();
+  const closuresWithoutAccount = input.outcomes ? zeroClosures() : null;
+  if (input.outcomes) {
+    const attended = new Set<string>();
+    for (const a of byKey.values()) for (const id of a.conversations) attended.add(id);
+    for (const id of attended) {
+      const c = input.outcomes.get(id);
+      if (!c) continue;
+      if (c.account === null) { closuresWithoutAccount![c.outcome]++; continue; }
+      get(c.account); // la cuenta que cerró aparece aunque no haya escrito en el período
+      const row = closuresByAccount.get(c.account) ?? zeroClosures();
+      row[c.outcome]++;
+      closuresByAccount.set(c.account, row);
+    }
+  }
+  const closuresOf = (account: string | null): Record<ClosureOutcome, number> | null =>
+    !input.outcomes ? null : (account !== null ? closuresByAccount.get(account) : undefined) ?? zeroClosures();
 
   const all: AccountReportRow[] = [...byKey.entries()].map(([key, a]) => {
     const account = key === KEY_NULL ? null : key;
@@ -221,7 +253,7 @@ export function buildAccountsReport(
       status: !cfg ? "SIN_CONFIGURAR" : cfg.historical || !cfg.active ? "HISTORICA" : "ACTIVA",
       borrowed: cfg?.borrowed ?? false,
       conversations: a.conversations.size,
-      closures: closuresOf(a.conversations),
+      closures: closuresOf(account),
       publicMessages: a.publicMessages,
       privateNotes: a.privateNotes,
       firstResponses: distribution(a.firstResponses),
@@ -243,7 +275,7 @@ export function buildAccountsReport(
   const systemAccounts = all.filter((a) => isSystem(a.account));
   const supervisionAccounts = all.filter((a) => isSupervision(a.account));
 
-  const seen = new Set(all.map((a) => a.account));
+  const seen = new Set([...withActivity].map((k) => (k === KEY_NULL ? null : k)));
   const activeWithoutMessages = [...configured.values()]
     .filter((c) => c.active && !c.historical && !isSystemAccount(c) && !isSupervisionAccount(c) && !seen.has(c.externalId))
     .map((c) => ({ account: c.externalId, alias: c.alias, borrowed: c.borrowed }));
@@ -261,6 +293,7 @@ export function buildAccountsReport(
       followupsUnanswered,
       privateNotes: teamNotes,
     },
+    closuresWithoutAccount,
     activeWithoutMessages,
   };
 }

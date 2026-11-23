@@ -14,19 +14,29 @@ import { publicHours } from "./schedule";
 import { ACCOUNTS_CACHE_SECONDS, type AccountsPayload } from "./accounts-types";
 import { prisma } from "@/lib/prisma";
 import { closureMapOf, closureOutcomeOf } from "./closure-outcome";
-import type { ClosureOutcome } from "./config-schema";
+import type { ClosureAttribution } from "./accounts";
 
-/** Resultado de cierre de cada conversación, por id. Solo lectura: estado, resultado guardado y etiquetas. */
-async function loadOutcomes(conversationIds: readonly string[], map: ReturnType<typeof closureMapOf>): Promise<Map<string, ClosureOutcome>> {
-  const out = new Map<string, ClosureOutcome>();
+/**
+ * Resultado de cierre de cada conversación resuelta y la cuenta que tenía asignada al
+ * resolverse (la de su última fila RESUELTA del historial). Solo lectura: estado, resultado
+ * guardado, etiquetas y asignado.
+ */
+async function loadOutcomes(conversationIds: readonly string[], map: ReturnType<typeof closureMapOf>): Promise<Map<string, ClosureAttribution>> {
+  const out = new Map<string, ClosureAttribution>();
   for (let i = 0; i < conversationIds.length; i += 5000) {
     const rows = await prisma.conversation.findMany({
       where: { id: { in: conversationIds.slice(i, i + 5000) }, status: "RESUELTA" },
-      select: { id: true, closureTypeName: true, externalLabels: true },
+      select: {
+        id: true, closureTypeName: true, externalLabels: true,
+        stateHistory: {
+          where: { toStatus: "RESUELTA" }, orderBy: [{ changedAt: "desc" }, { id: "desc" }], take: 1,
+          select: { externalAssigneeId: true },
+        },
+      },
     });
     for (const r of rows) {
       const o = closureOutcomeOf({ resolved: true, closureTypeName: r.closureTypeName, labels: r.externalLabels }, map);
-      if (o) out.set(r.id, o.outcome);
+      if (o) out.set(r.id, { outcome: o.outcome, account: r.stateHistory[0]?.externalAssigneeId ?? null });
     }
   }
   return out;
