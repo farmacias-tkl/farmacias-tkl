@@ -204,6 +204,66 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     needsConfig: false,
   },
   {
+    key: "queue.urgent_or_insisting",
+    block: "AHORA",
+    label: "Cliente urgente o insistiendo",
+    definition:
+      "Casos esperando en los que el cliente, en mensajes todavía sin respuesta de un operador, pide urgencia o " +
+      "avisa que se va (\"urgente\", \"si no me llaman\", \"otra farmacia\", \"hay alguien\", \"nadie responde\"): " +
+      "Urgente. O escribió 2 mensajes o más separados por más de 10 minutos después de completar el bot: " +
+      "Insistiendo. Dejan de mostrarse cuando un operador responde.",
+    source: "ConversationMessage (texto y hora)",
+    population: "AHORA",
+    denominator: null,
+    evidence: "DETECTADO",
+    limitations: [
+      "Urgente depende de palabras: puede marcar un mensaje que no es urgente y no ver uno escrito de otra forma.",
+      "Insistiendo solo mira los mensajes posteriores al recorrido completo del bot.",
+    ],
+    needsConfig: false,
+  },
+  {
+    key: "queue.whatsapp_window",
+    block: "AHORA",
+    label: "Ventana de WhatsApp",
+    definition:
+      "Regla de Meta: desde el último mensaje del cliente hay 24 horas de reloj para responder libremente; " +
+      "después, la conversación solo se reabre con una plantilla aprobada. \"Cerrada\" es que pasaron más de " +
+      "24 horas; \"por vencer\", que todavía se puede responder y falta menos que el aviso configurado " +
+      "(4 horas si no se cargó). Tiempo real: corre de noche, fines de semana y feriados. Es independiente " +
+      "del semáforo de la meta, que mide minutos hábiles.",
+    source: "ConversationMessage.sentAt del último mensaje del cliente",
+    population: "AHORA",
+    denominator: null,
+    evidence: "MEDIDO",
+    limitations: [
+      "Usa la hora del mensaje que informa Emozion. No se consulta a WhatsApp si la ventana sigue abierta.",
+      "Un mensaje del cliente que no llegó a la plataforma no reabre la ventana acá.",
+    ],
+    needsConfig: false,
+  },
+  {
+    key: "whatsapp_window.closed_unanswered",
+    block: "ATENCION",
+    label: "Ventana de WhatsApp cerrada sin respuesta",
+    definition:
+      "Conversaciones en las que pasaron más de 24 horas de reloj desde el último mensaje del cliente sin la " +
+      "primera respuesta de una persona, o en las que esa respuesta llegó después. Para retomarlas hace falta " +
+      "una plantilla aprobada: es una oportunidad perdida. En \"Atención y demoras\" cuenta las que entraron en " +
+      "el período; en Avances, las que se cerraron hoy contra el mismo día de la semana anterior a la misma hora.",
+    source: "ConversationMessage.sentAt",
+    population: "ENTRADA",
+    denominator: null,
+    evidence: "MEDIDO",
+    limitations: [
+      "Mira solo la primera respuesta: no cuenta las ventanas que se cierran más adelante en la conversación, " +
+        "porque ahí el último mensaje del cliente suele ser un agradecimiento.",
+      "No cuenta las conversaciones en las que el cliente solo saludó, agradeció o tocó botones del bot.",
+      "Las conversaciones de los últimos dos días pueden no haber llegado todavía a las 24 horas.",
+    ],
+    needsConfig: false,
+  },
+  {
     key: "queue.not_customers",
     block: "DATOS",
     label: "No son clientes",
@@ -297,7 +357,8 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     label: "Primera respuesta humana (tiempo hábil)",
     definition:
       "Igual que la anterior, contando solo los minutos dentro del horario público. Lo que entra fuera de " +
-      "horario empieza a contar al abrir; lo respondido antes de abrir cuenta 0.",
+      "horario empieza a contar al abrir. Lo respondido fuera del horario público, antes de que vuelva a abrir, " +
+      "no entra en la meta: se informa aparte como \"Respondidas fuera del horario público\", con su espera real.",
     source: "ConversationStateHistory, ConversationMessage, configuración",
     population: "ENTRADA",
     denominator: "Conversaciones respondidas; las pendientes se muestran al lado con su antigüedad",

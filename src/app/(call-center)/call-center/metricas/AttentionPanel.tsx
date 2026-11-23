@@ -129,19 +129,23 @@ function Headline({ total }: { total: Summary }) {
   const goal = total.goal;
   const median = total.firstResponseBusiness?.median ?? null;
   if (total.entries === 0) return null;
-  const offHours = total.noPublicHours.answered > 0 ? (
+  const offHours = total.outsidePublicHours.answered > 0 ? (
     <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
-      {nf.format(total.noPublicHours.answered)} {total.noPublicHours.answered === 1 ? "conversación salió" : "conversaciones salieron"} del bot en días sin horario
-      público (domingos y feriados) y se {total.noPublicHours.answered === 1 ? "respondió" : "respondieron"} ese mismo día. La meta pública no aplica:
-      no cuentan en el cumplimiento. La mitad esperó <span className="font-semibold">{formatMinutesOrMissing(total.noPublicHours.clock.median)}</span> de tiempo real.
+      <span className="font-semibold">Respondidas fuera del horario público: {nf.format(total.outsidePublicHours.answered)}.</span>{" "}
+      Salieron del bot con el horario público cerrado (noches, sábados a la tarde, domingos y feriados) y se respondieron antes de que volviera a abrir.
+      La meta pública no aplica: no cuentan en el cumplimiento. La mitad esperó <span className="font-semibold">{formatMinutesOrMissing(total.outsidePublicHours.clock.median)}</span> de tiempo real.
     </p>
   ) : null;
   if (!goal || goal.compliance === null) {
-    if (offHours) return offHours;
     return (
-      <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
-        No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
-      </p>
+      <>
+        {offHours ?? (
+          <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
+            No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
+          </p>
+        )}
+        <WindowClosedNote total={total} />
+      </>
     );
   }
   return (
@@ -152,7 +156,19 @@ function Headline({ total }: { total: Summary }) {
       {median !== null && <> Entre las respondidas, la mitad esperó <span className="font-semibold">{formatMinutes(median)} hábiles</span>.</>}
     </p>
     {offHours}
+    <WindowClosedNote total={total} />
     </>
+  );
+}
+
+/** Pérdida de oportunidad: ventanas de 24 horas de WhatsApp que se cerraron sin la primera respuesta. */
+function WindowClosedNote({ total }: { total: Summary }) {
+  return (
+    <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
+      <span className="font-semibold">Conversaciones cuya ventana se cerró sin respuesta: {nf.format(total.windowClosed)}</span> de {nf.format(total.entries)}.{" "}
+      Pasaron más de 24 horas desde el último mensaje del cliente sin la primera respuesta de una persona: para retomarlas hace falta una plantilla de WhatsApp.
+      <span className="mt-1 block text-[11px] text-gray-500">{EVIDENCE_LABELS.MEDIDO}</span>
+    </p>
   );
 }
 
@@ -399,7 +415,7 @@ function GoalGroups({ goal }: { goal: NonNullable<Summary["goal"]> }) {
         </tbody>
       </table>
       <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-600">
-        {nf.format(goal.thanksCandidatesOverdue)} de las vencidas son candidatos a agradecimiento · {nf.format(goal.answeredBeforeOpening)} se respondieron antes de abrir o sin consumir tiempo hábil
+        {nf.format(goal.thanksCandidatesOverdue)} de las vencidas son candidatos a agradecimiento
       </p>
     </div>
   );
@@ -503,8 +519,8 @@ function DaysTable({ data }: { data: AttentionPayload }) {
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.entries)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.answered)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.pending.total)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{d.goal ? formatRatio(d.goal.compliance) : d.noPublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseBusiness ? formatMinutesOrMissing(d.firstResponseBusiness.median) : d.noPublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{d.goal ? formatRatio(d.goal.compliance) : d.outsidePublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseBusiness ? formatMinutesOrMissing(d.firstResponseBusiness.median) : d.outsidePublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseClock.median !== null ? formatMinutes(d.firstResponseClock.median) : "Sin datos"}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">
                   {d.pendingAtClose ? `${nf.format(d.pendingAtClose.pending)} de ${nf.format(d.pendingAtClose.leftBotInHours)}` : "—"}

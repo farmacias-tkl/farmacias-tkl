@@ -20,11 +20,13 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
-  arDayISO, arHour, arDayStartUTC, classifyAgainstGoal, isWithinHours, utcTimestampParam,
+  arDayISO, arHour, arDayStartUTC, businessMinutesBetween, classifyAgainstGoal, isWithinHours, utcTimestampParam,
   type DayRanges, type GoalGroup,
 } from "./business-time";
 import { configForDay, type ConfigVersion } from "./config";
 import { publicHours } from "./schedule";
+import { windowClosedUnanswered } from "./whatsapp-window";
+import { BOT_BUTTONS, EMPTY_MESSAGE } from "./kinds-patterns";
 import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, isThanksCandidate } from "./patterns";
 import {
   BOT_ORDER_FLOW_LIKE, CUSTOMER_ORDER_OPTION, MEDUCAR_LINK_REGEX, MEDUCAR_PHRASE_REGEX,
@@ -43,6 +45,17 @@ export interface EntryRow {
   firstHumanAt: Date | null;
   /** Cuenta de Emozion que dio la primera respuesta. */
   firstHumanAccount: string | null;
+  /**
+   * Último mensaje del cliente anterior a la primera respuesta (o el último, si no hubo
+   * respuesta): desde acá corre la ventana de 24 horas de WhatsApp. Ausente o null: no se evalúa.
+   */
+  lastCustomerBeforeResponseAt?: Date | null;
+  /**
+   * Todo lo que escribió el cliente son saludos, agradecimientos o botones del bot, sin
+   * adjuntos (el mismo criterio de "Saludo / agradecimiento" de Tipos). No pedía una
+   * respuesta: no cuenta como ventana de WhatsApp cerrada sin respuesta.
+   */
+  customerOnlyGreeting?: boolean;
   orderFlow: boolean;
   firstCustomerMessageIsMeducar: boolean;
   customerChars: number;
@@ -66,15 +79,24 @@ export interface EntryFact extends EntryRow {
   fromFirstMessageMinutes: number | null;
   /** Minutos de reloj en el bot; null sin salida registrada. */
   botMinutes: number | null;
-  /** Meta: null si no había configuración vigente ese día, o si la meta no aplica (noPublicHoursSameDay). */
+  /** Meta: null si no había configuración vigente ese día, o si la meta no aplica (outsidePublicHours). */
   goal: { group: GoalGroup; businessMinutes: number; goalMinutes: number } | null;
   /**
-   * Salió del bot un día sin horario público (domingo o feriado) y se respondió ese mismo
-   * día. La meta pública no aplica: no cuenta como cumplida con cero minutos hábiles. Queda
-   * fuera del cumplimiento y de la mediana hábil, y se informa aparte con su espera real.
-   * Si ese día no se respondió, sigue en la meta y el reloj corre desde que abre el horario.
+   * Salió del bot fuera del horario público y recibió la primera respuesta antes de que el
+   * horario público volviera a abrir (un domingo, un feriado, un sábado a la tarde, una
+   * noche). La meta pública no aplica: no cuenta como cumplida con cero minutos hábiles.
+   * Queda fuera del cumplimiento y de la mediana hábil, y se informa aparte con su espera
+   * real. Si el horario público abre antes de la respuesta, sigue en la meta y el reloj
+   * corre desde la apertura.
    */
-  noPublicHoursSameDay: boolean;
+  outsidePublicHours: boolean;
+  /**
+   * La ventana de 24 horas de WhatsApp se cerró sin la primera respuesta: pasaron más de 24
+   * horas de reloj desde el último mensaje del cliente y nadie había respondido (o la primera
+   * respuesta llegó después). Para retomarla hizo falta una plantilla. No cuentan las
+   * conversaciones en las que el cliente solo saludó o agradeció.
+   */
+  windowClosed: boolean;
   answeredSameDay: boolean;
   enteredInPublicHours: boolean | null;
 }
@@ -112,8 +134,6 @@ export interface GoalSummary {
   complianceExcludingThanks: number | null;
   /** Candidatos a agradecimiento entre los pendientes vencidos. */
   thanksCandidatesOverdue: number;
-  /** Respondidas con 0 minutos hábiles (antes de abrir la atención). */
-  answeredBeforeOpening: number;
 }
 
 export interface PendingSummary {
@@ -149,10 +169,12 @@ export interface AttentionSummary {
   /** Conversaciones sin configuración vigente el día de entrada: quedan fuera de la meta. */
   withoutConfig: number;
   /**
-   * Respondidas el mismo día en que salieron del bot, cuando ese día no tenía horario público:
-   * la meta no aplica. Con su espera de reloj, que es la espera real del cliente.
+   * Respondidas fuera del horario público, sin que abriera entre la salida del bot y la
+   * respuesta: la meta no aplica. Con su espera de reloj, que es la espera real del cliente.
    */
-  noPublicHours: { answered: number; clock: Distribution };
+  outsidePublicHours: { answered: number; clock: Distribution };
+  /** Conversaciones cuya ventana de WhatsApp se cerró sin la primera respuesta. */
+  windowClosed: number;
 }
 
 export interface AttentionDay extends AttentionSummary {
@@ -185,7 +207,8 @@ export function toEntryFact(row: EntryRow, now: Date, versions: readonly ConfigV
   const clockDay = arDayISO(clockStart);
   const version = configForDay(versions, clockDay);
   const answered = row.firstHumanAt;
-  const noPublicHoursSameDay = version !== null && pub(clockDay).length === 0 && answered !== null && arDayISO(answered) === clockDay;
+  const outsidePublicHours = version !== null && answered !== null
+    && !isWithinHours(clockStart, pub) && businessMinutesBetween(clockStart, answered, pub) === 0;
   return {
     ...row,
     day,
@@ -206,8 +229,10 @@ export function toEntryFact(row: EntryRow, now: Date, versions: readonly ConfigV
       ? Math.max(0, (answered.getTime() - row.firstCustomerAt.getTime()) / MS_MIN)
       : null,
     botMinutes: row.botExitAt ? Math.max(0, (row.botExitAt.getTime() - row.createdAt.getTime()) / MS_MIN) : null,
-    noPublicHoursSameDay,
-    goal: version && !noPublicHoursSameDay
+    outsidePublicHours,
+    windowClosed: row.lastCustomerBeforeResponseAt && !row.customerOnlyGreeting
+      ? windowClosedUnanswered(row.lastCustomerBeforeResponseAt, answered, now) : false,
+    goal: version && !outsidePublicHours
       ? {
           ...classifyAgainstGoal(clockStart, answered, now, version.data.firstResponseGoalMinutes, pub),
           goalMinutes: version.data.firstResponseGoalMinutes,
@@ -234,13 +259,15 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
   let answered = 0;
   let withoutConfig = 0;
   const pending: PendingSummary = { total: 0, thanksCandidates: 0, completedOrders: 0, oldestClockStart: null, medianAgeMinutes: null };
-  const g = { answeredWithin: 0, answeredLate: 0, pendingOverdue: 0, pendingWithin: 0, thanksOverdue: 0, beforeOpening: 0, withGoal: 0 };
+  const g = { answeredWithin: 0, answeredLate: 0, pendingOverdue: 0, pendingWithin: 0, thanksOverdue: 0, withGoal: 0 };
   const goalMinutesSeen = new Set<number>();
   const unanswered = { total: 0, inHours: 0, inHoursKnown: 0, completedOrders: 0 };
   const late = { total: 0, answeredSameDay: 0 };
   const offHoursClock: number[] = [];
+  let windowClosed = 0;
 
   for (const f of facts) {
+    if (f.windowClosed) windowClosed++;
     byManagementType[f.managementType]++;
     byPath[f.botExitPath].conversations++;
     if (f.botMinutes !== null) botTimes[f.botExitPath].push(f.botMinutes);
@@ -262,11 +289,11 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
     if (f.goal) {
       g.withGoal++;
       goalMinutesSeen.add(f.goal.goalMinutes);
-      if (f.goal.group === "ANSWERED_WITHIN_GOAL") { g.answeredWithin++; if (f.goal.businessMinutes === 0) g.beforeOpening++; }
+      if (f.goal.group === "ANSWERED_WITHIN_GOAL") g.answeredWithin++;
       else if (f.goal.group === "ANSWERED_LATE") g.answeredLate++;
       else if (f.goal.group === "PENDING_OVERDUE") { g.pendingOverdue++; if (f.thanksCandidate) g.thanksOverdue++; }
       else g.pendingWithin++;
-    } else if (f.noPublicHoursSameDay) {
+    } else if (f.outsidePublicHours) {
       offHoursClock.push(f.clockMinutes!);
     } else {
       withoutConfig++;
@@ -305,7 +332,6 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
           compliance: ratio(g.answeredWithin, denominator),
           complianceExcludingThanks: ratio(g.answeredWithin, denominator - g.thanksOverdue),
           thanksCandidatesOverdue: g.thanksOverdue,
-          answeredBeforeOpening: g.beforeOpening,
         }
       : null,
     unansweredSameDay: {
@@ -315,7 +341,8 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
     },
     lateOrders: late,
     withoutConfig,
-    noPublicHours: { answered: offHoursClock.length, clock: distribution(offHoursClock) },
+    outsidePublicHours: { answered: offHoursClock.length, clock: distribution(offHoursClock) },
+    windowClosed,
   };
 }
 
@@ -364,7 +391,7 @@ export function buildAttentionReport(
     to: opts.to,
     total: summarize(facts, opts.now),
     days,
-    hasConfig: facts.some((f) => f.goal !== null || f.noPublicHoursSameDay),
+    hasConfig: facts.some((f) => f.goal !== null || f.outsidePublicHours),
   };
 }
 
@@ -376,11 +403,14 @@ interface RawEntryRow {
   botOrderCompleteAt: Date | null;
   firstHumanAt: Date | null;
   firstHumanAccount: string | null;
+  lastCustBeforeOp: Date | null;
   orderFlow: boolean | null;
   meducar: boolean | null;
   custChars: number | null;
   custMedia: boolean | null;
   custLink: boolean | null;
+  freeMessages: number | null;
+  emptyMessages: number | null;
   prevResolved: boolean;
 }
 
@@ -393,6 +423,8 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
   const from = arDayStartUTC(fromDay);
   const to = new Date(arDayStartUTC(toDayInclusive).getTime() + 24 * 60 * MS_MIN);
   const prevHours = `${THANKS_CANDIDATE.previousResolvedWithinHours} hours`;
+  // Texto libre del cliente: lo que escribió, sin los botones del bot.
+  const free = Prisma.sql`m.author = 'CUSTOMER' AND m.body IS NOT NULL AND m.body NOT IN (${Prisma.join([...BOT_BUTTONS])})`;
 
   const rows = await prisma.$queryRaw<RawEntryRow[]>(Prisma.sql`
     WITH scope AS (
@@ -408,7 +440,9 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
              OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})) AS order_flow,
         coalesce(sum(length(coalesce(m.body, ''))) FILTER (WHERE m.author = 'CUSTOMER'), 0)::int AS cust_chars,
         bool_or(m.author = 'CUSTOMER' AND (m.body IS NULL OR m."mediaType" IS NOT NULL)) AS cust_media,
-        bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link
+        bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link,
+        (count(*) FILTER (WHERE ${free}))::int AS free_n,
+        (count(*) FILTER (WHERE ${free} AND m.body ~* ${EMPTY_MESSAGE}))::int AS empty_n
       FROM "ConversationMessage" m
       JOIN scope s ON s.id = m."conversationId"
       GROUP BY 1
@@ -425,6 +459,9 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       (SELECT m."externalSenderId" FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'OPERATOR' AND NOT m."isPrivate"
         ORDER BY m."sentAt", m.id LIMIT 1) AS "firstHumanAccount",
+      (SELECT max(m."sentAt") FROM "ConversationMessage" m
+        WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
+          AND (a.first_op IS NULL OR m."sentAt" < a.first_op)) AS "lastCustBeforeOp",
       a.order_flow AS "orderFlow",
       (SELECT (m.author = 'CUSTOMER' AND m.body ~* ${MEDUCAR_LINK_REGEX} AND m.body ~* ${MEDUCAR_PHRASE_REGEX})
         FROM "ConversationMessage" m
@@ -433,6 +470,8 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       a.cust_chars AS "custChars",
       a.cust_media AS "custMedia",
       a.cust_link AS "custLink",
+      a.free_n AS "freeMessages",
+      a.empty_n AS "emptyMessages",
       EXISTS (
         SELECT 1 FROM "Conversation" p
         JOIN "ConversationStateHistory" h ON h."conversationId" = p.id AND h."toStatus" = 'RESUELTA'
@@ -451,11 +490,13 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
     botOrderCompleteAt: r.botOrderCompleteAt,
     firstHumanAt: r.firstHumanAt,
     firstHumanAccount: r.firstHumanAccount,
+    lastCustomerBeforeResponseAt: r.lastCustBeforeOp,
     orderFlow: r.orderFlow === true,
     firstCustomerMessageIsMeducar: r.meducar === true,
     customerChars: Number(r.custChars ?? 0),
     customerSentMedia: r.custMedia === true,
     customerSentLink: r.custLink === true,
+    customerOnlyGreeting: r.custMedia !== true && Number(r.freeMessages ?? 0) === Number(r.emptyMessages ?? 0),
     previousResolvedRecently: r.prevResolved,
   }));
 }

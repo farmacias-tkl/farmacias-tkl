@@ -94,15 +94,15 @@ test("meta: los cuatro grupos y el cumplimiento", () => {
   assert.equal(g.compliance, 1 / 3); // el pendiente en plazo todavía no entra en el denominador
 });
 
-test("meta: entró de noche; respondida a los 10 minutos de abrir cumple, antes de abrir cuenta 0", () => {
+test("meta: entró de noche; respondida a los 10 minutos de abrir cumple; la respondida antes de abrir queda fuera de la meta", () => {
   const r = report([
     row("2026-03-02T22:00", { answered: "2026-03-03T10:10" }),
     row("2026-03-02T22:00", { answered: "2026-03-03T08:30" }),
   ], "2026-03-03T12:00");
   const g = r.total.goal!;
-  assert.equal(g.answeredWithin, 2);
-  assert.equal(g.answeredBeforeOpening, 1);
-  assert.equal(r.total.firstResponseBusiness?.median, 5); // 10 y 0
+  assert.equal(g.answeredWithin, 1);
+  assert.equal(r.total.outsidePublicHours.answered, 1);
+  assert.equal(r.total.firstResponseBusiness?.median, 10);
   assert.ok((r.total.firstResponseClock.median ?? 0) > 600); // en reloj son más de 10 horas
 });
 
@@ -218,7 +218,7 @@ test("período sin conversaciones: ceros en los conteos y null en las medianas",
   assert.deepEqual(r.days, []);
 });
 
-// ── Días sin horario público ──────────────────────────────────────────────────────────
+// ── Respondidas fuera del horario público ──────────────────────────────────────────────────────────
 
 test("domingo: respondida el mismo día no cuenta como cumplida con cero minutos; se informa aparte con su espera real", () => {
   const r = report([row("2026-03-08T16:00", { answered: "2026-03-08T16:42" })], "2026-03-08T20:00");
@@ -226,7 +226,7 @@ test("domingo: respondida el mismo día no cuenta como cumplida con cero minutos
   assert.deepEqual([t.entries, t.answered], [1, 1]);
   assert.equal(t.goal, null, "sin conversaciones evaluables no hay cumplimiento, ni 100 %");
   assert.equal(t.firstResponseBusiness, null, "tampoco una mediana hábil de cero");
-  assert.deepEqual([t.noPublicHours.answered, t.noPublicHours.clock.median], [1, 40]);
+  assert.deepEqual([t.outsidePublicHours.answered, t.outsidePublicHours.clock.median], [1, 40]);
   assert.equal(t.withoutConfig, 0, "no es falta de configuración");
   assert.equal(r.hasConfig, true);
 });
@@ -235,7 +235,7 @@ test("domingo sin respuesta que sigue al lunes: entra en la meta y el reloj corr
   const rows = [row("2026-03-01T16:00"), row("2026-03-01T17:00", { answered: "2026-03-02T10:10" }), row("2026-03-01T18:00", { answered: "2026-03-02T11:00" })];
   // Lunes 10:30: el horario público abrió a las 10:00.
   const t = buildAttentionReport(rows, { now: at("2026-03-02T11:30"), from: "2026-03-01", to: "2026-03-02", versions }).total;
-  assert.equal(t.noPublicHours.answered, 0);
+  assert.equal(t.outsidePublicHours.answered, 0);
   assert.deepEqual([t.goal!.answeredWithin, t.goal!.answeredLate, t.goal!.pendingOverdue], [1, 1, 1]);
   // 10 y 60 minutos hábiles desde las 10:00 del lunes.
   assert.deepEqual([t.firstResponseBusiness!.n, t.firstResponseBusiness!.median], [2, 35]);
@@ -243,22 +243,51 @@ test("domingo sin respuesta que sigue al lunes: entra en la meta y el reloj corr
 
 test("domingo todavía sin respuesta, el mismo domingo: pendiente en plazo, no vencido ni cumplido", () => {
   const t = report([row("2026-03-08T16:00")], "2026-03-08T20:00").total;
-  assert.deepEqual([t.goal!.pendingWithin, t.goal!.pendingOverdue, t.goal!.compliance, t.noPublicHours.answered], [1, 0, null, 0]);
+  assert.deepEqual([t.goal!.pendingWithin, t.goal!.pendingOverdue, t.goal!.compliance, t.outsidePublicHours.answered], [1, 0, null, 0]);
 });
 
 test("feriado: igual que un domingo", () => {
   // 23/11/2026 es feriado y cae lunes: sin horario público aunque el horario semanal lo tenga.
   const rows = [row("2026-11-23T11:00", { answered: "2026-11-23T11:30" }), row("2026-11-24T11:00", { answered: "2026-11-24T11:05" })];
   const r = buildAttentionReport(rows, { now: at("2026-11-24T18:00"), from: "2026-11-23", to: "2026-11-24", versions });
-  assert.deepEqual([r.total.noPublicHours.answered, r.total.noPublicHours.clock.median], [1, 28]);
+  assert.deepEqual([r.total.outsidePublicHours.answered, r.total.outsidePublicHours.clock.median], [1, 28]);
   assert.deepEqual([r.total.goal!.answeredWithin, r.total.goal!.compliance], [1, 1]);
   const feriado = r.days.find((d) => d.day === "2026-11-23")!;
-  assert.deepEqual([feriado.goal, feriado.noPublicHours.answered], [null, 1]);
+  assert.deepEqual([feriado.goal, feriado.outsidePublicHours.answered], [null, 1]);
 });
 
-test("día hábil: responder antes de abrir sigue contando cero minutos dentro de la meta", () => {
-  const t = report([row("2026-03-03T08:00", { answered: "2026-03-03T08:30" })], "2026-03-03T12:00").total;
-  assert.deepEqual([t.goal!.answeredWithin, t.goal!.answeredBeforeOpening, t.noPublicHours.answered], [1, 1, 0]);
+test("sábado a la tarde: salió del bot después del cierre y se respondió esa tarde; fuera de la meta, con su espera real", () => {
+  // El sábado 07/03 el horario público de prueba cierra a las 12:00.
+  const t = report([row("2026-03-07T16:00", { answered: "2026-03-07T16:32" })], "2026-03-07T20:00").total;
+  assert.equal(t.goal, null, "no cuenta como cumplida con cero minutos");
+  assert.deepEqual([t.outsidePublicHours.answered, t.outsidePublicHours.clock.median, t.withoutConfig], [1, 30, 0]);
+});
+
+test("noche de día hábil respondida antes de abrir: fuera de la meta", () => {
+  const rows = [row("2026-03-03T20:00", { answered: "2026-03-03T20:45" }), row("2026-03-03T22:00", { answered: "2026-03-04T08:30" })];
+  const t = report(rows, "2026-03-04T12:00").total;
+  assert.equal(t.goal, null);
+  assert.deepEqual([t.outsidePublicHours.answered, t.firstResponseBusiness, t.answered], [2, null, 2]);
+});
+
+test("noche respondida después de abrir: sigue en la meta y el reloj corre desde la apertura", () => {
+  const rows = [row("2026-03-03T22:00", { answered: "2026-03-04T10:10" }), row("2026-03-03T22:00", { answered: "2026-03-04T11:00" })];
+  const t = report(rows, "2026-03-04T12:00").total;
+  assert.equal(t.outsidePublicHours.answered, 0);
+  assert.deepEqual([t.goal!.answeredWithin, t.goal!.answeredLate], [1, 1]);
+  // 10 y 60 minutos hábiles desde las 10:00, no las 12 horas de reloj.
+  assert.deepEqual([t.firstResponseBusiness!.n, t.firstResponseBusiness!.median], [2, 35]);
+});
+
+test("salió del bot dentro del horario público y se respondió después del cierre: sigue en la meta", () => {
+  // Sale 17:52 (creada 17:50), cierra 18:00, responde 18:30: 8 minutos hábiles.
+  const t = report([row("2026-03-03T17:50", { answered: "2026-03-03T18:30" })], "2026-03-03T20:00").total;
+  assert.deepEqual([t.goal!.answeredWithin, t.outsidePublicHours.answered, t.firstResponseBusiness!.median], [1, 0, 8]);
+});
+
+test("fuera del horario público y todavía sin respuesta: pendiente en plazo hasta que abra", () => {
+  const t = report([row("2026-03-07T16:00")], "2026-03-07T20:00").total;
+  assert.deepEqual([t.goal!.pendingWithin, t.goal!.pendingOverdue, t.outsidePublicHours.answered], [1, 0, 0]);
 });
 
 test("semana con domingo: el cumplimiento se calcula sin las respondidas del domingo", () => {
@@ -270,7 +299,35 @@ test("semana con domingo: el cumplimiento se calcula sin las respondidas del dom
   ];
   const t = report(rows, "2026-03-08T21:00").total;
   assert.equal(t.goal!.compliance, 0.5, "1 de 2, no 3 de 4");
-  assert.deepEqual([t.noPublicHours.answered, t.firstResponseBusiness!.n, t.answered], [2, 2, 4]);
+  assert.deepEqual([t.outsidePublicHours.answered, t.firstResponseBusiness!.n, t.answered], [2, 2, 4]);
+});
+
+// ── Ventana de WhatsApp ───────────────────────────────────────────────────────────────
+
+test("ventana de WhatsApp cerrada sin respuesta: 24 horas de reloj desde el último mensaje del cliente", () => {
+  const rows = [
+    // Sin respuesta y ya pasaron más de 24 horas.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-02T11:05") }),
+    // Respondida a las 26 horas: la ventana ya se había cerrado.
+    row("2026-03-02T11:00", { answered: "2026-03-03T13:10", lastCustomerBeforeResponseAt: at("2026-03-02T11:05") }),
+    // Respondida a las 23 horas: dentro de la ventana, aunque tarde para la meta.
+    row("2026-03-02T11:00", { answered: "2026-03-03T10:00", lastCustomerBeforeResponseAt: at("2026-03-02T11:05") }),
+    // El cliente insistió: la ventana corre desde su último mensaje, y todavía no pasaron 24 horas.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-03T15:00") }),
+    // Sin el dato no se evalúa.
+    row("2026-03-02T11:00"),
+    // El cliente solo saludó o agradeció: no pedía respuesta, no cuenta.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-02T11:05"), customerOnlyGreeting: true }),
+  ];
+  const r = report(rows, "2026-03-04T10:00");
+  assert.equal(r.total.windowClosed, 2);
+  assert.equal(r.days[0].windowClosed, 2);
+});
+
+test("ventana de WhatsApp: corre el fin de semana, cuando el reloj hábil está pausado", () => {
+  // Sábado 07/03 a las 20:00, sin respuesta. Domingo 08/03 a las 21:00: ventana cerrada, pero todavía en plazo para la meta.
+  const t = report([row("2026-03-07T20:00", { lastCustomerBeforeResponseAt: at("2026-03-07T20:00") })], "2026-03-08T21:00").total;
+  assert.deepEqual([t.windowClosed, t.goal!.pendingWithin, t.goal!.pendingOverdue], [1, 1, 0]);
 });
 
 console.log(`\nmetrics/attention: ${passed} ok, ${failures.length} fail`);

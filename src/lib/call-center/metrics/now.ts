@@ -19,7 +19,8 @@ import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered, isProbablyClosed, loadOpenBlockRows, type ClosedBlockRow } from "./closed-unanswered";
 import { loadDailyActivityRows } from "./activity";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
-import { criticalWaitMinutesOf, isSystemAccount, type ConfigAccount } from "./config-schema";
+import { DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, isSystemAccount, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
+import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
 import {
@@ -69,6 +70,7 @@ export function waitContext(versions: readonly ConfigVersion[], now: Date): Wait
     ops: operatorHours(versions),
     goalMinutes: current.data.firstResponseGoalMinutes,
     criticalMinutes: criticalWaitMinutesOf(current.data),
+    windowWarningHours: windowWarningHoursOf(current.data),
   };
 }
 
@@ -91,13 +93,17 @@ export function toNowPayload(
   const { history, today, closed, wait, accounts, openBlocks, progress, checks } = extras;
   const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
   // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
+  const now = snapshot.generatedAt;
+  // La ventana de WhatsApp corre en tiempo real desde el último mensaje del cliente.
+  const warningHours = wait?.windowWarningHours ?? DEFAULT_WINDOW_WARNING_HOURS;
+  const windowOf = (lastCustomerAt: Date) => windowState(lastCustomerAt, now, warningHours);
   const staleItems = stale.map((it) => {
     const b = blockById?.get(it.conversationId);
     const kind = !blockById ? null : b && isProbablyClosed(b) ? ("PROBABLE_CLOSE" as const) : ("PENDING" as const);
-    return { conversationId: it.conversationId, waitStart: it.waitStart.toISOString(), kind };
+    return { conversationId: it.conversationId, waitStart: it.waitStart.toISOString(), kind, windowClosed: windowOf(it.lastCustomerAt) === "CERRADA" };
   });
   const probableClose = blockById ? staleItems.filter((i) => i.kind === "PROBABLE_CLOSE").length : null;
-  const now = snapshot.generatedAt;
+  const closedItems = closed ? closed.items.map((it) => ({ ...it, windowClosed: windowOf(new Date(it.lastCustomerAt)) === "CERRADA" })) : null;
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
   const items = waiting.map((it) => ({
     conversationId: it.conversationId,
@@ -106,6 +112,9 @@ export function toNowPayload(
     createdAt: it.createdAt.toISOString(),
     waitStart: it.waitStart.toISOString(),
     waitMinutes: Math.round(it.waitHours * 60),
+    lastCustomerAt: it.lastCustomerAt.toISOString(),
+    window: windowOf(it.lastCustomerAt),
+    alert: it.urgent ? ("URGENTE" as const) : it.insisting ? ("INSISTIENDO" as const) : null,
     ...(wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null }),
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
@@ -123,6 +132,8 @@ export function toNowPayload(
       completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
       critical: wait ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
+      urgent: items.filter((it) => it.alert === "URGENTE").length,
+      insisting: items.filter((it) => it.alert === "INSISTIENDO").length,
     },
     today,
     list: items.slice(0, maxRows),
@@ -135,8 +146,16 @@ export function toNowPayload(
       items: staleItems.slice(0, maxRows),
     },
     closedUnanswered: closed
-      ? { days: closed.days, total: closed.total, question: closed.question, order: closed.order, attachment: closed.attachment, items: closed.items.slice(0, maxRows) }
+      ? { days: closed.days, total: closed.total, question: closed.question, order: closed.order, attachment: closed.attachment, items: closedItems!.slice(0, maxRows) }
       : null,
+    window: {
+      hours: WHATSAPP_WINDOW_HOURS,
+      warningHours,
+      closed: items.filter((it) => it.window === "CERRADA").length,
+      closing: items.filter((it) => it.window === "POR_VENCER").length,
+      staleClosed: staleItems.filter((it) => it.windowClosed).length,
+      closedUnansweredClosed: closedItems ? closedItems.filter((it) => it.windowClosed).length : null,
+    },
     progress,
     quality: {
       freshness: {

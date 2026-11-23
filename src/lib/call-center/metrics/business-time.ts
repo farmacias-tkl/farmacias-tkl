@@ -8,7 +8,8 @@
  * Reglas de la meta de primera respuesta (decisión de Dirección, 21/11/2026):
  *  - solo cuentan los minutos dentro del horario dado;
  *  - lo que entra fuera de horario empieza a contar cuando abre la atención;
- *  - lo respondido antes de abrir cuenta 0;
+ *  - lo respondido antes de abrir suma 0 minutos; attention.ts lo deja fuera de la meta y lo
+ *    informa aparte (decisión del 22/11/2026);
  *  - un feriado nacional no tiene horario: no suma minutos.
  */
 import { hhmmToMinutes, type TimeRange, type WeekSchedule, type IsoWeekday } from "./config-schema";

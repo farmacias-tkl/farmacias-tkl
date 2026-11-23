@@ -28,6 +28,8 @@ export interface WaitContext {
   goalMinutes: number;
   /** Desde cuántos minutos hábiles un caso es crítico. */
   criticalMinutes: number;
+  /** Horas antes del cierre de la ventana de WhatsApp desde las que un caso está "por vencer". */
+  windowWarningHours?: number;
 }
 
 /** PURO. */

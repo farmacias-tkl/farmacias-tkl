@@ -18,9 +18,9 @@ const NOW = new Date("2026-03-10T15:00:00.000Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
 const SINCE = hoursAgo(24 * 30);
 const row = (id: string, over: Partial<WaitingRow> = {}): WaitingRow => ({
-  conversationId: id, open: false, status: "RESUELTA", externalAssigneeId: null, createdAt: hoursAgo(5), waitStart: hoursAgo(5), hasHumanResponse: false,
+  conversationId: id, open: false, status: "RESUELTA", externalAssigneeId: null, createdAt: hoursAgo(5), waitStart: hoursAgo(5), lastCustomerAt: hoursAgo(5), hasHumanResponse: false,
   botExitAt: hoursAgo(4.9), botOrderComplete: false, customerChars: 200, customerSentMedia: false,
-  customerSentLink: false, previousResolvedRecently: false, ...over,
+  customerSentLink: false, previousResolvedRecently: false, urgent: false, insisting: false, ...over,
 });
 
 test("antigüedad: límites de 24 h, 72 h y 30 días", () => {

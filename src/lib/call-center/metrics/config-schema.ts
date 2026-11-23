@@ -111,6 +111,13 @@ export const callCenterMetricsConfigSchema = z
      * DEFAULT_CRITICAL_WAIT_MINUTES (criticalWaitMinutesOf).
      */
     criticalWaitMinutes: z.number().int().min(1).max(1440).optional(),
+    /**
+     * Horas antes del cierre de la ventana de WhatsApp desde las que un caso se marca "por
+     * vencer" en "Ahora". OPCIONAL, igual que criticalWaitMinutes: ausente vale
+     * DEFAULT_WINDOW_WARNING_HOURS. Las 24 horas de la ventana son una regla de Meta y no se
+     * configuran (whatsapp-window.ts).
+     */
+    windowWarningHours: z.number().int().min(1).max(23).optional(),
     accounts: z.array(accountSchema).max(100),
     callCenterVendors: z.array(vendorSchema).max(500),
   })
@@ -147,6 +154,13 @@ export const DEFAULT_CRITICAL_WAIT_MINUTES = 60;
  */
 export function criticalWaitMinutesOf(d: Pick<CallCenterMetricsConfigData, "firstResponseGoalMinutes" | "criticalWaitMinutes">): number {
   return Math.max(d.criticalWaitMinutes ?? DEFAULT_CRITICAL_WAIT_MINUTES, d.firstResponseGoalMinutes + 1);
+}
+
+/** Aviso de ventana por vencer cuando la versión no lo trae. */
+export const DEFAULT_WINDOW_WARNING_HOURS = 4;
+
+export function windowWarningHoursOf(d: Pick<CallCenterMetricsConfigData, "windowWarningHours">): number {
+  return d.windowWarningHours ?? DEFAULT_WINDOW_WARNING_HOURS;
 }
 
 export type ParseConfigResult =

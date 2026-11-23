@@ -6,7 +6,7 @@
  * Horario de prueba: operadores lunes a viernes 08–20; público lunes a viernes 09–19.
  */
 import assert from "node:assert/strict";
-import { buildShiftProgress, cutEntryRowsAt, progressSide, shiftStartOf, type ShiftRow } from "./progress";
+import { buildShiftProgress, cutEntryRowsAt, progressSide, shiftStartOf, type ShiftRow, countWindowClosures } from "./progress";
 import { isoWeekdayOf, type DayRanges } from "./business-time";
 import type { EntryRow } from "./attention";
 import type { ConfigVersion } from "./config";
@@ -107,6 +107,22 @@ test("sin entradas o sin configuración vigente: sin dato, no cero", () => {
   assert.deepEqual([vacio.entries, vacio.compliance, vacio.medianBusinessMinutes], [0, null, null]);
   const sinConfig = progressSide([entry("2026-03-03T10:00", "2026-03-03T10:05")], "2026-03-03", at("2026-03-03T12:00"), []);
   assert.deepEqual([sinConfig.entries, sinConfig.compliance, sinConfig.medianBusinessMinutes, sinConfig.hasPublicHours], [1, null, null, null]);
+});
+
+test("ventanas de WhatsApp cerradas sin respuesta: por el momento del cierre, dentro del tramo del día", () => {
+  const from = at("2026-03-10T00:00"), to = at("2026-03-10T15:00");
+  const rows = [
+    { lastCustomerAt: at("2026-03-09T10:00"), firstHumanAt: null, onlyGreeting: false },                      // cerró hoy 10:00, sin respuesta
+    { lastCustomerAt: at("2026-03-09T11:00"), firstHumanAt: at("2026-03-10T12:00"), onlyGreeting: false },    // cerró hoy 11:00; la respuesta llegó después
+    { lastCustomerAt: at("2026-03-09T11:00"), firstHumanAt: at("2026-03-10T09:00"), onlyGreeting: false },    // respondida antes del cierre
+    { lastCustomerAt: at("2026-03-09T16:00"), firstHumanAt: null, onlyGreeting: false },                      // cierra hoy 16:00: todavía no
+    { lastCustomerAt: at("2026-03-08T20:00"), firstHumanAt: null, onlyGreeting: false },                      // cerró ayer
+  ];
+  assert.equal(countWindowClosures(rows, from, to), 2);
+  assert.equal(countWindowClosures(rows, from, at("2026-03-10T16:30")), 3);
+  assert.equal(countWindowClosures([], from, to), 0);
+  // El que solo saludó o agradeció no cuenta.
+  assert.equal(countWindowClosures([{ lastCustomerAt: at("2026-03-09T10:00"), firstHumanAt: null, onlyGreeting: true }], from, to), 0);
 });
 
 console.log(`\nmetrics/progress: ${passed} ok, ${failures.length} fail`);

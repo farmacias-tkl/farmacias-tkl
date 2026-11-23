@@ -23,7 +23,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { utcTimestampParam } from "./business-time";
 import type { AgeBucket, QueueGroupCounts } from "./queue-types";
-import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, isThanksCandidate } from "./patterns";
+import { BOT_ORDER_COMPLETE_LIKE, INSISTING, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, URGENT_CUSTOMER_REGEX, isThanksCandidate } from "./patterns";
 
 const MS_HOUR = 3_600_000;
 
@@ -42,6 +42,8 @@ export interface WaitingRow {
   createdAt: Date;
   /** Primer mensaje del cliente del bloque sin responder: desde cuándo espera. */
   waitStart: Date;
+  /** Último mensaje del cliente: desde acá corre la ventana de 24 horas de WhatsApp. */
+  lastCustomerAt: Date;
   /** Ya tuvo al menos un mensaje público de operador (espera la SIGUIENTE respuesta). */
   hasHumanResponse: boolean;
   /** Salida del bot (aproximación a la derivación); null si no está registrada. */
@@ -51,6 +53,10 @@ export interface WaitingRow {
   customerSentMedia: boolean;
   customerSentLink: boolean;
   previousResolvedRecently: boolean;
+  /** Algún mensaje del bloque sin responder pide urgencia o avisa que se va (URGENT_CUSTOMER_REGEX). */
+  urgent: boolean;
+  /** En el bloque sin responder, después del bot: 2 mensajes o más separados por más de 10 minutos. */
+  insisting: boolean;
 }
 
 export interface QueueItem extends WaitingRow {
@@ -131,6 +137,7 @@ interface RawWaitingRow {
   assignee: string | null;
   createdAt: Date;
   waitStart: Date;
+  lastCustomerAt: Date;
   hasHuman: boolean;
   botExitAt: Date | null;
   done: boolean | null;
@@ -138,6 +145,8 @@ interface RawWaitingRow {
   custMedia: boolean | null;
   custLink: boolean | null;
   prevResolved: boolean;
+  urgent: boolean | null;
+  insisting: boolean | null;
 }
 
 /**
@@ -158,7 +167,8 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
         coalesce(sum(length(coalesce(m.body, ''))) FILTER (WHERE m.author = 'CUSTOMER'), 0)::int AS cust_chars,
         bool_or(m.author = 'CUSTOMER' AND (m.body IS NULL OR m."mediaType" IS NOT NULL)) AS cust_media,
         bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link,
-        bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done
+        bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done,
+        min(m."sentAt") FILTER (WHERE m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done_at
       FROM "ConversationMessage" m
       JOIN scope s ON s.id = m."conversationId"
       GROUP BY 1
@@ -166,12 +176,20 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     SELECT
       s.id,
       (s.status <> 'RESUELTA') AS "open",
+      EXISTS (SELECT 1 FROM "ConversationMessage" m
+        WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER' AND (a.last_op IS NULL OR m."sentAt" > a.last_op)
+          AND m.body ~* ${URGENT_CUSTOMER_REGEX}) AS "urgent",
+      (SELECT count(*) >= ${INSISTING.minMessages} AND max(m."sentAt") - min(m."sentAt") > ${`${INSISTING.minMinutesApart} minutes`}::interval
+        FROM "ConversationMessage" m
+        WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER' AND (a.last_op IS NULL OR m."sentAt" > a.last_op)
+          AND a.done_at IS NOT NULL AND m."sentAt" > a.done_at) AS "insisting",
       s.status::text AS "status",
       s."externalAssigneeId" AS "assignee",
       s."createdAt" AS "createdAt",
       (SELECT min(m."sentAt") FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
           AND (a.last_op IS NULL OR m."sentAt" > a.last_op)) AS "waitStart",
+      a.last_cust AS "lastCustomerAt",
       (a.last_op IS NOT NULL) AS "hasHuman",
       (SELECT min(h."changedAt") FROM "ConversationStateHistory" h
         WHERE h."conversationId" = s.id AND h."fromStatus" = 'PENDIENTE'
@@ -198,6 +216,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     externalAssigneeId: r.assignee,
     createdAt: r.createdAt,
     waitStart: r.waitStart,
+    lastCustomerAt: r.lastCustomerAt,
     hasHumanResponse: r.hasHuman,
     botExitAt: r.botExitAt,
     botOrderComplete: r.done === true,
@@ -205,6 +224,8 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     customerSentMedia: r.custMedia === true,
     customerSentLink: r.custLink === true,
     previousResolvedRecently: r.prevResolved,
+    urgent: r.urgent === true,
+    insisting: r.insisting === true,
   }));
 }
 

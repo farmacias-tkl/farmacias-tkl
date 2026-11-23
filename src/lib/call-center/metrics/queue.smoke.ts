@@ -61,7 +61,7 @@ async function main() {
     ] });
     // Abierta, nunca respondida, con pedido completo en el bot.
     ids.abiertaPedido = await conv(prisma, "abierta-pedido", { phone: "+5491100000002", status: "SIN_ASIGNAR", createdH: 3, botExitH: 2.9, msgs: [
-      { author: "CUSTOMER", h: 3, body: LONG }, { author: "BOT", h: 2.9, body: "✅ ¡Listo! Mensaje final inventado." }, { author: "CUSTOMER", h: 2.5, body: "sigo acá" },
+      { author: "CUSTOMER", h: 3, body: LONG }, { author: "BOT", h: 2.9, body: "✅ ¡Listo! Mensaje final inventado." }, { author: "CUSTOMER", h: 2.5, body: "sigo acá" }, { author: "CUSTOMER", h: 1, body: "es urgente, hay alguien" },
     ] });
     // Abierta, respondida, el cliente volvió a escribir dos veces: espera desde el PRIMER mensaje del bloque.
     ids.abiertaSiguiente = await conv(prisma, "abierta-siguiente", { phone: "+5491100000003", status: "ASIGNADA", createdH: 10, botExitH: 9.9, msgs: [
@@ -118,11 +118,18 @@ async function main() {
       assert.equal(r.hasHumanResponse, false);
       assert.equal(r.waitStart.getTime(), hoursAgo(3).getTime());
       assert.equal(r.botExitAt?.getTime(), hoursAgo(2.9).getTime());
+      // Pide urgencia, y escribió dos veces después del bot con más de 10 minutos de diferencia, sin respuesta.
+      assert.deepEqual([r.urgent, r.insisting], [true, true]);
+      assert.equal(r.lastCustomerAt.getTime(), hoursAgo(1).getTime());
     });
     await check("esperando la siguiente respuesta: la espera arranca en el primer mensaje del bloque", () => {
       const r = byId.get(ids.abiertaSiguiente)!;
       assert.equal(r.hasHumanResponse, true);
       assert.equal(r.waitStart.getTime(), hoursAgo(6).getTime());
+      // Dos mensajes separados por una hora, pero sin recorrido del bot completo: no cuenta como insistencia.
+      assert.deepEqual([r.urgent, r.insisting], [false, false]);
+      // La ventana de WhatsApp corre desde el ÚLTIMO mensaje del cliente, no desde el inicio del bloque.
+      assert.equal(r.lastCustomerAt.getTime(), hoursAgo(5).getTime());
     });
     await check("agradecimiento corto tras un cierre: candidato; con foto: no", () => {
       const g = snap.items.find((i) => i.conversationId === ids.gracias)!;

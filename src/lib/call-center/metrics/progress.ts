@@ -6,12 +6,17 @@
  *    horario de operadores de hoy, estaban abiertas, con el último mensaje público del
  *    cliente y hasta 72 horas de espera (la misma ventana de "Ahora"). El estado a esa hora
  *    se reconstruye con el historial de cambios de estado.
- *  - Atrasados atendidos durante el turno: de ese grupo, los que recibieron una respuesta
+ *  - Pendientes atendidas durante el turno: de ese grupo, los que recibieron una respuesta
  *    pública de un operador desde que empezó el turno.
  *  - Primera respuesta: lo que entró hoy, hasta ahora, contra el mismo día de la semana
  *    anterior cortado a la misma hora. El corte se simula: de la semana anterior solo
  *    cuentan las conversaciones creadas antes de esa hora y las respuestas dadas antes de
  *    esa hora.
+ *
+ *  - Ventanas de WhatsApp cerradas sin respuesta: conversaciones cuya ventana de 24 horas se
+ *    cerró HOY (hasta ahora) sin la primera respuesta de una persona, contra las que se
+ *    cerraron el mismo día de la semana anterior hasta la misma hora. Cuenta por el momento
+ *    del cierre, no por la fecha de entrada: lo que entra hoy todavía no puede haberse cerrado.
  *
  * Antes del primer turno del día (o un día sin turno, o sin configuración) no hay dato de
  * turno: null, nunca cero.
@@ -31,6 +36,8 @@ import { publicHours } from "./schedule";
 import { addDaysISO } from "./period";
 import { QUEUE_LIST_DEFAULT_HOURS } from "./patterns";
 import type { NowProgress, ProgressSide } from "./now-types";
+import { windowClosesAt } from "./whatsapp-window";
+import { BOT_BUTTONS, EMPTY_MESSAGE } from "./kinds-patterns";
 
 const MS_MIN = 60_000;
 const MS_HOUR = 3_600_000;
@@ -81,6 +88,8 @@ export function cutEntryRowsAt(rows: readonly EntryRow[], cutoff: Date): EntryRo
       botOrderCompleteAt: r.botOrderCompleteAt && r.botOrderCompleteAt.getTime() <= t ? r.botOrderCompleteAt : null,
       firstHumanAt: r.firstHumanAt && r.firstHumanAt.getTime() <= t ? r.firstHumanAt : null,
       firstHumanAccount: r.firstHumanAt && r.firstHumanAt.getTime() <= t ? r.firstHumanAccount : null,
+      // Un mensaje del cliente posterior al corte todavía no existía: sin el dato no se evalúa la ventana.
+      lastCustomerBeforeResponseAt: r.lastCustomerBeforeResponseAt && r.lastCustomerBeforeResponseAt.getTime() <= t ? r.lastCustomerBeforeResponseAt : null,
     }));
 }
 
@@ -133,6 +142,62 @@ export async function loadShiftRows(shiftStart: Date): Promise<ShiftRow[]> {
   `);
 }
 
+/** Una conversación vista en el instante de corte: último mensaje del cliente sin primera respuesta previa, y esa respuesta si ya existía. */
+export interface WindowRow {
+  lastCustomerAt: Date;
+  firstHumanAt: Date | null;
+  /** El cliente solo saludó, agradeció o tocó botones (sin adjuntos): no cuenta. */
+  onlyGreeting: boolean;
+}
+
+/**
+ * Ventanas de WhatsApp que se cerraron sin la primera respuesta dentro de [from, to). PURO.
+ * Una respuesta posterior al cierre no la salva: para darla ya hizo falta una plantilla.
+ */
+export function countWindowClosures(rows: readonly WindowRow[], from: Date, to: Date): number {
+  return rows.filter((r) => {
+    const closes = windowClosesAt(r.lastCustomerAt).getTime();
+    return !r.onlyGreeting && closes >= from.getTime() && closes < to.getTime() && (r.firstHumanAt === null || r.firstHumanAt.getTime() > closes);
+  }).length;
+}
+
+/**
+ * Filas para countWindowClosures, vistas en el instante `to`: solo cuentan los mensajes
+ * anteriores a `to`. Trae únicamente las conversaciones cuya ventana cierra en [from, to).
+ * Solo lectura; sin ids, teléfono, nombre ni texto.
+ */
+export async function loadWindowRows(from: Date, to: Date): Promise<WindowRow[]> {
+  const t = utcTimestampParam(to);
+  const scopeFrom = utcTimestampParam(new Date(from.getTime() - SCOPE_DAYS * MS_DAY));
+  const lcFrom = utcTimestampParam(new Date(from.getTime() - MS_DAY));
+  const lcTo = utcTimestampParam(new Date(to.getTime() - MS_DAY));
+  const cust = Prisma.sql`m.author = 'CUSTOMER' AND m."sentAt" < ${t}::timestamp`;
+  const free = Prisma.sql`${cust} AND m.body IS NOT NULL AND m.body NOT IN (${Prisma.join([...BOT_BUTTONS])})`;
+  return prisma.$queryRaw<WindowRow[]>(Prisma.sql`
+    WITH scope AS (
+      SELECT c.id FROM "Conversation" c
+      WHERE c."createdAt" >= ${scopeFrom}::timestamp AND c."createdAt" < ${t}::timestamp
+    ), agg AS (
+      SELECT m."conversationId" AS cid,
+        min(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate" AND m."sentAt" < ${t}::timestamp) AS first_op,
+        (NOT coalesce(bool_or(${cust} AND (m.body IS NULL OR m."mediaType" IS NOT NULL)), false)
+          AND count(*) FILTER (WHERE ${free}) = count(*) FILTER (WHERE ${free} AND m.body ~* ${EMPTY_MESSAGE})) AS only_greeting
+      FROM "ConversationMessage" m
+      JOIN scope s ON s.id = m."conversationId"
+      GROUP BY 1
+    ), lc AS (
+      SELECT a.first_op, a.only_greeting,
+        (SELECT max(m."sentAt") FROM "ConversationMessage" m
+          WHERE m."conversationId" = a.cid AND m.author = 'CUSTOMER' AND m."sentAt" < ${t}::timestamp
+            AND (a.first_op IS NULL OR m."sentAt" < a.first_op)) AS last_cust
+      FROM agg a
+    )
+    SELECT last_cust AS "lastCustomerAt", first_op AS "firstHumanAt", only_greeting AS "onlyGreeting"
+    FROM lc
+    WHERE last_cust >= ${lcFrom}::timestamp AND last_cust < ${lcTo}::timestamp
+  `);
+}
+
 /** Avances al momento `now`. `ops` es el horario de operadores; null sin configuración vigente. */
 export async function loadProgress(now: Date, versions: readonly ConfigVersion[], ops: DayRanges | null): Promise<NowProgress> {
   const today = arDayISO(now);
@@ -140,10 +205,15 @@ export async function loadProgress(now: Date, versions: readonly ConfigVersion[]
   const previousAt = new Date(now.getTime() - 7 * MS_DAY);
   const shiftStart = ops ? shiftStartOf(now, ops) : null;
 
-  const [shiftRows, todayRows, previousRows] = await Promise.all([
+  const todayStart = arDayStartUTC(today);
+  const previousStart = arDayStartUTC(previousDay);
+  const [shiftRows, todayRows, previousRows, windowToday, windowPrevious] = await Promise.all([
     shiftStart ? loadShiftRows(shiftStart) : Promise.resolve(null),
     loadEntryRows(today, today),
     loadEntryRows(previousDay, previousDay),
+    // Si falla, el resto de Avances se muestra igual: null, no cero.
+    loadWindowRows(todayStart, now).catch(() => null),
+    loadWindowRows(previousStart, previousAt).catch(() => null),
   ]);
 
   return {
@@ -152,5 +222,8 @@ export async function loadProgress(now: Date, versions: readonly ConfigVersion[]
       today: progressSide(todayRows, today, now, versions),
       previous: progressSide(previousRows, previousDay, previousAt, versions),
     },
+    windowClosed: windowToday && windowPrevious
+      ? { today: countWindowClosures(windowToday, todayStart, now), previous: countWindowClosures(windowPrevious, previousStart, previousAt) }
+      : null,
   };
 }

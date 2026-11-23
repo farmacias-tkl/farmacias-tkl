@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, ISO_WEEKDAYS, criticalWaitMinutesOf, parseConfigData,
+  CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, ISO_WEEKDAYS, criticalWaitMinutesOf, parseConfigData, windowWarningHoursOf,
   type CallCenterMetricsConfigData, type ConfigAccount, type IsoWeekday,
 } from "@/lib/call-center/metrics/config-schema";
 import {
@@ -36,6 +36,7 @@ export default function ConfigForm({
   const [operatorText, setOperatorText] = useState<ScheduleText>(base ? scheduleToText(base.data.operatorHours) : emptyScheduleText());
   const [goal, setGoal] = useState(String(base?.data.firstResponseGoalMinutes ?? ""));
   const [critical, setCritical] = useState(String(base ? criticalWaitMinutesOf(base.data) : DEFAULT_CRITICAL_WAIT_MINUTES));
+  const [windowWarning, setWindowWarning] = useState(String(base ? windowWarningHoursOf(base.data) : DEFAULT_WINDOW_WARNING_HOURS));
   const [accounts, setAccounts] = useState<ConfigAccount[]>(() => initialAccounts(base?.data ?? null, options.accounts));
   const [newAccount, setNewAccount] = useState("");
   const [vendors, setVendors] = useState<Set<string>>(
@@ -87,6 +88,8 @@ export default function ConfigForm({
     if (!/^\d+$/.test(goal.trim()) || goalNumber < 1) problems.push("La meta tiene que ser un número entero de minutos, mayor que cero.");
     const criticalNumber = Number(critical);
     if (!/^\d+$/.test(critical.trim()) || criticalNumber <= goalNumber) problems.push("La demora crítica tiene que ser un número entero de minutos, mayor que la meta.");
+    const warningNumber = Number(windowWarning);
+    if (!/^\d+$/.test(windowWarning.trim()) || warningNumber < 1 || warningNumber > 23) problems.push("El aviso de ventana por vencer tiene que ser un número entero de horas, entre 1 y 23.");
     if (problems.length > 0 || !pub.ok || !ops.ok) { setErrors(problems); return; }
 
     const data: CallCenterMetricsConfigData = {
@@ -95,6 +98,7 @@ export default function ConfigForm({
       operatorHours: ops.schedule,
       firstResponseGoalMinutes: goalNumber,
       criticalWaitMinutes: criticalNumber,
+      windowWarningHours: warningNumber,
       // system se guarda siempre explícito, aunque la versión base no lo tuviera.
       accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
       callCenterVendors: [...vendors].map((k) => {
@@ -188,6 +192,15 @@ export default function ConfigForm({
         <div className="mt-2 flex items-center gap-2">
           <input id="critical" inputMode="numeric" value={critical} onChange={(e) => setCritical(e.target.value)} className={`w-24 ${input}`} />
           <span className="text-sm text-gray-600">minutos</span>
+        </div>
+        <label htmlFor="windowWarning" className="mt-4 block text-sm font-semibold text-gray-800">Aviso de ventana de WhatsApp por vencer</label>
+        <p className="text-xs text-gray-500">
+          Horas antes del cierre de la ventana desde las que un caso se marca &quot;por vencer&quot; en &quot;Ahora&quot;. La ventana de 24 horas desde el último mensaje del
+          cliente es una regla de WhatsApp y no se configura.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <input id="windowWarning" inputMode="numeric" value={windowWarning} onChange={(e) => setWindowWarning(e.target.value)} className={`w-24 ${input}`} />
+          <span className="text-sm text-gray-600">horas</span>
         </div>
       </section>
 
