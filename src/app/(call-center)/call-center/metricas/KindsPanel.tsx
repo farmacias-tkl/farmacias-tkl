@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import {
-  CONSULT_KINDS, ORDER_KINDS,
-  type ConsultKind, type KindCounts, type KindsPayload, type MainKind, type OrderKind,
+  CONSULT_KINDS, NO_TAKE_KINDS, ORDER_KINDS,
+  type ConsultKind, type KindCounts, type KindsPayload, type MainKind, type NoTakeKind, type OrderKind,
 } from "@/lib/call-center/metrics/kinds-types";
 import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
 import { formatShortDay } from "@/lib/call-center/metrics/format";
@@ -13,9 +13,10 @@ import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
 const nf = new Intl.NumberFormat("es-AR");
 const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires" });
 
-const ORDER_LABELS: Record<OrderKind, string> = { DOMICILIO: "A domicilio", RETIRO: "Retiro en sucursal", MEDUCAR: "Receta de Meducar", SIN_MODALIDAD: "Sin modalidad" };
+const ORDER_LABELS: Record<OrderKind, string> = { DOMICILIO: "A domicilio", RETIRO: "Retiro en sucursal", RECETA: "Receta digital", SIN_MODALIDAD: "Sin modalidad" };
+const NO_TAKE_LABELS: Record<NoTakeKind, string> = { SIN_STOCK: "Sin stock o falta del laboratorio", DERIVADO_PRESENCIAL: "Derivado a compra presencial" };
 const CONSULT_LABELS: Record<ConsultKind, string> = {
-  PRECIO: "Precio", STOCK: "Stock o disponibilidad", HORARIOS: "Horarios y sucursales", COBERTURA: "Obra social o cobertura",
+  SERVICIOS: "Vacunas y servicios", PRECIO: "Precio", STOCK: "Stock o disponibilidad", HORARIOS: "Horarios y sucursales", COBERTURA: "Obra social o cobertura",
   PAGO: "Modalidad de pago", TIENDA_ONLINE: "Tienda online", OTRAS: "Otras",
 };
 
@@ -29,7 +30,8 @@ const BANDS: Array<{ label: string; hours: number[] }> = [
 /** Los tres tipos que se comparan entre sí. El resto va aparte. */
 const COMPARED: MainKind[] = ["RECLAMO", "PEDIDO", "CONSULTA"];
 const SHORT: Record<MainKind, string> = {
-  RECLAMO: "Reclamos", PEDIDO: "Pedidos", CONSULTA: "Consultas", PEDIDO_SIN_CONFIRMAR: "Sin confirmar", SIN_CONTENIDO: "Sin contenido", SIN_CLASIFICAR: "Sin clasificar",
+  RECLAMO: "Reclamos", PEDIDO: "Pedidos", CONSULTA: "Consultas", VENTA_PERDIDA: "Venta perdida", NO_SE_PUDO_TOMAR: "No se pudo tomar",
+  PEDIDO_SIN_CONFIRMAR: "Sin confirmar", SALUDO: "Saludo", SIN_MOTIVO: "Sin motivo claro",
 };
 
 type State =
@@ -80,8 +82,9 @@ export default function KindsPanel({ today }: { today: string }) {
 
 function Report({ data }: { data: KindsPayload }) {
   const t = data.total;
-  // Los porcentajes no cuentan las conversaciones sin contenido.
-  const base = data.conversations - t.SIN_CONTENIDO;
+  // Los porcentajes no cuentan los saludos y agradecimientos solos.
+  const base = data.conversations - t.SALUDO;
+  const notCompleted = t.VENTA_PERDIDA + t.NO_SE_PUDO_TOMAR + t.PEDIDO_SIN_CONFIRMAR;
   const sum = (counts: KindCounts[]) => (k: MainKind) => counts.reduce((n, c) => n + c[k], 0);
 
   if (data.conversations === 0) {
@@ -100,21 +103,32 @@ function Report({ data }: { data: KindsPayload }) {
         <Stat label="Reclamos" value={t.RECLAMO} share={pct(t.RECLAMO, base)} />
       </div>
       <p className="mt-1 text-xs text-gray-700">
-        Porcentajes sobre {nf.format(base)} conversaciones con contenido. Si una conversación es reclamo y pedido a la vez, cuenta como reclamo.
+        Porcentajes sobre {nf.format(base)} conversaciones, sin los saludos y agradecimientos solos. Cada conversación tiene un solo tipo: si es reclamo y pedido a la vez, cuenta como reclamo.
       </p>
 
-      <Box title="Aparte">
-        <Line label="Pedido sin confirmar" value={`${nf.format(t.PEDIDO_SIN_CONFIRMAR)} · ${pct(t.PEDIDO_SIN_CONFIRMAR, base)}`}
-          note="Completó el recorrido del bot, pero no hay pago ni coordinación de retiro o envío. No suma como pedido." />
-        <Line label="Sin clasificar" value={`${nf.format(t.SIN_CLASIFICAR)} · ${pct(t.SIN_CLASIFICAR, base)}`} note="Ninguna regla alcanzó. Sirve para revisar el criterio." />
-        <Line label="Sin contenido o agradecimiento" value={nf.format(t.SIN_CONTENIDO)} note="Solo saludos, agradecimientos o botones. No entra en los porcentajes." />
+      <Box title={`Pedidos no concretados (${nf.format(notCompleted)} · ${pct(notCompleted, base)})`} note="El cliente quería pedir y la venta no quedó confirmada. No suman como pedidos.">
+        <Line label="Venta perdida" value={`${nf.format(t.VENTA_PERDIDA)} · ${pct(t.VENTA_PERDIDA, base)}`}
+          note="El cliente dice que ya lo compró, que ya fue a la farmacia o que cancela." />
+        <Line label="No se pudo tomar" value={`${nf.format(t.NO_SE_PUDO_TOMAR)} · ${pct(t.NO_SE_PUDO_TOMAR, base)}`} />
+        {NO_TAKE_KINDS.map((k) => (
+          <Line key={k} label={`· ${NO_TAKE_LABELS[k]}`} value={nf.format(data.noTake[k])}
+            note={k === "DERIVADO_PRESENCIAL" ? "El operador avisa que no hay personal de pedidos, o que desde esa sucursal no se hacen envíos ni retiros." : undefined} />
+        ))}
+        <Line label="El cliente no respondió o quedó en volver" value={`${nf.format(t.PEDIDO_SIN_CONFIRMAR)} · ${pct(t.PEDIDO_SIN_CONFIRMAR, base)}`}
+          note="Completó el recorrido del bot y la conversación terminó sin confirmación, sin aviso de falta y sin que diga que compró en otro lado." />
       </Box>
 
-      <Box title={`Pedidos (${nf.format(t.PEDIDO)})`} note={<>Es pedido si hay evidencia de pago o de coordinación, o si es una receta de Meducar. Elegir &quot;Pedir medicamentos&quot; en el bot no alcanza.</>}>
+      <Box title="Aparte">
+        <Line label="Sin motivo claro" value={`${nf.format(t.SIN_MOTIVO)} · ${pct(t.SIN_MOTIVO, base)}`}
+          note="No hay evidencia de qué quería el cliente. Que un operador haya respondido no alcanza para contarla como consulta." />
+        <Line label="Saludo / agradecimiento" value={nf.format(t.SALUDO)} note="Solo saludos, agradecimientos o botones. No entra en los porcentajes." />
+      </Box>
+
+      <Box title={`Pedidos (${nf.format(t.PEDIDO)})`} note={<>Es pedido si el operador lo confirma (número de control, aviso de retiro, salida del envío), si hay evidencia de pago o si el cliente mandó una receta digital para pedir. Elegir &quot;Pedir medicamentos&quot; en el bot no alcanza, y que el operador informe un precio tampoco.</>}>
         {ORDER_KINDS.map((k) => <Line key={k} label={ORDER_LABELS[k]} value={`${nf.format(data.orders[k])} · ${pct(data.orders[k], t.PEDIDO)}`} />)}
       </Box>
 
-      <Box title={`Consultas (${nf.format(t.CONSULTA)})`} note="El subtipo sale de las palabras del cliente. Un adjunto sin otra evidencia cuenta como consulta.">
+      <Box title={`Consultas (${nf.format(t.CONSULTA)})`} note="Necesita un tema reconocible, una pregunta o un adjunto. El subtipo sale de las palabras del cliente.">
         {CONSULT_KINDS.map((k) => <Line key={k} label={CONSULT_LABELS[k]} value={`${nf.format(data.consults[k])} · ${pct(data.consults[k], t.CONSULTA)}`} />)}
       </Box>
 
