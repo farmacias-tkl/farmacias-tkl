@@ -102,6 +102,19 @@ const vendorSchema = z
 
 export type ConfigVendor = z.infer<typeof vendorSchema>;
 
+const branchOrderHoursSchema = z
+  .object({
+    /** Branch.id. */
+    branchId: z.string().trim().min(1).max(64),
+    /** Horario en que la sucursal toma pedidos para retirar. */
+    pickup: weekScheduleSchema,
+    /** Horario en que la sucursal toma pedidos con envío. Va aparte aunque hoy coincida con el de retiro. */
+    delivery: weekScheduleSchema,
+  })
+  .strict();
+
+export type ConfigBranchOrderHours = z.infer<typeof branchOrderHoursSchema>;
+
 export const callCenterMetricsConfigSchema = z
   .object({
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
@@ -127,6 +140,13 @@ export const callCenterMetricsConfigSchema = z
     windowWarningHours: z.number().int().min(1).max(23).optional(),
     accounts: z.array(accountSchema).max(100),
     callCenterVendors: z.array(vendorSchema).max(500),
+    /**
+     * Horario de pedidos por sucursal, para distinguir una derivación a compra presencial
+     * correcta (fuera de ese horario) de una posible venta perdida (dentro). OPCIONAL: las
+     * versiones guardadas antes de este campo no lo traen; una sucursal sin horario cargado no
+     * se marca dentro ni fuera de horario.
+     */
+    branchOrderHours: z.array(branchOrderHoursSchema).max(100).optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {
@@ -139,6 +159,13 @@ export const callCenterMetricsConfigSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accounts"], message: `Cuenta repetida: ${a.externalId}` });
       }
       ids.add(a.externalId);
+    }
+    const orderBranches = new Set<string>();
+    for (const b of cfg.branchOrderHours ?? []) {
+      if (orderBranches.has(b.branchId)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["branchOrderHours"], message: "Sucursal repetida en el horario de pedidos" });
+      }
+      orderBranches.add(b.branchId);
     }
     const vendors = new Set<string>();
     for (const v of cfg.callCenterVendors) {

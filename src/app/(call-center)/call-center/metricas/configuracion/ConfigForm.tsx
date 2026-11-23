@@ -28,7 +28,7 @@ export default function ConfigForm({
 }: {
   today: string;
   base: { validFrom: string; data: CallCenterMetricsConfigData } | null;
-  options: { accounts: KnownAccount[]; vendors: KnownVendor[] };
+  options: { accounts: KnownAccount[]; vendors: KnownVendor[]; branches: Array<{ id: string; name: string }> };
 }) {
   const router = useRouter();
   const [validFrom, setValidFrom] = useState(today);
@@ -46,6 +46,12 @@ export default function ConfigForm({
   const [vendorAccounts, setVendorAccounts] = useState<Record<string, string>>(
     () => Object.fromEntries((base?.data.callCenterVendors ?? []).flatMap((v) => (v.accountId ? [[vendorKey(v.branchId, v.code), v.accountId]] : []))),
   );
+  // Horario de pedidos por sucursal: retiro y envíos, cada uno con su texto por día.
+  const [orderHours, setOrderHours] = useState<Array<{ branchId: string; pickup: ScheduleText; delivery: ScheduleText }>>(
+    () => (base?.data.branchOrderHours ?? []).map((b) => ({ branchId: b.branchId, pickup: scheduleToText(b.pickup), delivery: scheduleToText(b.delivery) })),
+  );
+  const [newOrderBranch, setNewOrderBranch] = useState("");
+  const branchName = (id: string) => options.branches.find((b) => b.id === id)?.name ?? "Sucursal que ya no existe";
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -92,6 +98,14 @@ export default function ConfigForm({
     if (!/^\d+$/.test(goal.trim()) || goalNumber < 1) problems.push("La meta tiene que ser un número entero de minutos, mayor que cero.");
     const criticalNumber = Number(critical);
     if (!/^\d+$/.test(critical.trim()) || criticalNumber <= goalNumber) problems.push("La demora crítica tiene que ser un número entero de minutos, mayor que la meta.");
+    const branchOrderHours: NonNullable<CallCenterMetricsConfigData["branchOrderHours"]> = [];
+    for (const b of orderHours) {
+      const pickup = textToSchedule(b.pickup);
+      const delivery = textToSchedule(b.delivery);
+      if (!pickup.ok) for (const [d, msg] of Object.entries(pickup.errors)) problems.push(`Pedidos para retirar, ${branchName(b.branchId)}, ${WEEKDAY_LABELS[d as IsoWeekday]}: ${msg}`);
+      if (!delivery.ok) for (const [d, msg] of Object.entries(delivery.errors)) problems.push(`Pedidos con envío, ${branchName(b.branchId)}, ${WEEKDAY_LABELS[d as IsoWeekday]}: ${msg}`);
+      if (pickup.ok && delivery.ok) branchOrderHours.push({ branchId: b.branchId, pickup: pickup.schedule, delivery: delivery.schedule });
+    }
     const warningNumber = Number(windowWarning);
     if (!/^\d+$/.test(windowWarning.trim()) || warningNumber < 1 || warningNumber > 23) problems.push("El aviso de ventana por vencer tiene que ser un número entero de horas, entre 1 y 23.");
     if (problems.length > 0 || !pub.ok || !ops.ok) { setErrors(problems); return; }
@@ -103,6 +117,8 @@ export default function ConfigForm({
       firstResponseGoalMinutes: goalNumber,
       criticalWaitMinutes: criticalNumber,
       windowWarningHours: warningNumber,
+      // Sin sucursales cargadas el campo no se guarda, como en las versiones anteriores.
+      ...(branchOrderHours.length > 0 ? { branchOrderHours } : {}),
       // system se guarda siempre explícito, aunque la versión base no lo tuviera.
       accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
       callCenterVendors: [...vendors].map((k) => {
@@ -286,6 +302,56 @@ export default function ConfigForm({
           <button type="button" onClick={addAccount} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
             Agregar cuenta
           </button>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-gray-800">Horario de pedidos por sucursal</h2>
+        <p className="text-xs text-gray-500">
+          Horario en que cada sucursal toma pedidos por WhatsApp, para retirar y con envío. Sirve para distinguir una derivación a compra presencial correcta
+          (fuera de ese horario) de una posible venta perdida (dentro). Los feriados no tienen horario. Una sucursal sin horario cargado no se marca dentro ni fuera.
+          Mismo formato que arriba: 09:30-18:00, y vacío si ese día no toma pedidos.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <select aria-label="Sucursal para cargar su horario de pedidos" value={newOrderBranch} onChange={(e) => setNewOrderBranch(e.target.value)} className={`w-56 max-w-full ${input}`}>
+            <option value="">Elegí una sucursal</option>
+            {options.branches.filter((b) => !orderHours.some((o) => o.branchId === b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          <button type="button" disabled={!newOrderBranch}
+            onClick={() => { setOrderHours((list) => [...list, { branchId: newOrderBranch, pickup: emptyScheduleText(), delivery: emptyScheduleText() }]); setNewOrderBranch(""); }}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-800 disabled:opacity-50">Agregar sucursal</button>
+        </div>
+        <div className="mt-3 space-y-3">
+          {orderHours.map((b, i) => (
+            <div key={b.branchId} className="rounded-lg border border-gray-200 bg-white p-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-gray-800">{branchName(b.branchId)}</h3>
+                <button type="button" onClick={() => setOrderHours((list) => list.filter((_, j) => j !== i))} className="text-xs font-medium text-red-700 underline">Quitar</button>
+              </div>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs text-gray-500">
+                    <tr><th className="py-1 pr-3 font-medium">Día</th><th className="py-1 pr-3 font-medium">Pedidos para retirar</th><th className="py-1 font-medium">Pedidos con envío</th></tr>
+                  </thead>
+                  <tbody>
+                    {ISO_WEEKDAYS.map((d) => (
+                      <tr key={d}>
+                        <td className="py-1 pr-3 text-gray-700">{WEEKDAY_LABELS[d]}</td>
+                        {(["pickup", "delivery"] as const).map((kind) => (
+                          <td key={kind} className="py-1 pr-3">
+                            <input aria-label={`${kind === "pickup" ? "Pedidos para retirar" : "Pedidos con envío"}, ${branchName(b.branchId)}, ${WEEKDAY_LABELS[d]}`}
+                              value={b[kind][d]} placeholder="No toma pedidos"
+                              onChange={(e) => setOrderHours((list) => list.map((x, j) => (j === i ? { ...x, [kind]: { ...x[kind], [d]: e.target.value } } : x)))}
+                              className={`w-full min-w-[11rem] font-mono ${input}`} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 

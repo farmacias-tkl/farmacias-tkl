@@ -35,6 +35,12 @@ export async function saveConfigVersion(
   const data: CallCenterMetricsConfigData = parsed.data;
   const validFrom = input.validFrom;
 
+  const orderBranchIds = [...new Set((data.branchOrderHours ?? []).map((b) => b.branchId))];
+  if (orderBranchIds.length > 0) {
+    const found = await prisma.branch.count({ where: { id: { in: orderBranchIds } } });
+    if (found !== orderBranchIds.length) return { ok: false, status: 400, errors: ["branchOrderHours: hay una sucursal que no existe"] };
+  }
+
   const branchIds = [...new Set(data.callCenterVendors.map((v) => v.branchId))];
   if (branchIds.length > 0) {
     const found = await prisma.branch.count({ where: { id: { in: branchIds } } });
@@ -125,7 +131,8 @@ export const VENDOR_LOOKBACK_DAYS = 90;
  * como asignadas, y los vendedores con ventas en los últimos VENDOR_LOOKBACK_DAYS días, por
  * sucursal. Solo lectura.
  */
-export async function loadConfigOptions(prisma: PrismaClient): Promise<{ accounts: KnownAccount[]; vendors: KnownVendor[] }> {
+export async function loadConfigOptions(prisma: PrismaClient): Promise<{ accounts: KnownAccount[]; vendors: KnownVendor[]; branches: Array<{ id: string; name: string }> }> {
+  const branches = await prisma.branch.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
   // Asignadas: el valor actual de cada conversación y el de cada cambio de estado.
   const assignees = await prisma.$queryRaw<AssigneeAccountRow[]>(Prisma.sql`
     SELECT x.id AS "externalId", to_char(max(x.t) - interval '3 hours', 'YYYY-MM-DD') AS "lastAssignedDay"
@@ -165,5 +172,5 @@ export async function loadConfigOptions(prisma: PrismaClient): Promise<{ account
     ORDER BY b.name, (array_agg(v->>'nombre' ORDER BY s."snapshotDate" DESC))[1]
   `);
 
-  return { accounts, vendors };
+  return { accounts, vendors, branches };
 }

@@ -41,10 +41,11 @@ import { arDayISO, arDayStartUTC, arHour, utcTimestampParam } from "./business-t
 import { BOT_ORDER_COMPLETE_LIKE } from "./patterns";
 import { claimsOf, loadDetectedRows } from "./detected";
 import { branchNamesRegex } from "./detected-patterns";
+import { getDerivations, type DerivationTiming } from "./derivation";
 import {
   BOT_BUTTONS, BUTTON_HOME, BUTTON_PICKUP,
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
-  BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_CANCELLED, OPERATOR_POSTPONED, OPERATOR_WAITING, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_DERIVED, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
+  BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_CANCELLED, OPERATOR_POSTPONED, OPERATOR_WAITING, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
 } from "./kinds-patterns";
 import {
@@ -93,6 +94,8 @@ export interface KindRow {
   operatorNoStock: boolean;
   /** El operador lo derivó a comprar en la sucursal. */
   operatorDerived: boolean;
+  /** Si lo derivó: dentro o fuera del horario de pedidos de la sucursal. null si no hubo derivación. */
+  derivation: DerivationTiming | null;
   customerMedia: boolean;
   /** El cliente escribió algo que no es un botón del bot. */
   hasFreeText: boolean;
@@ -134,7 +137,7 @@ export function classifyKind(r: Flags): ConversationKind {
   // Quería pedir: completó el recorrido del bot o mandó una receta para pedir.
   const orderIntent = r.botOrderComplete || r.prescription;
   if (orderIntent && r.operatorInPersonOnly) return { main: "NO_SE_PUDO_TOMAR", sub: "DERIVADO_MEDICAMENTO" };
-  if (orderIntent && r.operatorDerived) return { main: "NO_SE_PUDO_TOMAR", sub: "DERIVADO_PRESENCIAL" };
+  if (orderIntent && r.operatorDerived) return { main: "NO_SE_PUDO_TOMAR", sub: r.derivation === "EN_HORARIO" ? "DERIVADO_EN_HORARIO" : "DERIVADO_PRESENCIAL" };
   if (orderIntent && r.operatorNoStock) return { main: "NO_SE_PUDO_TOMAR", sub: "SIN_STOCK" };
   if (r.prescription && !r.declined) return { main: "PEDIDO", sub: "RECETA" };
   // Un tema escrito por el cliente. Los botones del bot sin texto no alcanzan.
@@ -163,6 +166,7 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
   const lost = Object.fromEntries(LOST_KINDS.map((k) => [k, 0])) as Record<LostKind, number>;
   const noTake = Object.fromEntries(NO_TAKE_KINDS.map((k) => [k, 0])) as Record<NoTakeKind, number>;
   let consultsAnswered = 0;
+  let derivedWithoutBranch = 0;
   const consults = Object.fromEntries(CONSULT_KINDS.map((k) => [k, 0])) as Record<ConsultKind, number>;
   const byDay = new Map<string, KindCounts>();
   const byHour = Array.from({ length: 24 }, zeroCounts);
@@ -173,6 +177,7 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
     if (kind.main === "PEDIDO") orders[kind.sub as OrderKind]++;
     if (kind.main === "VENTA_PERDIDA") lost[kind.sub as LostKind]++;
     if (kind.main === "NO_SE_PUDO_TOMAR") noTake[kind.sub as NoTakeKind]++;
+    if (kind.sub === "DERIVADO_PRESENCIAL" && r.derivation === "SIN_SUCURSAL") derivedWithoutBranch++;
     if (kind.main === "CONSULTA") { consults[kind.sub as ConsultKind]++; if (r.hasHumanResponse) consultsAnswered++; }
     const day = arDayISO(r.createdAt);
     const d = byDay.get(day) ?? zeroCounts();
@@ -191,6 +196,7 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
     orders,
     lost,
     noTake,
+    derivedWithoutBranch,
     consults,
     consultsAnswered,
     byDay: [...byDay.keys()].sort().map((day) => ({ day, ...byDay.get(day)! })),
@@ -198,7 +204,7 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
   };
 }
 
-type RawKindRow = Omit<KindRow, "claim" | "hasFreeText" | "onlyEmptyText"> & { freeMessages: number; emptyMessages: number };
+type RawKindRow = Omit<KindRow, "claim" | "hasFreeText" | "onlyEmptyText" | "operatorDerived" | "derivation"> & { freeMessages: number; emptyMessages: number };
 
 /** Conversaciones creadas entre dos días de Buenos Aires, inclusive, con sus marcas. Solo lectura. */
 export async function loadKindRows(fromDay: string, toDayInclusive: string): Promise<KindRow[]> {
@@ -221,7 +227,7 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const branchRegex = branchNamesRegex(branches.map((b) => b.name));
   const tkl = branchRegex ? `${BOUGHT_AT_TKL}|\\m(${branchRegex})\\M` : BOUGHT_AT_TKL;
 
-  const [rows, detected] = await Promise.all([
+  const [rows, detected, derivations] = await Promise.all([
     prisma.$queryRaw<RawKindRow[]>(Prisma.sql`
       SELECT c.id AS "conversationId", c."createdAt" AS "createdAt",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_ORDER}`)} AS "prescription",
@@ -242,7 +248,6 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
         ${flag(op)} AS "hasHumanResponse",
         ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_IN_PERSON_ONLY}`)} AS "operatorInPersonOnly",
         ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_NO_STOCK}`)} AS "operatorNoStock",
-        ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_DERIVED}`)} AS "operatorDerived",
         ${flag(Prisma.sql`${cust} AND (m.body IS NULL OR m."mediaType" IS NOT NULL)`)} AS "customerMedia",
         (count(*) FILTER (WHERE ${free}))::int AS "freeMessages",
         (count(*) FILTER (WHERE ${free} AND ${empty}))::int AS "emptyMessages",
@@ -260,12 +265,16 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
       GROUP BY c.id, c."createdAt"
     `),
     loadDetectedRows(fromDay, toDayInclusive),
+    getDerivations(fromDay, toDayInclusive),
   ]);
+  const derivationOf = new Map(derivations.map((d) => [d.conversationId, d.timing]));
 
   const withClaim = new Set(detected.rows.filter((r) => claimsOf(r).length > 0).map((r) => r.conversationId));
   return rows.map(({ freeMessages, emptyMessages, ...r }) => ({
     ...r,
     claim: withClaim.has(r.conversationId),
+    operatorDerived: derivationOf.has(r.conversationId),
+    derivation: derivationOf.get(r.conversationId) ?? null,
     hasFreeText: freeMessages > 0,
     onlyEmptyText: freeMessages > 0 && emptyMessages === freeMessages,
   }));

@@ -89,6 +89,12 @@ async function main() {
     await add("vacuna", [[C, "Quiero saber por la vacuna inventada"], [O, "Sí, la aplicamos"]]);
     await add("soloRespondida", [[C, "Soy la hija de la señora inventada"], [O, "Hola, ¿en qué te ayudo?"]]);
     await add("reclamo", [[C, "Pedir medicamentos"], [O, "Te paso el link de pago"], [C, "Me mandaron otro producto, no es lo que pedí"]]);
+    // Derivaciones: de dónde sale la sucursal y qué no es una derivación.
+    await add("derivNombra", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "La sucursal TKL Sucursal Nortina ya no cuenta con personal en el sector de pedidos"]]);
+    await add("derivEnvio", [[C, "Pedir medicamentos"], [B, "Tu sucursal mas cerca es: Sur Inventada"], [C, "A mi domicilio"], [B, DONE], [O, "Esa sucursal no ofrece servicio de envío a domicilio ni retiros"]]);
+    await add("derivCliente", [[C, "Pedir medicamentos"], [B, "¿Qué sucursal es más cercana a tu domicilio?"], [C, "Sucursal Nortina"], [B, DONE], [O, "No hay personal de pedidos, podés realizar la compra de forma presencial"]]);
+    await add("sinCobertura", [[C, "Pedir medicamentos"], [B, FLOW], [C, "A mi domicilio"], [B, DONE], [O, "No realizamos envíos a la dirección enviada, le puedo ofrecer retiro por la sucursal"]]);
+    await add("derivVendida", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "La sucursal Sur Inventada ya no cuenta con personal en el sector de pedidos"], [O, "Podrás retirar el pedido a nombre de Inventada 1234"]]);
     await add("fuera", [[C, "Cuánto sale"]], "2026-03-10T10:00");
     await add("noche", [[C, "Cuánto sale el producto"]], "2026-03-04T23:59");
 
@@ -156,6 +162,23 @@ async function main() {
     });
     await check("que un operador haya respondido no alcanza: sin motivo claro; el reclamo gana sobre el pedido", () => {
       assert.deepEqual([k("soloRespondida"), k("reclamo")], ["SIN_MOTIVO", "RECLAMO"]);
+    });
+    await check("derivaciones: la sucursal sale del aviso, de la respuesta del cliente o del bot; sin cobertura de envío no es derivación", async () => {
+      const { loadDerivationRows, resolveBranchId } = await import("./derivation");
+      const branches = [{ id: "b-norte", name: "Sucursal Nortina" }, { id: "b-sur", name: "Sur Inventada" }];
+      const ders = await loadDerivationRows("2026-03-02", "2026-03-04", branches);
+      const d = (key: string) => ders.find((x) => x.conversationId === ids[key]);
+      assert.deepEqual([d("derivNombra")!.noticeBranch, d("derivNombra")!.delivery, resolveBranchId(d("derivNombra")!, branches)], ["sucursal nortina", false, "b-norte"]);
+      assert.deepEqual([d("derivEnvio")!.noticeBranch, d("derivEnvio")!.botBranch, d("derivEnvio")!.delivery, resolveBranchId(d("derivEnvio")!, branches)], [null, "sur inventada", true, "b-sur"]);
+      assert.deepEqual([d("derivCliente")!.customerBranch, resolveBranchId(d("derivCliente")!, branches)], ["sucursal nortina", "b-norte"]);
+      assert.equal(d("sinCobertura"), undefined, "no hacer envíos a esa dirección y ofrecer retiro no es una derivación");
+      assert.deepEqual([d("derivVendida")!.sold, d("derivNombra")!.sold], [true, false]);
+      assert.equal(resolveBranchId(d("derivado")!, branches), null, "sin sucursal en ningún lado");
+      const dump = JSON.stringify(ders);
+      assert.ok(!/personal|domicilio|presencial|\+549/.test(dump), "del texto solo sale el nombre de la sucursal");
+      // Sin horario cargado nada se marca dentro del horario: todas quedan como derivado a compra presencial.
+      assert.deepEqual([k("derivNombra"), k("derivEnvio"), k("sinCobertura"), k("derivVendida")],
+        ["NO_SE_PUDO_TOMAR/DERIVADO_PRESENCIAL", "NO_SE_PUDO_TOMAR/DERIVADO_PRESENCIAL", "PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO"]);
     });
     await check("período y hora: lo creado fuera no entra; las 23:59 quedan en su día de Buenos Aires", async () => {
       assert.equal(by.has(ids.fuera), false);
