@@ -149,11 +149,11 @@ export default function NowPanel() {
           {d.today ? (
             <dl className="mt-1 space-y-2 text-sm text-gray-800">
               <div className="flex items-baseline justify-between gap-3">
-                <dt>Entraron hoy y ya recibieron respuesta</dt>
-                <dd className="shrink-0 text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.answered)} de {nf.format(d.today.entered)}</dd>
+                <dt>Nuevas de hoy<span className="block text-xs text-gray-600">{nf.format(Math.max(0, d.today.entered - d.today.answered))} sin respuesta</span></dt>
+                <dd className="shrink-0 text-right text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.answered)} <span className="text-sm font-normal text-gray-700">respondidas de</span> {nf.format(d.today.entered)}</dd>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <dt>Conversaciones atendidas hoy<span className="block text-xs text-gray-600">Incluye las que venían de días anteriores.</span></dt>
+                <dt>Respondidas hoy en total<span className="block text-xs text-gray-600">{nf.format(d.today.answered)} de hoy + {nf.format(Math.max(0, d.today.attended - d.today.answered))} de días anteriores</span></dt>
                 <dd className="shrink-0 text-xl font-semibold tabular-nums text-gray-900">{nf.format(d.today.attended)}</dd>
               </div>
             </dl>
@@ -250,7 +250,7 @@ function ProgressCard({ d }: { d: NowPayload }) {
             <dd className="shrink-0 text-lg font-semibold tabular-nums text-gray-900">{nf.format(pendingNow)}</dd>
           </div>
           <div className="flex items-baseline justify-between gap-3">
-            <dt>Atrasados atendidos durante el turno</dt>
+            <dt>Pendientes atendidas durante el turno</dt>
             <dd className="shrink-0 text-lg font-semibold tabular-nums text-gray-900">{nf.format(p.shift.attendedSince)} de {nf.format(p.shift.pendingAtStart)}</dd>
           </div>
         </dl>

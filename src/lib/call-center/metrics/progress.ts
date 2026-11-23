@@ -6,7 +6,7 @@
  *    horario de operadores de hoy, estaban abiertas, con el último mensaje público del
  *    cliente y hasta 72 horas de espera (la misma ventana de "Ahora"). El estado a esa hora
  *    se reconstruye con el historial de cambios de estado.
- *  - Atrasados atendidos durante el turno: de ese grupo, los que recibieron una respuesta
+ *  - Pendientes atendidas durante el turno: de ese grupo, los que recibieron una respuesta
  *    pública de un operador desde que empezó el turno.
  *  - Primera respuesta: lo que entró hoy, hasta ahora, contra el mismo día de la semana
  *    anterior cortado a la misma hora. El corte se simula: de la semana anterior solo
