@@ -65,6 +65,32 @@ export interface SalesBranchLine extends SalesTotals {
   branchName: string;
 }
 
+/** Una sucursal dentro de la ficha de un operador. */
+export interface SalesOperatorBranchLine {
+  branchId: string;
+  branchName: string;
+  code: string;
+  gross: number;
+  receipts: number;
+}
+
+/**
+ * Ventas de una persona: todos los códigos de SIAF asociados a su cuenta de operador en la
+ * configuración. Un código sin cuenta asociada va en su propia ficha (account null).
+ */
+export interface SalesOperatorLine extends SalesTotals {
+  /** externalId de la cuenta; null si el código no tiene cuenta asociada. */
+  account: string | null;
+  /** Alias de la cuenta en la configuración que regía su último día con ventas; null si no tiene. */
+  alias: string | null;
+  /** Nombre que trae SIAF, del día más reciente. Se usa de título cuando no hay cuenta asociada. */
+  name: string;
+  /** Días del período con comprobantes. */
+  days: number;
+  /** Por sucursal, en orden alfabético. */
+  branches: SalesOperatorBranchLine[];
+}
+
 export interface SalesReport {
   from: string;
   to: string;
@@ -72,6 +98,8 @@ export interface SalesReport {
   byDay: SalesDayLine[];
   byBranch: SalesBranchLine[];
   byVendor: SalesVendorLine[];
+  /** Por persona: primero las cuentas, por alias; después los códigos sin cuenta asociada, por nombre. No por importe. */
+  byOperator: SalesOperatorLine[];
   /** Días con ventas cargadas pero sin configuración vigente: no suman y no son cero. */
   daysWithoutConfig: string[];
   /** Versiones de configuración que se usaron dentro del período, de la más vieja a la más nueva. */
@@ -106,11 +134,12 @@ export function buildSalesReport(
   opts: { from: string; to: string; versions: readonly ConfigVersion[] },
 ): SalesReport {
   // Conjunto de vendedores del Call Center por versión, armado una sola vez.
-  const vendorSets = new Map<string, Set<string>>();
+  // El valor es la cuenta de operador asociada a ese código en esa versión (null si no tiene).
+  const vendorSets = new Map<string, Map<string, string | null>>();
   const setFor = (v: ConfigVersion) => {
     let s = vendorSets.get(v.id);
     if (!s) {
-      s = new Set(v.data.callCenterVendors.map((x) => vendorKey(x.branchId, x.code)));
+      s = new Map(v.data.callCenterVendors.map((x) => [vendorKey(x.branchId, x.code), x.accountId ?? null]));
       vendorSets.set(v.id, s);
     }
     return s;
@@ -125,6 +154,7 @@ export function buildSalesReport(
   const byDay = new Map<string, SalesTotals & { vendors: Set<string> }>();
   const byBranch = new Map<string, SalesBranchLine>();
   const byVendor = new Map<string, SalesVendorLine & { daySet: Set<string> }>();
+  const byOperator = new Map<string, SalesTotals & { account: string | null; alias: string | null; name: string; lastDay: string; daySet: Set<string>; branches: Map<string, SalesOperatorBranchLine> }>();
   const withoutConfig = new Set<string>();
   const used = new Map<string, string>();
   let lastLoadedDay: string | null = null;
@@ -162,7 +192,25 @@ export function buildSalesReport(
     if (r.day < v.firstDay) v.firstDay = r.day;
     if (r.day >= v.lastDay) { v.lastDay = r.day; v.name = r.name; } // el nombre más reciente
     byVendor.set(key, v);
+
+    // Por persona: la cuenta asociada sale de la versión que regía ESE día.
+    const account = setFor(version).get(key) ?? null;
+    const opKey = account !== null ? `a|${account}` : `v|${key}`;
+    const o = byOperator.get(opKey) ?? { ...zero(), account, alias: null, name: r.name, lastDay: "", daySet: new Set<string>(), branches: new Map<string, SalesOperatorBranchLine>() };
+    add(o, r);
+    o.daySet.add(r.day);
+    if (r.day >= o.lastDay) {
+      o.lastDay = r.day;
+      o.name = r.name;
+      o.alias = account !== null ? version.data.accounts.find((a) => a.externalId === account)?.alias ?? null : null;
+    }
+    const ob = o.branches.get(key) ?? { branchId: r.branchId, branchName: r.branchName, code: r.code, gross: 0, receipts: 0 };
+    ob.gross += r.gross; ob.receipts += r.receipts;
+    o.branches.set(key, ob);
+    byOperator.set(opKey, o);
   }
+  const operatorLabel = (o: { account: string | null; alias: string | null; name: string }) =>
+    o.account !== null ? o.alias ?? `Cuenta ${o.account}` : o.name;
 
   return {
     from: opts.from,
@@ -174,6 +222,13 @@ export function buildSalesReport(
     byVendor: [...byVendor.values()]
       .sort((a, b) => a.branchName.localeCompare(b.branchName, "es") || a.code.localeCompare(b.code, "es"))
       .map(({ daySet, ...v }) => done({ ...v, days: daySet.size })),
+    byOperator: [...byOperator.values()]
+      .sort((a, b) => Number(a.account === null) - Number(b.account === null) || operatorLabel(a).localeCompare(operatorLabel(b), "es"))
+      .map(({ daySet, lastDay: _lastDay, branches, ...o }) => done({
+        ...o, days: daySet.size,
+        branches: [...branches.values()].sort((a, b) => a.branchName.localeCompare(b.branchName, "es") || a.code.localeCompare(b.code, "es"))
+          .map((b) => ({ ...b, gross: round2(b.gross) })),
+      })),
     daysWithoutConfig: [...withoutConfig].sort(),
     configVersionsUsed: [...used.entries()].map(([id, validFrom]) => ({ id, validFrom })).sort((a, b) => a.validFrom.localeCompare(b.validFrom)),
     lastLoadedDay,

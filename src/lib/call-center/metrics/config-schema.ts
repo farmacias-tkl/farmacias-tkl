@@ -90,6 +90,13 @@ const vendorSchema = z
     branchId: z.string().trim().min(1).max(64),
     /** Código de vendedor de SIAF en esa sucursal. */
     code: z.string().trim().min(1).max(32),
+    /**
+     * Cuenta de operador (externalId de `accounts`) a la que pertenece este código, para
+     * juntar en una ficha los códigos que una misma persona tiene en distintas sucursales.
+     * OPCIONAL: las versiones guardadas antes de este campo no lo traen y siguen siendo
+     * válidas; sin el campo, el código se muestra en su propia ficha.
+     */
+    accountId: z.string().trim().min(1).max(64).optional(),
   })
   .strict();
 
@@ -140,6 +147,9 @@ export const callCenterMetricsConfigSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["callCenterVendors"], message: "Vendedor repetido en la misma sucursal" });
       }
       vendors.add(key);
+      if (v.accountId !== undefined && !ids.has(v.accountId)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["callCenterVendors"], message: "Vendedor asociado a una cuenta que no está en la lista de cuentas" });
+      }
     }
   });
 

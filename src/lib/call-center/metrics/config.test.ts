@@ -200,5 +200,15 @@ test("períodos: sin versiones no hay nada; con una sola, rige sin fecha de fin"
   assert.deepEqual(versionPeriods([versions[0]]).get("a"), { superseded: false, from: "2026-01-01", to: null });
 });
 
+test("vendedor asociado a una cuenta: opcional; la cuenta tiene que estar en la lista", () => {
+  const cfg = base();
+  cfg.callCenterVendors[0] = { branchId: "branch-inventada-a", code: "V01", accountId: "9001" } as never;
+  assert.equal(parseConfigData(cfg).ok, true);
+  // Sin el campo sigue siendo válida (versiones guardadas antes).
+  assert.equal(parseConfigData(base()).ok, true);
+  cfg.callCenterVendors[1] = { branchId: "branch-inventada-b", code: "V01", accountId: "no-existe" } as never;
+  assert.ok(errorsOf(cfg).some((e) => e.startsWith("callCenterVendors") && /cuenta/.test(e)));
+});
+
 console.log(`\nmetrics/config: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

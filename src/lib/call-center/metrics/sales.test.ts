@@ -149,5 +149,50 @@ test("comprobantes cada 100 pedidos: relación de volúmenes; sin pedidos queda 
   assert.equal(receiptsPer100Orders(10, 0), null);
 });
 
+test("por operador: los códigos de una misma cuenta se juntan en una ficha, con una línea por sucursal; sin cuenta van aparte", () => {
+  const acc = (externalId: string, alias: string | null) => ({ externalId, alias, active: true, borrowed: false, historical: false });
+  const v: ConfigVersion = {
+    id: "vo", validFrom: "2026-03-01", createdAt: new Date("2026-02-20T00:00:00Z"),
+    data: {
+      schemaVersion: 1, publicHours: EMPTY, operatorHours: EMPTY, firstResponseGoalMinutes: 15,
+      accounts: [acc("9001", "Zeta inventada"), acc("9002", "Alfa inventada"), acc("9003", null)],
+      callCenterVendors: [
+        { branchId: A, code: "V01", accountId: "9001" }, { branchId: B, code: "V07", accountId: "9001" },
+        { branchId: A, code: "V02", accountId: "9002" }, { branchId: B, code: "V03", accountId: "9003" },
+        { branchId: A, code: "V09" },
+      ],
+    },
+  };
+  const r = report([
+    row("2026-03-02", A, "V01", 100, 2), row("2026-03-03", A, "V01", 50, 1), row("2026-03-03", B, "V07", 30, 1, { discounts: 5 }),
+    row("2026-03-02", A, "V02", 1000, 4), row("2026-03-02", B, "V03", 10, 1), row("2026-03-04", A, "V09", 70, 3),
+  ], "2026-03-01", "2026-03-20", [v]);
+  // Orden por alias (no por importe); la cuenta sin alias va por "Cuenta N"; los sin cuenta, al final.
+  assert.deepEqual(r.byOperator.map((o) => [o.account, o.alias]), [["9002", "Alfa inventada"], ["9003", null], ["9001", "Zeta inventada"], [null, null]]);
+  const zeta = r.byOperator.find((o) => o.account === "9001")!;
+  assert.deepEqual([zeta.gross, zeta.receipts, zeta.discounts, zeta.days], [180, 4, 5, 2]);
+  assert.deepEqual(zeta.branches.map((b) => [b.branchId, b.code, b.receipts, b.gross]), [[A, "V01", 3, 150], [B, "V07", 1, 30]]);
+  const sin = r.byOperator.find((o) => o.account === null)!;
+  assert.deepEqual([sin.name, sin.gross, sin.branches.length], ["Vendedor V09", 70, 1]);
+  // La suma de las fichas es el total: ningún comprobante se cuenta dos veces.
+  assert.equal(r.byOperator.reduce((n, o) => n + o.receipts, 0), r.total.receipts);
+});
+
+test("por operador: sin el campo en la configuración, cada código queda en su propia ficha como antes", () => {
+  const r = report([row("2026-03-02", A, "V01", 100), row("2026-03-02", B, "V01", 50)]);
+  assert.deepEqual(r.byOperator.map((o) => [o.account, o.branches.length]), [[null, 1], [null, 1]]);
+});
+
+test("por operador: la cuenta asociada sale de la versión que regía cada día", () => {
+  const acc = { externalId: "9001", alias: "Alias inventado", active: true, borrowed: false, historical: false };
+  const mk = (id: string, validFrom: string, vendors: ConfigVendor[]): ConfigVersion => ({
+    id, validFrom, createdAt: new Date("2026-02-20T00:00:00Z"),
+    data: { schemaVersion: 1, publicHours: EMPTY, operatorHours: EMPTY, firstResponseGoalMinutes: 15, accounts: [acc], callCenterVendors: vendors },
+  });
+  const vs = [mk("a", "2026-03-01", [{ branchId: A, code: "V01" }]), mk("b", "2026-03-10", [{ branchId: A, code: "V01", accountId: "9001" }])];
+  const r = report([row("2026-03-05", A, "V01", 100), row("2026-03-12", A, "V01", 40)], "2026-03-01", "2026-03-20", vs);
+  assert.deepEqual(r.byOperator.map((o) => [o.account, o.gross]), [["9001", 40], [null, 100]]);
+});
+
 console.log(`\nmetrics/sales: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

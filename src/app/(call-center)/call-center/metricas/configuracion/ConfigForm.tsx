@@ -42,6 +42,10 @@ export default function ConfigForm({
   const [vendors, setVendors] = useState<Set<string>>(
     () => new Set((base?.data.callCenterVendors ?? []).map((v) => vendorKey(v.branchId, v.code))),
   );
+  // Cuenta de operador asociada a cada vendedor marcado (clave sucursal|código → externalId).
+  const [vendorAccounts, setVendorAccounts] = useState<Record<string, string>>(
+    () => Object.fromEntries((base?.data.callCenterVendors ?? []).flatMap((v) => (v.accountId ? [[vendorKey(v.branchId, v.code), v.accountId]] : []))),
+  );
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -103,7 +107,10 @@ export default function ConfigForm({
       accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
       callCenterVendors: [...vendors].map((k) => {
         const [branchId, ...rest] = k.split("|");
-        return { branchId, code: rest.join("|") };
+        // La asociación se guarda solo si esa cuenta sigue en la lista de cuentas.
+        const accountId = vendorAccounts[k];
+        const known = accountId && accounts.some((a) => a.externalId === accountId);
+        return { branchId, code: rest.join("|"), ...(known ? { accountId } : {}) };
       }),
     };
     // Misma validación que hace el servidor, para mostrar el problema antes de enviar.
@@ -287,6 +294,7 @@ export default function ConfigForm({
         <p className="text-xs text-gray-500">
           Marcá, en cada sucursal, los vendedores cuyas ventas son del Call Center. El código de vendedor es propio de cada sucursal.
           Se listan los que tuvieron ventas en los últimos 90 días. Marcados: {vendors.size}.
+          Al marcar uno podés indicar a qué cuenta de operador pertenece: así los códigos que una misma persona tiene en distintas sucursales se juntan en una sola ficha de ventas.
         </p>
         {vendorGroups.length === 0 && <p className="mt-2 text-sm text-gray-500">No hay ventas recientes con detalle de vendedores.</p>}
         <div className="mt-3 space-y-2">
@@ -299,16 +307,32 @@ export default function ConfigForm({
                 </summary>
                 <div className="grid gap-x-6 gap-y-1 border-t border-gray-100 px-3 py-2 sm:grid-cols-2">
                   {g.items.map((item) => (
-                    <label key={item.key} className="flex items-center gap-2 text-sm text-gray-700">
-                      <input type="checkbox" checked={vendors.has(item.key)}
-                        onChange={(e) => setVendors((set) => {
-                          const next = new Set(set);
-                          if (e.target.checked) next.add(item.key); else next.delete(item.key);
-                          return next;
-                        })} />
-                      <span className="font-mono text-xs text-gray-500">{item.code}</span>
-                      <span className="truncate">{item.name ?? "Sin ventas recientes"}</span>
-                    </label>
+                    <div key={item.key} className="py-0.5">
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" checked={vendors.has(item.key)}
+                          onChange={(e) => setVendors((set) => {
+                            const next = new Set(set);
+                            if (e.target.checked) next.add(item.key); else next.delete(item.key);
+                            return next;
+                          })} />
+                        <span className="font-mono text-xs text-gray-500">{item.code}</span>
+                        <span className="truncate">{item.name ?? "Sin ventas recientes"}</span>
+                      </label>
+                      {vendors.has(item.key) && (
+                        <select aria-label={`Cuenta de operador del vendedor ${item.code}`} value={vendorAccounts[item.key] ?? ""}
+                          onChange={(e) => setVendorAccounts((map) => {
+                            const next = { ...map };
+                            if (e.target.value) next[item.key] = e.target.value; else delete next[item.key];
+                            return next;
+                          })}
+                          className={`ml-6 mt-1 w-56 max-w-full text-xs ${input}`}>
+                          <option value="">Sin cuenta asociada</option>
+                          {accounts.filter((a) => a.system !== true).map((a) => (
+                            <option key={a.externalId} value={a.externalId}>{a.alias && a.alias.trim() ? `${a.alias.trim()} · cuenta ${a.externalId}` : `Cuenta ${a.externalId}`}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                   ))}
                 </div>
               </details>
