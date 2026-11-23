@@ -60,6 +60,35 @@ export function canTransition(
 }
 
 /**
+ * Transiciones que la INGESTA de Emozion trae de forma habitual y que la lista de acciones
+ * de operador no permite. No son un error: son la forma en que Emozion mueve una
+ * conversación. La ingesta registra siempre lo que llega; esta lista solo decide si deja un
+ * aviso. No habilita nada para las acciones de operador (canTransition no la mira).
+ *
+ *  PENDIENTE   → ASIGNADA   sale del bot ya con un asignado
+ *  SIN_ASIGNAR → RESUELTA   se resuelve sin haber tenido asignado
+ *  RESUELTA    → ASIGNADA   se reabre directamente con un asignado
+ */
+export const EXPECTED_INGESTED_TRANSITIONS: Readonly<
+  Partial<Record<ConversationStatus, readonly ConversationStatus[]>>
+> = {
+  [ConversationStatus.PENDIENTE]: [ConversationStatus.ASIGNADA],
+  [ConversationStatus.SIN_ASIGNAR]: [ConversationStatus.RESUELTA],
+  [ConversationStatus.RESUELTA]: [ConversationStatus.ASIGNADA],
+};
+
+/**
+ * ¿Es una transición que la ingesta espera? Las de la lista de acciones de operador más las
+ * habituales de Emozion. Las demás se registran igual, con un aviso.
+ */
+export function isExpectedIngestedTransition(
+  from: ConversationStatus,
+  to: ConversationStatus,
+): boolean {
+  return canTransition(from, to) || (EXPECTED_INGESTED_TRANSITIONS[from]?.includes(to) ?? false);
+}
+
+/**
  * CICLO DE VIDA de Conversation.assignedToUserId (regla de diseño del dominio).
  * No todo se implementa en Sprint 2 — esto documenta el contrato para el futuro.
  *

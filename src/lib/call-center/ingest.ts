@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { canTransition } from "./transitions";
+import { isExpectedIngestedTransition } from "./transitions";
 import { initialStorageFields, type AttachmentSourceCtx } from "./attachment-source";
 import { tagErrorStage } from "./safe-error";
 import type {
@@ -199,7 +199,8 @@ export function closureLabelOf(labels: readonly string[] | null | undefined, clo
 /**
  * Aplica un cambio de estado ingerido. Registra la REALIDAD de Emozion: NO bloquea por
  * canTransition() (esa whitelist gobierna las acciones de operador, Sprint 2). Si la
- * transición no está en la whitelist, deja un warning, no bloquea. NO setea
+ * transición no es de las que la ingesta espera (isExpectedIngestedTransition: las de
+ * operador más las habituales de Emozion), deja un warning, no bloquea. NO setea
  * assignedToUserId (cruce agente Emozion → User TKL = dominio futuro).
  *
  * Si la conversación no existe (evento fuera de orden) → outcome "needsRetry": el caller
@@ -225,8 +226,8 @@ export async function applyStatusChangedFromEmozion(
   }
 
   const from = conv.status;
-  if (from !== n.status && !canTransition(from, n.status)) {
-    warnings.push(`transición ingerida fuera de whitelist: ${from}→${n.status} (se registra igual; Emozion es la realidad)`);
+  if (from !== n.status && !isExpectedIngestedTransition(from, n.status)) {
+    warnings.push(`transición ingerida no esperada: ${from}→${n.status} (se registra igual; Emozion es la realidad)`);
   }
 
   // Asignado y tipo de cierre: a diferencia del resto (merge conservador), acá el evento
