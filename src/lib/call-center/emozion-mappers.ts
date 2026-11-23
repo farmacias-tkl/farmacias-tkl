@@ -11,6 +11,7 @@ import type {
   NormalizeResult,
   NormalizedStatus,
   NormalizedAuthor,
+  NormalizedAssigneeType,
 } from "./emozion-types";
 import { isUsableAttachmentId, emozionAttachmentSourceExternalId } from "./attachment-identity";
 
@@ -166,6 +167,19 @@ export function normalizeExternalAssigneeId(conv: EmozionConversation | null | u
 }
 
 /**
+ * De qué es el id del asignado: meta.assignee_type ("AgentBot" | "User") o, si no viene,
+ * meta.assignee.type ("agent_bot" | "user"). Sin asignado, o con un valor que no es ninguno
+ * de esos, null: no se adivina.
+ */
+export function normalizeExternalAssigneeType(conv: EmozionConversation | null | undefined): NormalizedAssigneeType | null {
+  if (normalizeExternalAssigneeId(conv) === null) return null;
+  const raw = conv?.meta?.assignee_type ?? conv?.meta?.assignee?.type;
+  if (typeof raw !== "string") return null;
+  const t = raw.trim().toLowerCase().replace(/[^a-z]/g, "");
+  return t === "agentbot" ? "AGENT_BOT" : t === "user" ? "USER" : null;
+}
+
+/**
  * Tipo de cierre que el operador elige al resolver en Emozion: SOLO código y nombre de
  * catálogo. closure_comment NO se lee en ningún punto (texto libre, posible dato personal).
  * Lectura defensiva (los valores reales no están confirmados): id = número finito o string
@@ -270,6 +284,7 @@ export function normalizeConversation(conv: EmozionConversation | null | undefin
       externalLabels: normalizeLabels(conv),
       contact,
       externalAssigneeId: normalizeExternalAssigneeId(conv),
+      externalAssigneeType: normalizeExternalAssigneeType(conv),
     },
     warnings,
     authorFallbackCount: 0,
@@ -355,6 +370,7 @@ export function normalizeStatusEvent(conv: EmozionConversation | null | undefine
       status: st.status,
       closedAt: parseTimestamp(conv?.resolved_at),
       externalAssigneeId: normalizeExternalAssigneeId(conv),
+      externalAssigneeType: normalizeExternalAssigneeType(conv),
       closureTypeId: closure.closureTypeId,
       closureTypeName: closure.closureTypeName,
       labels: labelsIfPresent(conv),
@@ -386,6 +402,7 @@ export function normalizeUpdateEvent(conv: EmozionConversation | null | undefine
       resolved: conv?.status === "resolved",
       assigneePresent: !!meta && typeof meta === "object" && "assignee" in meta,
       externalAssigneeId: normalizeExternalAssigneeId(conv),
+      externalAssigneeType: normalizeExternalAssigneeType(conv),
       closureTypeId: closure.closureTypeId,
       closureTypeName: closure.closureTypeName,
       eventAt: parseTimestamp(conv?.updated_at) ?? parseTimestamp(conv?.resolved_at),

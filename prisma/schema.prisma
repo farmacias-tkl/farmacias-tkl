@@ -1445,6 +1445,10 @@ model Conversation {
   // agente). NO se cruza a User TKL. Una reasignación que no cambia el estado no genera
   // evento: puede quedar desactualizado.
   externalAssigneeId     String?
+  // De qué es ese id: "USER" (una cuenta de persona) o "AGENT_BOT" (un bot de Emozion, como
+  // el del menú). Bots y usuarios tienen numeraciones separadas: el mismo número puede ser
+  // uno de cada uno. null = el evento no lo dijo, o el dato es anterior a esta columna.
+  externalAssigneeType   String?
   // Tipo de cierre que el operador elige al resolver en Emozion (catálogo: código + nombre).
   // Solo tiene valor mientras la conversación está RESUELTA; al reabrir vuelve a null (cada
   // cierre queda en ConversationStateHistory). El comentario de cierre NUNCA se ingiere.
@@ -1516,6 +1520,7 @@ model ConversationStateHistory {
   // Snapshot del evento de Emozion que produjo esta fila (null en filas de operador TKL y
   // en las anteriores a esta ingesta): asignado en ese momento y tipo de cierre elegido.
   externalAssigneeId   String?
+  externalAssigneeType String?             // "USER" | "AGENT_BOT" | null (sin dato)
   closureTypeId        String?
   closureTypeName      String?
   // Solo en las filas RESUELTA de la ingesta: las etiquetas vistas hasta ese cierre.

@@ -15,6 +15,11 @@
 
 /** Espejo de Prisma ConversationStatus (sin importar Prisma — frontera pura). */
 export type NormalizedStatus = "PENDIENTE" | "SIN_ASIGNAR" | "ASIGNADA" | "RESUELTA";
+/**
+ * De qué es el id del asignado. Los bots y los usuarios de Emozion tienen numeraciones
+ * separadas: sin el tipo, el id de un bot se puede confundir con el de una persona.
+ */
+export type NormalizedAssigneeType = "USER" | "AGENT_BOT";
 /** Espejo de Prisma ConversationMessageAuthor. */
 export type NormalizedAuthor = "CUSTOMER" | "BOT" | "OPERATOR";
 
@@ -58,7 +63,9 @@ export interface EmozionContact {
 
 export interface EmozionConversationMeta {
   sender?: EmozionContact | null;
-  assignee?: { id?: number | null } | null;
+  assignee?: { id?: number | null; type?: string | null } | null;
+  /** Chatwoot: "AgentBot" | "User". Dice de qué es meta.assignee.id. */
+  assignee_type?: string | null;
 }
 
 export interface EmozionConversation {
@@ -114,6 +121,8 @@ export interface NormalizedConversation {
   // id crudo del agente asignado en Emozion (meta.assignee.id). Opcional: los WebhookEvent
   // guardados antes de este campo no lo traen → se lee como null.
   externalAssigneeId?: string | null;
+  /** Tipo del asignado. null u omitido = sin dato (el evento no lo trae, o no hay asignado). */
+  externalAssigneeType?: NormalizedAssigneeType | null;
 }
 
 /**
@@ -150,6 +159,7 @@ export interface NormalizedStatusEvent {
   // Los tres siguientes son opcionales: los WebhookEvent guardados antes de estos campos
   // (p. ej. los que quedaron en ERROR) no los traen → se leen como null.
   externalAssigneeId?: string | null; // meta.assignee.id crudo; null = sin asignado
+  externalAssigneeType?: NormalizedAssigneeType | null; // null u omitido = sin dato
   closureTypeId?: string | null;      // closure_type_id → string
   closureTypeName?: string | null;    // closure_type_name (catálogo); NUNCA closure_comment
   /** Etiquetas de la conversación, si el evento trae la clave `labels`; null u omitido = no la trae, no se tocan. */
@@ -168,6 +178,8 @@ export interface NormalizedUpdateEvent {
   /** El evento trae la clave meta.assignee (con un asignado o con null). Si no la trae, el asignado no se toca. */
   assigneePresent: boolean;
   externalAssigneeId: string | null;
+  /** Tipo del asignado. null u omitido = sin dato. Opcional: los eventos guardados antes no lo traen. */
+  externalAssigneeType?: NormalizedAssigneeType | null;
   closureTypeId: string | null;
   closureTypeName: string | null;
   /**

@@ -542,6 +542,37 @@ async function main() {
       assert.deepEqual(c!.stateHistory[c!.stateHistory.length - 1].externalLabelsSeen, esperadas);
     });
 
+    // 5x. Tipo de asignado (datos inventados): bots y usuarios tienen numeraciones separadas.
+    const TYP = 39850;
+    const rawTyp = (event: string, status: string, assignee: { id: number; type?: string } | null, extra: Record<string, unknown> = {}) => {
+      const base = rawConvCreated(TYP, "+5491100000010", "Cliente Ficticio Tipo", status, [], null, event);
+      return { ...base, meta: { ...base.meta, assignee: assignee ? { id: assignee.id } : null, ...(assignee?.type ? { assignee_type: assignee.type } : {}) }, ...extra };
+    };
+    const convTyp = () => prisma.conversation.findUnique({ where: { externalConversationId: String(TYP) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] } } });
+    await check("5x. tipo de asignado: se guarda con el id en la conversación y en cada fila; sin dato queda null", async () => {
+      await run(rawTyp("conversation_created", "open", { id: 37, type: "AgentBot" }));
+      let c = await convTyp();
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType, c!.stateHistory[0].externalAssigneeType], ["37", "AGENT_BOT", "AGENT_BOT"]);
+      // Mismo asignado y el evento no dice el tipo: se conserva.
+      await run(rawTyp("conversation_updated", "open", { id: 37 }));
+      assert.equal((await convTyp())!.externalAssigneeType, "AGENT_BOT");
+      // Pasa a una persona con el MISMO número: el tipo es lo único que los distingue.
+      await run(rawTyp("conversation_updated", "open", { id: 37, type: "User" }));
+      assert.deepEqual([(await convTyp())!.externalAssigneeId, (await convTyp())!.externalAssigneeType], ["37", "USER"]);
+      // Cambia el asignado y el evento no dice el tipo: queda sin dato, no arrastra el anterior.
+      await run(rawTyp("conversation_updated", "open", { id: 80 }));
+      assert.deepEqual([(await convTyp())!.externalAssigneeId, (await convTyp())!.externalAssigneeType], ["80", null]);
+      // El cambio de estado lo guarda en su fila.
+      await run(rawTyp("conversation_status_changed", "resolved", { id: 80, type: "User" }));
+      c = await convTyp();
+      const last = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.externalAssigneeType, last.toStatus, last.externalAssigneeId, last.externalAssigneeType], ["USER", "RESUELTA", "80", "USER"]);
+      // Sin asignado no hay tipo.
+      await run(rawTyp("conversation_status_changed", "open", null));
+      c = await convTyp();
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType], [null, null]);
+    });
+
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)
     await check("6. fallo de dominio → ERROR persiste; dominio rolled back", async () => {
       // status inválido (no producible por el mapper) → fuerza error de Prisma DENTRO de la tx.
