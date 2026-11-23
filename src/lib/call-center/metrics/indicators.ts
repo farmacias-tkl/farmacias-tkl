@@ -297,7 +297,8 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     label: "Primera respuesta humana (tiempo hábil)",
     definition:
       "Igual que la anterior, contando solo los minutos dentro del horario público. Lo que entra fuera de " +
-      "horario empieza a contar al abrir; lo respondido antes de abrir cuenta 0.",
+      "horario empieza a contar al abrir. Lo respondido fuera del horario público, antes de que vuelva a abrir, " +
+      "no entra en la meta: se informa aparte como \"Respondidas fuera del horario público\", con su espera real.",
     source: "ConversationStateHistory, ConversationMessage, configuración",
     population: "ENTRADA",
     denominator: "Conversaciones respondidas; las pendientes se muestran al lado con su antigüedad",
