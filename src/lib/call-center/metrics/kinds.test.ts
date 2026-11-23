@@ -16,7 +16,7 @@ const at = (s: string) => new Date(`${s}:00.000-03:00`);
 let n = 0;
 const row = (over: Partial<KindRow> = {}): KindRow => ({
   conversationId: `k${++n}`, createdAt: at("2026-03-03T10:00"), claim: false, prescription: false, homeDelivery: false, pickup: false,
-  botOrderComplete: false, confirmed: false, saleLost: false, saleElsewhere: false, saleProbable: false, notALoss: false, boughtAtTkl: false, declined: false, followUp: false, hasHumanResponse: false,
+  botOrderComplete: false, confirmed: false, saleLost: false, saleElsewhere: false, postponed: false, saleProbable: false, notALoss: false, boughtAtTkl: false, declined: false, followUp: false, hasHumanResponse: false,
   operatorInPersonOnly: false, operatorNoStock: false, operatorDerived: false, customerMedia: false, hasFreeText: true, onlyEmptyText: false,
   hasQuestionMark: false, services: false, price: false, stock: false, hours: false, coverage: false, paymentMethod: false, onlineStore: false, ...over,
 });
@@ -46,6 +46,8 @@ test("el cliente dice que ya compró: en TKL es una venta presencial; si no, ven
   assert.deepEqual(kind({ saleProbable: true }), { main: "VENTA_PERDIDA", sub: "PROBABLE" });
   // Pasa a pagar después de que le ofrecieron stock: la marca ya viene resuelta en boughtAtTkl.
   assert.deepEqual(kind({ boughtAtTkl: true }), { main: "COMPRO_TKL", sub: null });
+  // Pedido postergado por el operador: no es una venta perdida aunque el cliente diga que va a otra farmacia.
+  assert.deepEqual(kind({ postponed: true, saleLost: true, saleElsewhere: true }), { main: "PEDIDO_SIN_CONFIRMAR", sub: null });
   // Se confundió de receta: no es una pérdida.
   assert.deepEqual(kind({ saleLost: true, notALoss: true }), { main: "SIN_MOTIVO", sub: null });
   assert.equal(kind({ saleLost: true, botOrderComplete: true, operatorNoStock: true }).main, "VENTA_PERDIDA", "gana sobre no se pudo tomar");

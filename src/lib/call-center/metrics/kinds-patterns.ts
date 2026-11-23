@@ -28,10 +28,10 @@ export const ORDER_CONFIRMED_OPERATOR =
   "|link de pago|\\m(alias|cbu|cvu)\\M" +
   // Avisos de retiro o de envío.
   "|podr[aá]s retirar|pued(e|en|es) pasar a (buscar|retirar)|c[oó]digo de retiro|a nombre de [^|]{0,40}[0-9]{3,}" +
-  "|el env[ií]o lo realizamos|realizando el env[ií]o|receta fue validada|comunicamos al cadete";
+  "|el env[ií]o lo realizamos|realizando el env[ií]o|receta fue validada|comunicamos al cadete|\\m(lo |la |los |las )?agendamos\\M";
 /**
- * Cierre fijo de venta. Es la evidencia más débil: vale solo si el operador no dejó el pedido
- * en espera ni lo canceló en ningún momento de la conversación.
+ * Cierre fijo de venta. Es la evidencia más débil: si es la única, no vale cuando el operador
+ * dejó el pedido en espera en algún momento de la conversación.
  */
 export const ORDER_CLOSING_OPERATOR = "gracias por confiar en farmacias tkl";
 
@@ -42,11 +42,19 @@ export const ORDER_CLOSING_OPERATOR = "gracias por confiar en farmacias tkl";
 export const ORDER_STRONG_OPERATOR = "n[uú]mero de control|(recibimos|registramos|acreditamos) (el|tu|su) pago|pago (fue |ya fue )?(recibido|acreditado|registrado)";
 
 /**
- * El operador deja el pedido en espera o lo cancela. Si lo escribe DESPUÉS de la última
- * evidencia de venta (por ejemplo, del cierre "gracias por confiar"), el pedido no quedó
- * confirmado, salvo que haya evidencia firme.
+ * El operador deja el pedido en espera. Anula el cierre "gracias por confiar" solo cuando ese
+ * cierre es la única evidencia de venta.
  */
-export const OPERATOR_ON_HOLD = "aguardamos|quedamos atentos|esperamos (tu|su) contacto|cancel(amos|ar|aremos) el pedido";
+export const OPERATOR_WAITING = "aguardamos|quedamos atentos|esperamos (tu|su) contacto";
+
+/** El operador cancela el pedido. Anula siempre, salvo que haya evidencia firme. */
+export const OPERATOR_CANCELLED = "cancel(amos|ar|aremos|ado) el pedido";
+
+/**
+ * El pedido queda postergado: la receta todavía no es válida o hay que esperar una fecha.
+ * Es un pedido sin confirmar, no una venta perdida.
+ */
+export const OPERATOR_POSTPONED = "receta (es )?v[aá]lida (desde|a partir)|hay que esperar hasta|aguardamos (tu|su) contacto m[aá]s adelante";
 
 /** El cliente dice que pagó o manda el comprobante. */
 export const PAYMENT_CUSTOMER = "ya (pagu[eé]|abon[eé]|transfer[ií])|comprobante|te (paso|env[ií]o) el pago";

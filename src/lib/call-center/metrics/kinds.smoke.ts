@@ -54,6 +54,11 @@ async function main() {
     await add("probable", [[C, "Tienen el producto inventado"], [C, "Bueno, voy a ver si consigo en otra farmacia"]]);
     await add("noPreparen", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [C, "No lo preparen, gracias"]]);
     await add("enCamino", [[C, "Hola, a qué hora llega"], [O, "En un rato"]]);
+    await add("envioYEspera", [[C, "Pedir medicamentos"], [B, FLOW], [C, "A mi domicilio"], [B, DONE], [O, "El envío lo realizamos hoy"], [O, "Quedamos atentos. ¡Muchas gracias por confiar en Farmacias TKL!"]]);
+    await add("agendado", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "Perfecto, lo agendamos para el jueves"], [O, "Aguardamos"]]);
+    await add("cancelado", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "El envío lo realizamos hoy"], [O, "Procedemos a cancelar el pedido"]]);
+    await add("canceladoConControl", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "Número de control 123"], [O, "Procedemos a cancelar el pedido"]]);
+    await add("postergado", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "La receta es válida desde el 01/04, hay que esperar hasta esa fecha"], [C, "Bueno, entonces voy a otra farmacia"]]);
     await add("esperaYSoloCierre", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "Aguardamos contacto por la otra receta"], [O, "¡Muchas gracias por confiar en Farmacias TKL!"]]);
     await add("soloPrecio", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "El producto tiene un valor de $ 100, el total es 100"]]);
     await add("recetaMeducar", [[C, "Hola, quiero realizar un pedido sobre esta receta: https://cdn.meducar.com/r/inventada"], [B, "Texto del bot"]]);
@@ -106,8 +111,14 @@ async function main() {
     await check("seguimiento de un pago; un agradecimiento largo es un saludo", () => {
       assert.deepEqual([k("seguimiento"), k("graciasLargo")], ["SEGUIMIENTO", "SALUDO"]);
     });
-    await check("el cierre de venta no vale si después el operador deja el pedido en espera; con número de control sí, y si la espera fue antes también", () => {
+    await check("el cierre de venta, si es la única evidencia, no vale cuando el operador dejó el pedido en espera", () => {
       assert.deepEqual([k("cierreEnEspera"), k("controlYEspera"), k("esperaYCierre"), k("esperaYSoloCierre")], ["PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO", "PEDIDO/RETIRO", "PEDIDO_SIN_CONFIRMAR"]);
+    });
+    await check("la espera no anula otra evidencia de venta; 'agendamos' confirma; la cancelación anula salvo con número de control", () => {
+      assert.deepEqual([k("envioYEspera"), k("agendado"), k("cancelado"), k("canceladoConControl")], ["PEDIDO/DOMICILIO", "PEDIDO/RETIRO", "PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO"]);
+    });
+    await check("pedido postergado por una receta que todavía no es válida: sin confirmar, no venta perdida", () => {
+      assert.equal(k("postergado"), "PEDIDO_SIN_CONFIRMAR");
     });
     await check("compró en TKL: pasa a pagar después de que le ofrecieron stock, o dice que lo compró ahí", () => {
       assert.deepEqual([k("pasaAPagar"), k("comproAhi")], ["COMPRO_TKL", "COMPRO_TKL"]);
