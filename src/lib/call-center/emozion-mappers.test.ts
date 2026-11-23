@@ -295,6 +295,17 @@ test("asignado. tipo: assignee_type o assignee.type; sin asignado o con un valor
   assert.equal(normalizeUpdateEvent(conv).data?.externalAssigneeType, "AGENT_BOT");
 });
 
+test("asignado. abierta con un BOT asignado es SIN_ASIGNAR: nadie la tomó; con una persona o sin tipo, ASIGNADA", () => {
+  const sender = { phone_number: "+5491100000011" };
+  const st = (meta: object) => [normalizeConversation({ id: 621, status: "open", meta: { sender, ...meta } } as never).data?.status, normalizeStatusEvent({ id: 621, status: "open", meta } as never).data?.status];
+  assert.deepEqual(st({ assignee: { id: 9 }, assignee_type: "AgentBot" }), ["SIN_ASIGNAR", "SIN_ASIGNAR"]);
+  assert.deepEqual(st({ assignee: { id: 9 }, assignee_type: "User" }), ["ASIGNADA", "ASIGNADA"]);
+  assert.deepEqual(st({ assignee: { id: 9 } }), ["ASIGNADA", "ASIGNADA"]);
+  // El id y el tipo del bot se siguen guardando.
+  const bot = normalizeStatusEvent({ id: 621, status: "open", meta: { assignee: { id: 9 }, assignee_type: "AgentBot" } } as never).data;
+  assert.deepEqual([bot?.externalAssigneeId, bot?.externalAssigneeType], ["9", "AGENT_BOT"]);
+});
+
 test("asignado. normalizeConversation lo expone y no cambia el mapeo de estado", () => {
   const sender = { phone_number: "+5491100000002" };
   const con = normalizeConversation({ id: 601, status: "open", meta: { sender, assignee: { id: 5 } } });

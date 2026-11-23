@@ -113,6 +113,15 @@ export function resolveConversationId(conv: EmozionConversation | null | undefin
   return { id: uniq[0] ?? null, discrepancy: false };
 }
 
+/**
+ * ¿La conversación tiene asignada a una PERSONA? Un bot asignado (el del menú queda como
+ * asignado al salir de "pendiente") no cuenta: nadie la tomó. Sin dato de tipo se asume
+ * persona, como antes de leer el tipo.
+ */
+export function hasPersonAssignee(conv: EmozionConversation | null | undefined): boolean {
+  return normalizeExternalAssigneeId(conv) !== null && normalizeExternalAssigneeType(conv) !== "AGENT_BOT";
+}
+
 /** status Emozion + presencia de assignee → ConversationStatus (conservador + warning). */
 export function mapStatus(status: unknown, hasAssignee: boolean): { status: NormalizedStatus; warnings: string[] } {
   switch (status) {
@@ -268,7 +277,7 @@ export function normalizeConversation(conv: EmozionConversation | null | undefin
       authorFallbackCount: 0,
     };
   }
-  const hasAssignee = Boolean(conv?.meta?.assignee && conv.meta.assignee.id != null);
+  const hasAssignee = hasPersonAssignee(conv);
   const st = mapStatus(conv?.status, hasAssignee);
   warnings.push(...st.warnings);
   return {
@@ -360,7 +369,7 @@ export function normalizeStatusEvent(conv: EmozionConversation | null | undefine
   if (!id) {
     return { outcome: "insufficientData", data: null, warnings: ["status change sin id de conversación → no se mapea"], authorFallbackCount: 0 };
   }
-  const hasAssignee = Boolean(conv?.meta?.assignee && conv.meta.assignee.id != null);
+  const hasAssignee = hasPersonAssignee(conv);
   const st = mapStatus(conv?.status, hasAssignee);
   const closure = normalizeClosure(conv);
   return {
