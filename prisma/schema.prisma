@@ -1436,6 +1436,10 @@ model Conversation {
   externalConversationId String?  @unique   // dedup de dominio (uuid Emozion); nullable → Postgres trata nulls como distintos, las conv manuales de Sprint 2 con null no chocan
   source                 String?            // EMOZION | WHATSAPP_CLOUD | MANUAL — String?, sin enum aún
   externalLabels         String[] @default([]) // staging de labels crudas de Emozion; NO se unifican; futuro = modelo ConversationTag (sub-dominio aparte)
+  // Etiquetas VISTAS desde que la conversación se abrió o reabrió por última vez: unión, solo
+  // suma (externalLabels es la lista actual y cada evento la reemplaza). Emozion quita al
+  // resolver las de sucursal y modalidad; acá se conservan. Al reabrir empieza de nuevo.
+  externalLabelsSeen     String[] @default([])
 
   // Asignado en Emozion según el último evento de conversación recibido (id crudo del
   // agente). NO se cruza a User TKL. Una reasignación que no cambia el estado no genera
@@ -1514,6 +1518,8 @@ model ConversationStateHistory {
   externalAssigneeId   String?
   closureTypeId        String?
   closureTypeName      String?
+  // Solo en las filas RESUELTA de la ingesta: las etiquetas vistas hasta ese cierre.
+  externalLabelsSeen   String[]            @default([])
 
   @@index([conversationId])
   @@index([changedAt])
