@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { closureMapOf, closureOutcomeOf } from "./closure-outcome";
-import { buildAccountsReport, type OperatorMessageRow } from "./accounts";
+import { buildAccountsReport, type ClosureAttribution, type OperatorMessageRow } from "./accounts";
 import { closureLabelOf } from "../ingest";
 
 let passed = 0;
@@ -41,18 +41,40 @@ test("ingesta: la etiqueta de cierre es la última de la lista que la configurac
   assert.equal(closureLabelOf(["solo_consulta"], new Set()), null);
 });
 
-test("Operadores: resultados de cierre de las conversaciones en las que escribió cada cuenta", () => {
+test("ingesta: la etiqueta de cierre se decide por diferencia contra las etiquetas guardadas", () => {
+  const set = new Set(["venta_concretada", "solo_consulta"]);
+  // La que el evento agrega, aunque no sea la última de la lista.
+  assert.equal(closureLabelOf(["venta_concretada", "a_mi_domicilio", "solo_consulta"], set, ["a_mi_domicilio", "solo_consulta"]), "venta_concretada");
+  // No agrega ninguna de cierre y hay una sola: esa (evento repetido, o misma resolución otra vez).
+  assert.equal(closureLabelOf(["a_mi_domicilio", "solo_consulta"], set, ["a_mi_domicilio", "solo_consulta"]), "solo_consulta");
+  // No agrega ninguna de cierre y hay varias: no se puede saber cuál vale.
+  assert.equal(closureLabelOf(["solo_consulta", "venta_concretada"], set, ["venta_concretada", "solo_consulta"]), null);
+  // Agrega una etiqueta que no es de cierre: no cambia nada de lo anterior.
+  assert.equal(closureLabelOf(["solo_consulta", "venta_concretada", "dr_app"], set, ["solo_consulta", "venta_concretada"]), null);
+});
+
+test("Operadores: el cierre se atribuye a la cuenta asignada al resolver, una sola vez por conversación", () => {
   const at = (s: string) => new Date(`${s}:00.000-03:00`);
   const msg = (account: string, conversationId: string): OperatorMessageRow => ({ account, conversationId, sentAt: at("2026-03-03T11:00"), isPrivate: false });
   const messages = [msg("9001", "c1"), msg("9001", "c2"), msg("9001", "c3"), msg("9002", "c1")];
-  const outcomes = new Map([["c1", "VENTA"], ["c2", "CONSULTA"]] as const);
-  const r = buildAccountsReport({ messages, followups: [], facts: [], outcomes }, { now: at("2026-03-04T12:00"), versions: [] });
+  // c1: escribieron 9001 y 9002, la cerró 9002. c2: la cerró 9001. c3: se resolvió sin asignado.
+  // c4: la cerró 9003, que no escribió en el período. c9: sin mensajes de operador en el período, no entra.
+  const outcomes = new Map<string, ClosureAttribution>([
+    ["c1", { outcome: "VENTA", account: "9002" }], ["c2", { outcome: "CONSULTA", account: "9001" }],
+    ["c3", { outcome: "SIN_STOCK", account: null }], ["c4", { outcome: "VENTA", account: "9003" }],
+    ["c9", { outcome: "VENTA", account: "9001" }],
+  ]);
+  const r = buildAccountsReport({ messages: [...messages, msg("9001", "c4")], followups: [], facts: [], outcomes }, { now: at("2026-03-04T12:00"), versions: [] });
   const by = Object.fromEntries(r.accounts.map((a) => [a.account, a.closures]));
-  assert.deepEqual([by["9001"]!.VENTA, by["9001"]!.CONSULTA, by["9001"]!.PEDIDO_NO_CONCRETADO], [1, 1, 0]);
-  assert.deepEqual([by["9002"]!.VENTA, by["9002"]!.CONSULTA], [1, 0], "una conversación con dos cuentas cuenta en las dos");
+  assert.deepEqual([by["9001"]!.VENTA, by["9001"]!.CONSULTA, by["9001"]!.SIN_STOCK], [0, 1, 0], "escribir en una conversación no es cerrarla");
+  assert.deepEqual([by["9002"]!.VENTA, by["9002"]!.CONSULTA], [1, 0]);
+  assert.deepEqual([by["9003"]!.VENTA, r.accounts.find((a) => a.account === "9003")!.conversations], [1, 0], "la cuenta que cerró aparece aunque no haya escrito");
+  assert.deepEqual([r.closuresWithoutAccount!.SIN_STOCK, r.closuresWithoutAccount!.VENTA], [1, 0], "resuelta sin asignado: no se atribuye a nadie");
+  const total = r.accounts.reduce((n, a) => n + Object.values(a.closures!).reduce((x, y) => x + y, 0), 0);
+  assert.equal(total, 3, "cada conversación cuenta una sola vez");
   // Sin etiquetas de cierre en la configuración: sin dato, no cero.
   const sin = buildAccountsReport({ messages, followups: [], facts: [] }, { now: at("2026-03-04T12:00"), versions: [] });
-  assert.equal(sin.accounts[0].closures, null);
+  assert.deepEqual([sin.accounts[0].closures, sin.closuresWithoutAccount], [null, null]);
 });
 
 console.log(`\nmetrics/closure-outcome: ${passed} ok, ${failures.length} fail`);

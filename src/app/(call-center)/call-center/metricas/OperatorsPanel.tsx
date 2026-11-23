@@ -21,9 +21,9 @@ type State =
 
 const STATUS_LABELS: Record<Account["status"], string> = { ACTIVA: "Activa", HISTORICA: "Histórica", SIN_CONFIGURAR: "Sin configurar" };
 
-const CLOSURE_ORDER = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_SE_PUDO_VENDER", "SOLO_BOT", "OTRO"] as const;
+const CLOSURE_ORDER = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_LO_TRABAJAMOS", "SIN_STOCK", "SOLO_BOT", "OTRO"] as const;
 const CLOSURE_LABELS: Record<(typeof CLOSURE_ORDER)[number], string> = {
-  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_SE_PUDO_VENDER: "No se pudo vender", SOLO_BOT: "Solo bot", OTRO: "Otro",
+  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_LO_TRABAJAMOS: "No se pudo vender · no lo trabajamos", SIN_STOCK: "No se pudo vender · sin stock o discontinuado", SOLO_BOT: "Solo bot", OTRO: "Otro",
 };
 
 const accountName = (a: { account: string | null; alias: string | null }) =>
@@ -134,6 +134,14 @@ function Report({ data }: { data: AccountsPayload }) {
         </>
       )}
 
+      {data.closuresWithoutAccount && CLOSURE_ORDER.some((o) => data.closuresWithoutAccount![o] > 0) && (
+        <div className="mt-6 max-w-md rounded-md border border-gray-200 px-3 py-2">
+          <p className="text-sm font-semibold text-gray-800">Cierres sin cuenta asignada al resolver</p>
+          {CLOSURE_ORDER.filter((o) => data.closuresWithoutAccount![o] > 0).map((o) => <Line key={o} label={CLOSURE_LABELS[o]} value={nf.format(data.closuresWithoutAccount![o])} />)}
+          <p className="text-[11px] text-gray-500">Conversaciones con resultado de cierre que se resolvieron sin asignado: no se atribuyen a ninguna cuenta.</p>
+        </div>
+      )}
+
       {data.activeWithoutMessages.length > 0 && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3">
           <h2 className="text-sm font-semibold text-gray-800">Cuentas activas sin mensajes en el período</h2>
@@ -174,7 +182,7 @@ function AccountCard({ a, system }: { a: Account; system?: boolean }) {
           <div className="rounded-md border border-gray-200 px-2 py-1">
             <p className="text-xs font-medium text-gray-600">Cierre confirmado por el operador</p>
             {CLOSURE_ORDER.filter((o) => a.closures![o] > 0).map((o) => <Line key={o} label={CLOSURE_LABELS[o]} value={nf.format(a.closures![o])} />)}
-            <p className="text-[11px] text-gray-500">Etiqueta de cierre de Emozion. Cuenta las conversaciones en las que la cuenta escribió, no quién las cerró.</p>
+            <p className="text-[11px] text-gray-500">Etiqueta de cierre de Emozion. Cuenta las conversaciones que la cuenta tenía asignadas al resolverse.</p>
           </div>
         )}
         <Line label="Mensajes a clientes" value={nf.format(a.publicMessages)} />

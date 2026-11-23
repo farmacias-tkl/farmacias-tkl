@@ -132,11 +132,12 @@ export type ConfigBranchOrderHours = z.infer<typeof branchOrderHoursSchema>;
  *  - VENTA: venta concretada;
  *  - CONSULTA: consulta resuelta;
  *  - PEDIDO_NO_CONCRETADO: el cliente no hizo el pedido;
- *  - NO_SE_PUDO_VENDER: no lo trabajamos, sin stock o discontinuado;
+ *  - NO_LO_TRABAJAMOS: no se pudo vender porque no trabajamos lo que pidió;
+ *  - SIN_STOCK: no se pudo vender por falta de stock o producto discontinuado;
  *  - SOLO_BOT: solo navegó por el bot, sin atención de una persona;
  *  - OTRO: etiqueta de cierre que no entra en los anteriores.
  */
-export const CLOSURE_OUTCOMES = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_SE_PUDO_VENDER", "SOLO_BOT", "OTRO"] as const;
+export const CLOSURE_OUTCOMES = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_LO_TRABAJAMOS", "SIN_STOCK", "SOLO_BOT", "OTRO"] as const;
 export type ClosureOutcome = (typeof CLOSURE_OUTCOMES)[number];
 
 const closureLabelSchema = z

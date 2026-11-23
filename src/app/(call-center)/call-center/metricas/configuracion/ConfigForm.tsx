@@ -13,7 +13,7 @@ import type { KnownAccount, KnownVendor } from "@/lib/call-center/metrics/config
 
 type ScheduleText = Record<IsoWeekday, string>;
 const CLOSURE_OUTCOME_LABELS: Record<ClosureOutcome, string> = {
-  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_SE_PUDO_VENDER: "No se pudo vender",
+  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_LO_TRABAJAMOS: "No se pudo vender · no lo trabajamos", SIN_STOCK: "No se pudo vender · sin stock o discontinuado",
   SOLO_BOT: "Solo bot, sin atención de una persona", OTRO: "Otro",
 };
 

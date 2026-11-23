@@ -239,5 +239,13 @@ test("cuenta de supervisión: campo opcional; no puede ser de sistema a la vez",
   assert.ok(errorsOf(cfg).length > 0);
 });
 
+test("etiquetas de cierre: \"no se pudo vender\" va en dos resultados; el resultado único anterior ya no vale", () => {
+  const cfg = base() as ReturnType<typeof base> & { closureLabels?: Array<{ label: string; outcome: string }> };
+  cfg.closureLabels = [{ label: "etiqueta_inventada_a", outcome: "NO_LO_TRABAJAMOS" }, { label: "etiqueta_inventada_b", outcome: "SIN_STOCK" }];
+  assert.equal(parseConfigData(cfg).ok, true);
+  cfg.closureLabels = [{ label: "etiqueta_inventada_a", outcome: "NO_SE_PUDO_VENDER" as never }];
+  assert.ok(errorsOf(cfg).length > 0);
+});
+
 console.log(`\nmetrics/config: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

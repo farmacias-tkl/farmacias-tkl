@@ -53,8 +53,8 @@ export interface ConversationKind {
 export type KindCounts = Record<MainKind, number>;
 
 /** Resultado de cierre que eligió el operador al resolver (ver config-schema.ts). */
-export type ClosureOutcome = "VENTA" | "CONSULTA" | "PEDIDO_NO_CONCRETADO" | "NO_SE_PUDO_VENDER" | "SOLO_BOT" | "OTRO";
-export const CLOSURE_OUTCOME_LIST: readonly ClosureOutcome[] = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_SE_PUDO_VENDER", "SOLO_BOT", "OTRO"];
+export type ClosureOutcome = "VENTA" | "CONSULTA" | "PEDIDO_NO_CONCRETADO" | "NO_LO_TRABAJAMOS" | "SIN_STOCK" | "SOLO_BOT" | "OTRO";
+export const CLOSURE_OUTCOME_LIST: readonly ClosureOutcome[] = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_LO_TRABAJAMOS", "SIN_STOCK", "SOLO_BOT", "OTRO"];
 
 /**
  * Qué tipos detectados cuentan como coincidencia con cada resultado del operador. "OTRO" no
@@ -65,7 +65,9 @@ export const OUTCOME_MATCHES: Record<ClosureOutcome, readonly MainKind[]> = {
   VENTA: ["PEDIDO"],
   CONSULTA: ["CONSULTA", "SEGUIMIENTO"],
   PEDIDO_NO_CONCRETADO: ["VENTA_PERDIDA", "PEDIDO_SIN_CONFIRMAR", "COMPRO_TKL"],
-  NO_SE_PUDO_VENDER: ["NO_SE_PUDO_TOMAR"],
+  // Los dos motivos de "no se pudo vender" se comparan con el mismo tipo detectado.
+  NO_LO_TRABAJAMOS: ["NO_SE_PUDO_TOMAR"],
+  SIN_STOCK: ["NO_SE_PUDO_TOMAR"],
   SOLO_BOT: ["SALUDO"],
   OTRO: [],
 };
