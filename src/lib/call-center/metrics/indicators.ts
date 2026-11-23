@@ -204,6 +204,26 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     needsConfig: false,
   },
   {
+    key: "queue.whatsapp_window",
+    block: "AHORA",
+    label: "Ventana de WhatsApp",
+    definition:
+      "Regla de Meta: desde el último mensaje del cliente hay 24 horas de reloj para responder libremente; " +
+      "después, la conversación solo se reabre con una plantilla aprobada. \"Cerrada\" es que pasaron más de " +
+      "24 horas; \"por vencer\", que todavía se puede responder y falta menos que el aviso configurado " +
+      "(4 horas si no se cargó). Tiempo real: corre de noche, fines de semana y feriados. Es independiente " +
+      "del semáforo de la meta, que mide minutos hábiles.",
+    source: "ConversationMessage.sentAt del último mensaje del cliente",
+    population: "AHORA",
+    denominator: null,
+    evidence: "MEDIDO",
+    limitations: [
+      "Usa la hora del mensaje que informa Emozion. No se consulta a WhatsApp si la ventana sigue abierta.",
+      "Un mensaje del cliente que no llegó a la plataforma no reabre la ventana acá.",
+    ],
+    needsConfig: false,
+  },
+  {
     key: "queue.not_customers",
     block: "DATOS",
     label: "No son clientes",

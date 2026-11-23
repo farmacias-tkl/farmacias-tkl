@@ -19,7 +19,7 @@ const NOW = new Date("2026-03-10T15:00:00.000Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
 const SINCE = hoursAgo(24 * 30);
 const row = (id: string, over: Partial<WaitingRow> = {}): WaitingRow => ({
-  conversationId: id, open: false, status: "RESUELTA", externalAssigneeId: null, createdAt: hoursAgo(5), waitStart: hoursAgo(5), hasHumanResponse: false,
+  conversationId: id, open: false, status: "RESUELTA", externalAssigneeId: null, createdAt: hoursAgo(5), waitStart: hoursAgo(5), lastCustomerAt: hoursAgo(5), hasHumanResponse: false,
   botExitAt: hoursAgo(4.9), botOrderComplete: false, customerChars: 200, customerSentMedia: false,
   customerSentLink: false, previousResolvedRecently: false, ...over,
 });
@@ -157,7 +157,7 @@ test("hoy, cerradas sin responder e histórico pasan tal cual; los que no son cl
   const closed = buildClosedUnanswered([block("q", { blockHasQuestion: true }), block("prov", { blockNotCustomer: true, blockHasAttachment: true })]);
   const p = payload([], { wait: null, accounts: [], openBlocks: null, progress: null, checks: null, today: { entered: 12, answered: 9, attended: 20 }, closed, history: { before: SINCE, total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 } });
   assert.deepEqual(p.today, { entered: 12, answered: 9, attended: 20 });
-  assert.deepEqual(p.closedUnanswered, { days: 7, total: 1, question: 1, order: 0, attachment: 0, items: [{ conversationId: "q", lastCustomerAt: hoursAgo(3).toISOString(), reason: "QUESTION" }] });
+  assert.deepEqual(p.closedUnanswered, { days: 7, total: 1, question: 1, order: 0, attachment: 0, items: [{ conversationId: "q", lastCustomerAt: hoursAgo(3).toISOString(), reason: "QUESTION", windowClosed: false }] });
   assert.deepEqual(p.quality.closedBefore, { total: 7424, neverHuman: 2944, awaitingNext: 4480, completedOrders: 49 });
   assert.deepEqual([p.quality.notCustomers, p.quality.notCustomersDays], [1, 7]);
 });

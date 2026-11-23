@@ -123,6 +123,8 @@ async function main() {
       const r = byId.get(ids.abiertaSiguiente)!;
       assert.equal(r.hasHumanResponse, true);
       assert.equal(r.waitStart.getTime(), hoursAgo(6).getTime());
+      // La ventana de WhatsApp corre desde el ÚLTIMO mensaje del cliente, no desde el inicio del bloque.
+      assert.equal(r.lastCustomerAt.getTime(), hoursAgo(5).getTime());
     });
     await check("agradecimiento corto tras un cierre: candidato; con foto: no", () => {
       const g = snap.items.find((i) => i.conversationId === ids.gracias)!;

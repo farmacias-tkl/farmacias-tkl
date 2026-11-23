@@ -45,9 +45,18 @@ const REASON_LABELS: Record<ClosedReason, string> = {
   ATTACHMENT: "Mandó una receta o un comprobante",
 };
 
-type CaseFilter = "all" | "critical" | "orders" | "longest";
+type CaseFilter = "all" | "closing" | "closed" | "critical" | "orders" | "longest";
+
+/** "3 h 20 min" o "45 min" que faltan para que se cierre la ventana de WhatsApp. */
+function windowLeftLabel(lastCustomerAt: string, nowMs: number, hours: number): string {
+  const left = Math.max(0, Math.floor((new Date(lastCustomerAt).getTime() + hours * 3_600_000 - nowMs) / 60_000));
+  const h = Math.floor(left / 60);
+  return h > 0 ? `${h} h ${left % 60} min` : `${left} min`;
+}
 
 const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
+  closing: "con la ventana de WhatsApp por vencer, de la que vence antes a la que vence después",
+  closed: "con la ventana de WhatsApp cerrada",
   critical: "en demora crítica",
   orders: "con pedido completo sin primera respuesta",
   longest: "el caso con mayor espera",
@@ -72,7 +81,9 @@ export default function NowPanel() {
   const w = d.waiting;
   const toggle = (f: CaseFilter) => setFilter((cur) => (cur === f ? "all" : f));
   const shown =
-    filter === "critical" ? d.list.filter((it) => it.level === "CRITICO")
+    filter === "closing" ? d.list.filter((it) => it.window === "POR_VENCER").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : 1))
+    : filter === "closed" ? d.list.filter((it) => it.window === "CERRADA")
+    : filter === "critical" ? d.list.filter((it) => it.level === "CRITICO")
     : filter === "orders" ? d.list.filter((it) => it.botOrderComplete && !it.hasHumanResponse)
     : filter === "longest" ? d.list.slice(0, 1)
     : d.list;
@@ -85,6 +96,12 @@ export default function NowPanel() {
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
         <h2 className="text-sm font-semibold text-gray-800">Requiere acción</h2>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <ActionButton label={`Ventana de WhatsApp por vencer (menos de ${d.window.warningHours} h)`} value={nf.format(d.window.closing)} tone={d.window.closing ? "warning" : "plain"}
+            active={filter === "closing"} onClick={() => toggle("closing")} />
+          <ActionButton label="Ventana de WhatsApp cerrada · requiere plantilla" value={nf.format(d.window.closed)} tone="plain"
+            active={filter === "closed"} onClick={() => toggle("closed")} />
+        </div>
         <div className="mt-2 grid grid-cols-3 gap-2">
           <ActionButton label="En demora crítica" value={w.critical === null ? "—" : nf.format(w.critical)} tone={w.critical ? "critical" : "plain"}
             active={filter === "critical"} disabled={w.critical === null} onClick={() => toggle("critical")} />
@@ -98,7 +115,10 @@ export default function NowPanel() {
           {w.critical === null ? " Sin configuración cargada no se puede marcar la demora crítica." : ""}
         </p>
         <More>
-          Los tres grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
+          Ventana de WhatsApp: desde el último mensaje del cliente hay {d.window.hours} horas de reloj para responder libremente, también de noche, los fines de semana y
+          los feriados. Pasado ese plazo la conversación solo se reabre con una plantilla aprobada. &quot;Por vencer&quot; son las que todavía se pueden responder y les
+          quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
+          {" "}Los grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
           {d.schedule ? ` En plazo es hasta ${d.schedule.goalMinutes} minutos hábiles de espera, demorado hasta ${d.schedule.criticalMinutes} y crítico más de ${d.schedule.criticalMinutes}.` : ""}
           {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso no se muestra en plazo.
         </More>
@@ -165,7 +185,7 @@ export default function NowPanel() {
         </p>
       ) : (
         <ul className="mt-2 grid gap-2 lg:grid-cols-2">
-          {shown.map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} schedule={d.schedule} />)}
+          {shown.map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} schedule={d.schedule} windowHours={d.window.hours} />)}
         </ul>
       )}
 
@@ -177,14 +197,14 @@ export default function NowPanel() {
 
 /** Número del bloque "Requiere acción": funciona como filtro de la lista de casos. */
 function ActionButton({ label, value, tone, active, disabled, onClick }: {
-  label: string; value: string; tone: "critical" | "plain"; active: boolean; disabled?: boolean; onClick: () => void;
+  label: string; value: string; tone: "critical" | "warning" | "plain"; active: boolean; disabled?: boolean; onClick: () => void;
 }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active}
       className={`flex min-h-[76px] flex-col rounded-md border p-2 text-left disabled:opacity-60 ${
-        active ? "border-[#1E2D5A] ring-2 ring-[#1E2D5A]" : tone === "critical" ? "border-red-200" : "border-gray-200"
-      } ${tone === "critical" ? "bg-red-50" : "bg-white"}`}>
-      <span className={`text-xl font-semibold tabular-nums ${tone === "critical" ? "text-red-900" : "text-gray-900"}`}>{value}</span>
+        active ? "border-[#1E2D5A] ring-2 ring-[#1E2D5A]" : tone === "critical" ? "border-red-200" : tone === "warning" ? "border-orange-200" : "border-gray-200"
+      } ${tone === "critical" ? "bg-red-50" : tone === "warning" ? "bg-orange-50" : "bg-white"}`}>
+      <span className={`text-xl font-semibold tabular-nums ${tone === "critical" ? "text-red-900" : tone === "warning" ? "text-orange-900" : "text-gray-900"}`}>{value}</span>
       <span className="mt-0.5 text-[11px] leading-tight text-gray-700">{label}</span>
     </button>
   );
@@ -355,7 +375,7 @@ function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["sc
 }
 
 /** Tarjeta compacta: semáforo y tiempo, las dos etiquetas, desde cuándo espera y el enlace. */
-function CaseCard({ it, nowMs, schedule }: { it: NowListItem; nowMs: number; schedule: NowPayload["schedule"] }) {
+function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs: number; schedule: NowPayload["schedule"]; windowHours: number }) {
   const paused = it.level !== null && !schedule?.inPublicHours;
   return (
     <li className="rounded-lg border border-gray-200 bg-white px-3 py-2">
@@ -368,13 +388,23 @@ function CaseCard({ it, nowMs, schedule }: { it: NowListItem; nowMs: number; sch
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
         {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
       </p>
+      {it.window === "CERRADA" && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-gray-400 bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana de WhatsApp cerrada · requiere plantilla</span></p>
+      )}
+      {it.window === "POR_VENCER" && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-900">Ventana vence en {windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}</span></p>
+      )}
       <p className="mt-1 text-xs text-gray-700">
         Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>
         {it.level !== null && it.level !== "FUERA_HORARIO" ? ` · espera real ${formatWait(it.waitMinutes)}` : ""}
         {paused ? ` · reloj hábil pausado${it.level === "FUERA_HORARIO" && it.businessMinutes ? ` en ${formatWait(it.businessMinutes)}` : ""}` : ""}
         {it.thanksCandidate ? " · puede ser solo un agradecimiento" : ""}
       </p>
-      <p className="text-xs text-gray-600">La conversación entró {whenLabel(it.createdAt, nowMs)}</p>
+      <p className="text-xs text-gray-600">
+        Último mensaje del cliente {whenLabel(it.lastCustomerAt, nowMs)}
+        {it.window === "ABIERTA" ? ` · ventana de WhatsApp abierta, quedan ${windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}` : ""}
+        {" "}· la conversación entró {whenLabel(it.createdAt, nowMs)}
+      </p>
     </li>
   );
 }
@@ -393,6 +423,7 @@ function StaleCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
       <p className="mt-1 text-xs text-gray-700">
         Abiertas hace más de {d.windowHours} horas.
         {s.oldestWaitStart ? ` La más vieja espera desde el ${dayFmt.format(new Date(s.oldestWaitStart))}.` : ""}
+        {s.total > 0 ? ` ${nf.format(d.window.staleClosed)} de ${nf.format(s.total)} tienen la ventana de WhatsApp cerrada: para retomarlas hace falta una plantilla.` : ""}
       </p>
       {classified ? (
         <>
@@ -419,7 +450,10 @@ function StaleGroup({ title, count, note, items, nowMs }: { title: string; count
       <ul className="mt-1 divide-y divide-amber-200">
         {items.map((it) => (
           <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
-            <span className="text-xs text-gray-800">Espera desde {whenLabel(it.waitStart, nowMs)}</span>
+            <span className="text-xs text-gray-800">
+              Espera desde {whenLabel(it.waitStart, nowMs)}
+              <span className="block text-gray-700">{it.windowClosed ? "Ventana de WhatsApp cerrada · requiere plantilla" : "Ventana de WhatsApp abierta"}</span>
+            </span>
             <ConversationLink id={it.conversationId} />
           </li>
         ))}
@@ -438,7 +472,10 @@ function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
       </div>
       {c && (
         <>
-          <p className="mt-1 text-xs text-gray-700">Últimos {c.days} días.</p>
+          <p className="mt-1 text-xs text-gray-700">
+            Últimos {c.days} días.
+            {d.window.closedUnansweredClosed !== null && c.total > 0 ? ` ${nf.format(d.window.closedUnansweredClosed)} de ${nf.format(c.total)} tienen la ventana de WhatsApp cerrada.` : ""}
+          </p>
           <More>Se cerraron sin contestar lo último que escribió el cliente. No incluye agradecimientos ni avisos de que ya compró.</More>
           <dl className="mt-2 space-y-0.5 text-sm text-gray-700">
             <div className="flex justify-between gap-2"><dt>Con una consulta</dt><dd className="font-medium tabular-nums text-gray-900">{nf.format(c.question)}</dd></div>
@@ -453,7 +490,7 @@ function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
                   <li key={it.conversationId} className="flex items-center justify-between gap-2 py-1">
                     <span className="text-xs text-gray-700">
                       {REASON_LABELS[it.reason]}
-                      <span className="block text-gray-600">Escribió {whenLabel(it.lastCustomerAt, nowMs)}</span>
+                      <span className="block text-gray-600">Escribió {whenLabel(it.lastCustomerAt, nowMs)} · {it.windowClosed ? "ventana de WhatsApp cerrada, requiere plantilla" : "ventana de WhatsApp abierta"}</span>
                     </span>
                     <ConversationLink id={it.conversationId} />
                   </li>

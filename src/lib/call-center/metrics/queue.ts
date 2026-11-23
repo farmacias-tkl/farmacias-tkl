@@ -42,6 +42,8 @@ export interface WaitingRow {
   createdAt: Date;
   /** Primer mensaje del cliente del bloque sin responder: desde cuándo espera. */
   waitStart: Date;
+  /** Último mensaje del cliente: desde acá corre la ventana de 24 horas de WhatsApp. */
+  lastCustomerAt: Date;
   /** Ya tuvo al menos un mensaje público de operador (espera la SIGUIENTE respuesta). */
   hasHumanResponse: boolean;
   /** Salida del bot (aproximación a la derivación); null si no está registrada. */
@@ -131,6 +133,7 @@ interface RawWaitingRow {
   assignee: string | null;
   createdAt: Date;
   waitStart: Date;
+  lastCustomerAt: Date;
   hasHuman: boolean;
   botExitAt: Date | null;
   done: boolean | null;
@@ -172,6 +175,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
       (SELECT min(m."sentAt") FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
           AND (a.last_op IS NULL OR m."sentAt" > a.last_op)) AS "waitStart",
+      a.last_cust AS "lastCustomerAt",
       (a.last_op IS NOT NULL) AS "hasHuman",
       (SELECT min(h."changedAt") FROM "ConversationStateHistory" h
         WHERE h."conversationId" = s.id AND h."fromStatus" = 'PENDIENTE'
@@ -198,6 +202,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     externalAssigneeId: r.assignee,
     createdAt: r.createdAt,
     waitStart: r.waitStart,
+    lastCustomerAt: r.lastCustomerAt,
     hasHumanResponse: r.hasHuman,
     botExitAt: r.botExitAt,
     botOrderComplete: r.done === true,
