@@ -112,6 +112,17 @@ function Report({ data }: { data: AccountsPayload }) {
         </ul>
       )}
 
+      {data.supervisionAccounts.length > 0 && (
+        <>
+          <h2 className="mt-6 text-sm font-semibold text-gray-800">
+            Supervisión<span className="ml-2 text-xs font-normal text-gray-600">no son operadores y no suman en el equipo</span>
+          </h2>
+          <ul className="mt-2 grid gap-3 lg:grid-cols-2">
+            {data.supervisionAccounts.map((a) => <AccountCard key={a.account ?? "sin-cuenta"} a={a} />)}
+          </ul>
+        </>
+      )}
+
       {data.systemAccounts.length > 0 && (
         <>
           <h2 className="mt-6 text-sm font-semibold text-gray-800">

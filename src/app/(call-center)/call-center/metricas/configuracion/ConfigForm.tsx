@@ -128,7 +128,7 @@ export default function ConfigForm({
       ...(branchOrderHours.length > 0 ? { branchOrderHours } : {}),
       ...(closureLabels.some((c) => c.label.trim()) ? { closureLabels: closureLabels.filter((c) => c.label.trim()).map((c) => ({ label: c.label.trim(), outcome: c.outcome })) } : {}),
       // system se guarda siempre explícito, aunque la versión base no lo tuviera.
-      accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true })),
+      accounts: accounts.map((a) => ({ ...a, alias: a.alias && a.alias.trim() ? a.alias.trim() : null, system: a.system === true, ...(a.supervision === true ? { supervision: true } : {}) })),
       callCenterVendors: [...vendors].map((k) => {
         const [branchId, ...rest] = k.split("|");
         // La asociación se guarda solo si esa cuenta sigue en la lista de cuentas.
@@ -239,7 +239,7 @@ export default function ConfigForm({
         <h2 className="text-sm font-semibold text-gray-800">Cuentas de Emozion</h2>
         <p className="text-xs text-gray-500">
           Se muestran por su número o por el alias. Activa: está en uso, aunque no escriba por una ausencia. Prestada: la usa otra persona que su titular.
-          Histórica: ya no se usa y aparece solo en los períodos en que tuvo actividad. Sistema: no es una persona (por ejemplo, una cuenta a la que
+          Histórica: ya no se usa y aparece solo en los períodos en que tuvo actividad. Supervisión: la usa quien supervisa; se muestra aparte de los operadores y no suma en el equipo. Sistema: no es una persona (por ejemplo, una cuenta a la que
           Emozion asigna conversaciones de forma automática).
         </p>
         <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
@@ -253,6 +253,7 @@ export default function ConfigForm({
                 <th className="px-3 py-2 font-medium">Prestada</th>
                 <th className="px-3 py-2 font-medium">Histórica</th>
                 <th className="px-3 py-2 font-medium">Sistema</th>
+                <th className="px-3 py-2 font-medium">Supervisión</th>
                 <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
@@ -290,7 +291,11 @@ export default function ConfigForm({
                     </td>
                     <td className="px-3 py-2">
                       <input type="checkbox" aria-label={`Cuenta ${a.externalId} de sistema`} checked={a.system === true}
-                        onChange={(e) => updateAccount(i, { system: e.target.checked })} />
+                        onChange={(e) => updateAccount(i, { system: e.target.checked, ...(e.target.checked ? { supervision: false } : {}) })} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" aria-label={`Cuenta ${a.externalId} de supervisión`} checked={a.supervision === true}
+                        onChange={(e) => updateAccount(i, { supervision: e.target.checked, ...(e.target.checked ? { system: false } : {}) })} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       {!known && (

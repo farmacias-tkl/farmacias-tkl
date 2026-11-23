@@ -170,6 +170,23 @@ test("cuenta de sistema: si escribe va en un grupo aparte y no suma en el equipo
   assert.deepEqual(r.activeWithoutMessages, []);
 });
 
+test("cuenta de supervisión: va en su grupo, aparte de los operadores y de las de sistema, y no suma en el equipo", () => {
+  const withSup: ConfigVersion[] = [{ ...versions[0], data: { ...versions[0].data, accounts: [acc("9001"), acc("9007", { supervision: true, alias: "Supervisión inventada" }), acc("9009", { system: true })] } }];
+  const r = build({
+    messages: [msg("9001", "c1", "2026-03-02T10:00"), msg("9007", "c1", "2026-03-02T10:30"), msg("9007", "c2", "2026-03-02T11:00"), msg("9007", "c2", "2026-03-02T11:05", true)],
+    followups: [block("c1", "2026-03-02T10:10", "2026-03-02T10:30", "9007"), block("c1", "2026-03-02T10:40", "2026-03-02T10:50", "9001")],
+    facts: [fact("2026-03-02T10:00", "2026-03-02T10:20", "9007"), fact("2026-03-02T10:00", "2026-03-02T10:05", "9001")],
+  }, withSup);
+  assert.deepEqual(r.accounts.map((a) => a.account), ["9001"]);
+  assert.deepEqual(r.supervisionAccounts.map((a) => [a.account, a.alias, a.conversations, a.privateNotes]), [["9007", "Supervisión inventada", 2, 1]]);
+  assert.deepEqual(r.systemAccounts, []);
+  // El equipo cuenta solo lo de los operadores.
+  assert.deepEqual([r.team.conversations, r.team.conversationsWithSeveralAccounts, r.team.privateNotes], [1, 0, 0]);
+  assert.deepEqual([r.team.firstResponses.n, r.team.followups.n], [1, 1]);
+  // Sin mensajes en el período no aparece entre las cuentas activas sin mensajes: no es un operador.
+  assert.deepEqual(build({ messages: [msg("9001", "c1", "2026-03-02T10:00")] }, withSup).activeWithoutMessages, []);
+});
+
 test("sin cuentas de sistema el grupo queda vacío", () => {
   assert.deepEqual(build({ messages: [msg("9001", "c1", "2026-03-02T10:00")] }).systemAccounts, []);
 });

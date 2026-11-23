@@ -73,15 +73,27 @@ const accountSchema = z
      * Por ahora solo se guarda: ni la bandeja ni las métricas lo usan todavía.
      */
     system: z.boolean().optional(),
+    /**
+     * Cuenta de supervisión: la usa una persona que supervisa y a veces responde, pero no es
+     * un operador. Se muestra aparte y no entra en los totales del equipo. OPCIONAL, igual
+     * que `system`: ausente equivale a false (isSupervisionAccount).
+     */
+    supervision: z.boolean().optional(),
   })
   .strict()
-  .refine((a) => !(a.active && a.historical), "Una cuenta no puede ser activa e histórica a la vez");
+  .refine((a) => !(a.active && a.historical), "Una cuenta no puede ser activa e histórica a la vez")
+  .refine((a) => !(a.system === true && a.supervision === true), "Una cuenta no puede ser de sistema y de supervisión a la vez");
 
 export type ConfigAccount = z.infer<typeof accountSchema>;
 
 /** ¿Es una cuenta de sistema? El campo es opcional: sin él, no lo es. */
 export function isSystemAccount(a: Pick<ConfigAccount, "system">): boolean {
   return a.system === true;
+}
+
+/** ¿Es una cuenta de supervisión? El campo es opcional: sin él, no lo es. */
+export function isSupervisionAccount(a: Pick<ConfigAccount, "supervision">): boolean {
+  return a.supervision === true;
 }
 
 const vendorSchema = z

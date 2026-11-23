@@ -26,7 +26,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, isWithinHours, utcTimestampParam, type DayRanges } from "./business-time";
 import { configForDay, type ConfigVersion } from "./config";
-import { CLOSURE_OUTCOMES, isSystemAccount, type ClosureOutcome, type ConfigAccount } from "./config-schema";
+import { CLOSURE_OUTCOMES, isSupervisionAccount, isSystemAccount, type ClosureOutcome, type ConfigAccount } from "./config-schema";
 import { publicHours, operatorHours } from "./schedule";
 import { distribution, type Distribution, type EntryFact } from "./attention";
 
@@ -90,6 +90,8 @@ export interface AccountsReport {
   accounts: AccountReportRow[];
   /** Cuentas de sistema con mensajes en el período: aparte, fuera de los totales del equipo. */
   systemAccounts: AccountReportRow[];
+  /** Cuentas de supervisión: no son operadores. Se muestran aparte y no suman en el equipo. */
+  supervisionAccounts: AccountReportRow[];
   team: {
     /** Cada conversación una sola vez, aunque hayan participado varias cuentas. */
     conversations: number;
@@ -153,6 +155,12 @@ export function buildAccountsReport(
     const cfg = account ? configured.get(account) : undefined;
     return !!cfg && isSystemAccount(cfg);
   };
+  const isSupervision = (account: string | null) => {
+    const cfg = account ? configured.get(account) : undefined;
+    return !!cfg && isSupervisionAccount(cfg);
+  };
+  /** Fuera de los totales del equipo: cuentas de sistema y de supervisión. */
+  const outsideTeam = (account: string | null) => isSystem(account) || isSupervision(account);
 
   const accountsByConversation = new Map<string, Set<string>>();
   let teamNotes = 0;
@@ -163,7 +171,7 @@ export function buildAccountsReport(
     a.days.add(day);
     if (!a.first || m.sentAt < a.first) a.first = m.sentAt;
     if (!a.last || m.sentAt > a.last) a.last = m.sentAt;
-    const system = isSystem(m.account);
+    const system = outsideTeam(m.account);
     if (m.isPrivate) { a.privateNotes++; if (!system) teamNotes++; }
     else {
       a.publicMessages++;
@@ -184,7 +192,7 @@ export function buildAccountsReport(
   const teamFirst: number[] = [];
   for (const f of input.facts) {
     if (f.clockMinutes === null) continue;
-    if (!isSystem(f.firstHumanAccount)) teamFirst.push(f.clockMinutes);
+    if (!outsideTeam(f.firstHumanAccount)) teamFirst.push(f.clockMinutes);
     get(f.firstHumanAccount).firstResponses.push(f.clockMinutes);
   }
 
@@ -193,7 +201,7 @@ export function buildAccountsReport(
   for (const b of input.followups) {
     if (!b.respondedAt) { followupsUnanswered++; continue; }
     const minutes = Math.max(0, (b.respondedAt.getTime() - b.startedAt.getTime()) / MS_MIN);
-    if (!isSystem(b.account)) teamFollowups.push(minutes);
+    if (!outsideTeam(b.account)) teamFollowups.push(minutes);
     get(b.account).followups.push(minutes);
   }
 
@@ -231,18 +239,20 @@ export function buildAccountsReport(
   // Orden estable por número de cuenta: NO por demora ni por volumen (sin ranking).
   all.sort((x, y) => (x.account ?? "￿").localeCompare(y.account ?? "￿", "es", { numeric: true }));
 
-  const accounts = all.filter((a) => !isSystem(a.account));
+  const accounts = all.filter((a) => !outsideTeam(a.account));
   const systemAccounts = all.filter((a) => isSystem(a.account));
+  const supervisionAccounts = all.filter((a) => isSupervision(a.account));
 
   const seen = new Set(all.map((a) => a.account));
   const activeWithoutMessages = [...configured.values()]
-    .filter((c) => c.active && !c.historical && !isSystemAccount(c) && !seen.has(c.externalId))
+    .filter((c) => c.active && !c.historical && !isSystemAccount(c) && !isSupervisionAccount(c) && !seen.has(c.externalId))
     .map((c) => ({ account: c.externalId, alias: c.alias, borrowed: c.borrowed }));
 
   return {
     generatedAt: opts.now,
     accounts,
     systemAccounts,
+    supervisionAccounts,
     team: {
       conversations: accountsByConversation.size,
       conversationsWithSeveralAccounts: [...accountsByConversation.values()].filter((s) => s.size > 1).length,
