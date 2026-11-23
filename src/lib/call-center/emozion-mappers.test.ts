@@ -13,7 +13,9 @@ import {
   normalizeMessage,
   normalizeStatusEvent,
   normalizeUpdateEvent,
-  keyPathsOf,
+  normalizeLabels,
+  labelsIfPresent,
+  LABELS_MAX,
   SUPPORTED_EVENTS,
   normalizeClosure,
   normalizeExternalAssigneeId,
@@ -295,14 +297,14 @@ test("updated. está en la lista de eventos y lee SOLO tipo de cierre, asignado 
   } as never);
   assert.equal(r.outcome, "processed");
   assert.deepEqual(r.data, {
-    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null,
+    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null, labels: ["etiqueta"],
   });
   // Hora del evento: updated_at (ISO o epoch) o, si no viene, resolved_at.
   assert.equal(normalizeUpdateEvent({ id: 707, updated_at: ISO2, resolved_at: ISO }).data?.eventAt?.toISOString(), new Date(ISO2).toISOString());
   assert.equal(normalizeUpdateEvent({ id: 708, resolved_at: ISO }).data?.eventAt?.toISOString(), new Date(ISO).toISOString());
   assert.equal(normalizeUpdateEvent({ id: 709, updated_at: 1781735745 }).data?.eventAt?.getTime(), 1781735745000);
   const json = JSON.stringify(r);
-  assert.ok(!/COMENTARIO|closure_comment|5491100000003|Nombre Ficticio|etiqueta/.test(json), "ni comentario, ni teléfono, ni nombre, ni etiquetas");
+  assert.ok(!/COMENTARIO|closure_comment|5491100000003|Nombre Ficticio/.test(json), "ni comentario, ni teléfono, ni nombre");
 });
 
 test("updated. sin meta.assignee el asignado no se toca; con null queda sin asignado; sin id no se mapea", () => {
@@ -315,25 +317,19 @@ test("updated. sin meta.assignee el asignado no se toca; con null queda sin asig
   assert.equal(normalizeUpdateEvent({ id: 704, messages: [{ conversation_id: 705 }] }).outcome, "insufficientData");
 });
 
-test("rutas de claves: solo nombres y tipos, nunca valores", () => {
-  const paths = keyPathsOf({
-    event: "conversation_updated", id: 706, closure_type_name: "VALOR-SECRETO-A",
-    meta: { sender: { phone_number: "+5491100000004", name: "VALOR-SECRETO-B" }, assignee: { id: 5 } },
-    changed_attributes: [{ closure_type_id: { previous_value: null, current_value: 3 } }],
-    custom_attributes: { dni: "VALOR-SECRETO-C", "5491100000005": "x" },
-    "5491100000006": true, "clave con espacios": 1,
-  });
-  assert.ok(paths.includes("closure_type_name:string"));
-  assert.ok(paths.includes("meta.assignee.id:number"));
-  assert.ok(paths.includes("meta.sender.phone_number:string"));
-  assert.ok(paths.includes("changed_attributes[0].closure_type_id.current_value:number"));
-  assert.ok(paths.includes("custom_attributes:object"), "se anota la clave pero no se recorre");
-  assert.ok(!paths.some((p) => p.startsWith("custom_attributes.")));
-  assert.equal(paths.filter((p) => p.startsWith("[clave]:")).length, 2, "una clave que parece un dato no se copia");
-  const dump = JSON.stringify(paths);
-  assert.ok(!/VALOR-SECRETO|54911000000|706/.test(dump), "ningún valor");
-  assert.equal(keyPathsOf({ a: { b: { c: 1 } } }, 2).length, 2, "respeta el tope");
-  assert.deepEqual(keyPathsOf(null), []);
+test("etiquetas: solo nombres de etiqueta; el texto libre, lo repetido y lo que no es texto se descartan", () => {
+  const conv = { id: 710, labels: ["solo_consulta", "tkl_san_miguel", "dr-app", "  a_mi_domicilio ", "texto libre con espacios", "", 7, null, { x: 1 }, "solo_consulta", "x".repeat(65)] };
+  assert.deepEqual(normalizeLabels(conv as never), ["solo_consulta", "tkl_san_miguel", "dr-app", "a_mi_domicilio"]);
+  assert.equal(normalizeLabels({ id: 711, labels: Array.from({ length: 80 }, (_, i) => `etiqueta_${i}`) }).length, LABELS_MAX);
+});
+
+test("etiquetas en los eventos: si el evento trae la clave se informan (aunque esté vacía); si no la trae, null", () => {
+  assert.deepEqual(normalizeUpdateEvent({ id: 712, status: "resolved", labels: ["solo_consulta"] }).data?.labels, ["solo_consulta"]);
+  assert.deepEqual(normalizeUpdateEvent({ id: 713, status: "resolved", labels: [] }).data?.labels, []);
+  assert.equal(normalizeUpdateEvent({ id: 714, status: "resolved" }).data?.labels, null);
+  assert.deepEqual(normalizeStatusEvent({ id: 715, status: "resolved", labels: ["venta_concretada", "retiro_en_sucursal"] }).data?.labels, ["venta_concretada", "retiro_en_sucursal"]);
+  assert.equal(normalizeStatusEvent({ id: 716, status: "open" }).data?.labels, null);
+  assert.equal(labelsIfPresent({ id: 717, labels: "no-es-lista" } as never), null);
 });
 
 console.log(`\nemozion-mappers: ${passed} ok, ${failures.length} fail`);

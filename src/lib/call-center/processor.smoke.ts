@@ -18,7 +18,7 @@ import {
   readEnvelope,
   normalizeConversation,
   normalizeMessage,
-  normalizeStatusEvent, normalizeUpdateEvent, keyPathsOf,
+  normalizeStatusEvent, normalizeUpdateEvent,
   conversationExternalId,
 } from "./emozion-mappers";
 import {
@@ -81,7 +81,7 @@ const rawAtt = (id: number, fileType = "image", fileSize = 1024, sentinel = "") 
 });
 
 // B6.3-C2: opciones de captura que espejan el handler (modo efectivo + allowlist + debug).
-type CaptureOpts = { capture?: { mode: CaptureMode; allowedHosts: string[] }; debugOn?: boolean; keyPaths?: boolean };
+type CaptureOpts = { capture?: { mode: CaptureMode; allowedHosts: string[] }; debugOn?: boolean };
 
 // Espeja la construcción de payload del handler usando los MAPPERS REALES (y, desde B6.3-C2,
 // el MISMO gate de transientSourceUrls que usa el route).
@@ -110,7 +110,7 @@ function buildFromRaw(raw: any, opts: CaptureOpts = {}): { eventType: string; ex
     else status = "ERROR";
   } else if (eventType === "conversation_updated") {
     const r = normalizeUpdateEvent(env.conversation);
-    if (r.outcome === "processed") payload = { event: eventType, updateEvent: r.data, ...(opts.keyPaths ? { keyPaths: keyPathsOf(raw) } : {}) };
+    if (r.outcome === "processed") payload = { event: eventType, updateEvent: r.data };
     else status = "ERROR";
   }
   // Debug capture (espeja el route): el payload pasa a ser la vista estructural, no el normalizado.
@@ -402,17 +402,78 @@ async function main() {
       const dump = JSON.stringify([await convUpd(), await prisma.webhookEvent.findMany({ where: { externalConversationId: { in: [String(UPD), "39699"] } } })]);
       assert.ok(!dump.includes("SENTINEL_UPDATED_COMMENT"), "closure_comment no llega a ninguna tabla");
     });
-    await check("5n. rutas de claves: quedan en el evento procesado, solo con nombres y tipos", async () => {
-      const id = await run(rawUpd("conversation_updated", "resolved", 80, CIERRE), { keyPaths: true });
-      const ev = await prisma.webhookEvent.findUniqueOrThrow({ where: { id } });
-      const payload = ev.payload as { keyPaths?: string[]; updateEvent?: unknown };
-      assert.ok(Array.isArray(payload.keyPaths) && payload.keyPaths.includes("closure_type_id:number") && payload.keyPaths.includes("meta.assignee.id:number"));
-      assert.equal(payload.updateEvent, undefined, "el normalizado se descarta");
-      const dump = JSON.stringify(ev);
-      assert.ok(!/SENTINEL_UPDATED_COMMENT|Tipo inventado|5491100000005|Cliente Ficticio/.test(dump), "ningún valor");
-      // Sin registro de claves, el payload queda vacío como en los demás eventos.
-      const otro = await run(rawUpd("conversation_updated", "resolved", 80));
-      assert.equal((await prisma.webhookEvent.findUniqueOrThrow({ where: { id: otro } })).payload, null);
+    // 5o. Etiquetas de cierre (datos inventados). Cuáles son de cierre sale de la configuración.
+    const LAB = 39700;
+    const rawLab = (event: string, status: string, labels?: string[], extra: Record<string, unknown> = {}) => {
+      const { labels: _l, ...base } = rawConvCreated(LAB, "+5491100000007", "Cliente Ficticio Etiquetas", status, [], 77, event);
+      return { ...base, ...(labels ? { labels } : {}), ...extra };
+    };
+    const convLab = () => prisma.conversation.findUnique({ where: { externalConversationId: String(LAB) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] }, messages: true } });
+    const { resetClosureLabelsCache } = await import("./closure-labels");
+
+    await check("5o. sin etiquetas de cierre en la configuración: las etiquetas se guardan y no hay resultado de cierre", async () => {
+      await run(rawLab("conversation_created", "open", ["a_mi_domicilio"]));
+      await run(rawLab("conversation_status_changed", "resolved", ["a_mi_domicilio"]));
+      await run(rawLab("conversation_updated", "resolved", ["a_mi_domicilio", "solo_consulta"]));
+      const c = await convLab();
+      assert.deepEqual([c!.externalLabels, c!.closureTypeName, c!.status], [["a_mi_domicilio", "solo_consulta"], null, "RESUELTA"]);
+      await run(rawLab("conversation_status_changed", "open", ["a_mi_domicilio"]));
+    });
+
+    // Desde acá la configuración define dos etiquetas de cierre.
+    const EMPTY_WEEK = { "1": [], "2": [], "3": [], "4": [], "5": [], "6": [], "7": [] };
+    await prisma.callCenterMetricsConfig.create({
+      data: {
+        validFrom: new Date("2020-01-01T00:00:00.000Z"),
+        data: {
+          schemaVersion: 1, publicHours: EMPTY_WEEK, operatorHours: EMPTY_WEEK, firstResponseGoalMinutes: 15, accounts: [], callCenterVendors: [],
+          closureLabels: [{ label: "solo_consulta", outcome: "CONSULTA" }, { label: "venta_concretada", outcome: "VENTA" }],
+        },
+      },
+    });
+    resetClosureLabelsCache();
+
+    await check("5p. etiqueta de cierre DESPUÉS del cambio de estado: resultado en la conversación y en la fila RESUELTA; las demás etiquetas no son de cierre", async () => {
+      await run(rawLab("conversation_status_changed", "resolved", ["a_mi_domicilio", "tkl_san_miguel", "dr_app"]));
+      const antes = await convLab();
+      assert.deepEqual([antes!.status, antes!.closureTypeName], ["RESUELTA", null], "modalidad, sucursal y origen de receta no son de cierre");
+      await run(rawLab("conversation_updated", "resolved", ["a_mi_domicilio", "tkl_san_miguel", "dr_app", "solo_consulta"], { updated_at: new Date(Date.now() + 1000).toISOString() }));
+      const c = await convLab();
+      assert.deepEqual([c!.closureTypeName, c!.closureTypeId, c!.externalLabels], ["solo_consulta", null, ["a_mi_domicilio", "tkl_san_miguel", "dr_app", "solo_consulta"]]);
+      assert.equal(c!.stateHistory.length, antes!.stateHistory.length, "no agrega filas");
+      const last = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([last.toStatus, last.closureTypeName], ["RESUELTA", "solo_consulta"]);
+      // Repetido: idempotente.
+      await run(rawLab("conversation_updated", "resolved", ["a_mi_domicilio", "tkl_san_miguel", "dr_app", "solo_consulta"], { updated_at: new Date(Date.now() + 2000).toISOString() }));
+      assert.equal((await convLab())!.stateHistory.length, antes!.stateHistory.length);
+      assert.equal(c!.messages.length, 0, "no crea mensajes");
+    });
+    await check("5q. reapertura: el resultado se limpia en la conversación y queda en el historial; las etiquetas siguen al evento", async () => {
+      await run(rawLab("conversation_status_changed", "open", ["a_mi_domicilio"]));
+      const c = await convLab();
+      assert.deepEqual([c!.status, c!.closureTypeName, c!.externalLabels], ["ASIGNADA", null, ["a_mi_domicilio"]]);
+      assert.ok(c!.stateHistory.some((h) => h.toStatus === "RESUELTA" && h.closureTypeName === "solo_consulta"));
+      // Abierta y con un evento que no dice resuelta: una etiqueta de cierre no fija resultado.
+      await run(rawLab("conversation_updated", "open", ["a_mi_domicilio", "solo_consulta"], { updated_at: new Date(Date.now() + 1000).toISOString() }));
+      assert.equal((await convLab())!.closureTypeName, null);
+    });
+    await check("5r. etiqueta de cierre ANTES del cambio de estado: el cambio de estado la conserva y la guarda en su fila", async () => {
+      await run(rawLab("conversation_updated", "resolved", ["a_mi_domicilio", "venta_concretada"], { updated_at: new Date(Date.now() + 2000).toISOString() }));
+      assert.deepEqual([(await convLab())!.status, (await convLab())!.closureTypeName], ["ASIGNADA", "venta_concretada"]);
+      await run(rawLab("conversation_status_changed", "resolved"));
+      const c = await convLab();
+      assert.deepEqual([c!.status, c!.closureTypeName], ["RESUELTA", "venta_concretada"]);
+      assert.equal(c!.stateHistory[c!.stateHistory.length - 1].closureTypeName, "venta_concretada");
+      assert.deepEqual(c!.externalLabels, ["a_mi_domicilio", "venta_concretada"], "un evento sin la clave labels no borra las etiquetas");
+    });
+    await check("5s. el cambio de estado que ya trae la etiqueta de cierre la toma directamente; un evento sin etiquetas de cierre no borra el resultado", async () => {
+      await run(rawLab("conversation_status_changed", "open", []));
+      await run(rawLab("conversation_status_changed", "resolved", ["retiro_en_sucursal", "solo_consulta"]));
+      let c = await convLab();
+      assert.deepEqual([c!.closureTypeName, c!.stateHistory[c!.stateHistory.length - 1].closureTypeName], ["solo_consulta", "solo_consulta"]);
+      await run(rawLab("conversation_updated", "resolved", ["retiro_en_sucursal"], { updated_at: new Date(Date.now() + 3000).toISOString() }));
+      c = await convLab();
+      assert.deepEqual([c!.closureTypeName, c!.externalLabels], ["solo_consulta", ["retiro_en_sucursal"]]);
     });
 
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)

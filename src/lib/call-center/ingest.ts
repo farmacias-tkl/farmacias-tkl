@@ -181,6 +181,21 @@ export async function upsertMessageFromEmozion(
   };
 }
 
+const NO_CLOSURE_LABELS: ReadonlySet<string> = new Set();
+const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Etiqueta de cierre entre las etiquetas de una conversación: la que el operador elige al
+ * resolver, que una automatización de Emozion agrega como etiqueta. Cuáles son de cierre lo
+ * dice la configuración de métricas, no el código. Si hay más de una, la última de la lista.
+ * PURO.
+ */
+export function closureLabelOf(labels: readonly string[] | null | undefined, closureLabels: ReadonlySet<string>): string | null {
+  if (!labels) return null;
+  for (let i = labels.length - 1; i >= 0; i--) if (closureLabels.has(labels[i])) return labels[i];
+  return null;
+}
+
 /**
  * Aplica un cambio de estado ingerido. Registra la REALIDAD de Emozion: NO bloquea por
  * canTransition() (esa whitelist gobierna las acciones de operador, Sprint 2). Si la
@@ -193,6 +208,8 @@ export async function upsertMessageFromEmozion(
 export async function applyStatusChangedFromEmozion(
   tx: Prisma.TransactionClient,
   n: NormalizedStatusEvent,
+  // Etiquetas que la configuración vigente define como de cierre. Vacío = ninguna.
+  closureLabels: ReadonlySet<string> = NO_CLOSURE_LABELS,
 ): Promise<ApplyStatusResult> {
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
@@ -224,9 +241,12 @@ export async function applyStatusChangedFromEmozion(
   // `?? null`: los eventos guardados antes de estos campos no los traen.
   const externalAssigneeId = n.externalAssigneeId ?? null;
   const resolved = n.status === "RESUELTA";
+  //  - etiqueta de cierre: si el evento trae las etiquetas y una es de cierre, ese es el
+  //    resultado de la resolución y se guarda como nombre del tipo de cierre (sin código).
   const eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
-  const closureTypeId = !resolved ? null : eventHasClosure ? n.closureTypeId ?? null : conv.closureTypeId;
-  const closureTypeName = !resolved ? null : eventHasClosure ? n.closureTypeName ?? null : conv.closureTypeName;
+  const label = resolved ? closureLabelOf(n.labels, closureLabels) : null;
+  const closureTypeId = !resolved || label ? null : eventHasClosure ? n.closureTypeId ?? null : conv.closureTypeId;
+  const closureTypeName = !resolved ? null : label ?? (eventHasClosure ? n.closureTypeName ?? null : conv.closureTypeName);
 
   await tx.conversation.update({
     where: { id: conv.id },
@@ -235,6 +255,8 @@ export async function applyStatusChangedFromEmozion(
       externalAssigneeId,
       closureTypeId,
       closureTypeName,
+      // Las etiquetas del evento reemplazan a las guardadas, solo si el evento trae la clave.
+      ...(n.labels ? { externalLabels: n.labels } : {}),
       ...(n.closedAt && !conv.closedAt ? { closedAt: n.closedAt } : {}),
     },
   });
@@ -254,7 +276,7 @@ export async function applyStatusChangedFromEmozion(
 }
 
 /**
- * Aplica un conversation_updated: SOLO tipo de cierre y asignado. No crea mensajes, no cambia
+ * Aplica un conversation_updated: SOLO tipo de cierre, asignado y etiquetas. No crea mensajes, no cambia
  * el estado y no agrega filas al historial, así que varios eventos seguidos son idempotentes.
  *
  *  - Tipo de cierre: se guarda si la conversación está RESUELTA, o si el propio evento dice
@@ -267,17 +289,21 @@ export async function applyStatusChangedFromEmozion(
  *    hora del historial es la de procesamiento, y el evento que acompaña a una resolución
  *    puede traer una hora unos segundos anterior a la fila de esa misma resolución.
  *  - Asignado: solo si el evento trae la clave meta.assignee; con null queda sin asignado.
+ *  - Etiquetas: si el evento trae la clave `labels`, reemplazan a las guardadas. Si una es de
+ *    cierre (según la configuración), es el resultado de la resolución y se guarda como
+ *    nombre del tipo de cierre, con las mismas reglas.
  *
  * Conversación inexistente → "ignored" (sin reintento: el evento no trae con qué crearla).
  */
 export async function applyConversationUpdatedFromEmozion(
   tx: Prisma.TransactionClient,
   n: NormalizedUpdateEvent,
+  closureLabels: ReadonlySet<string> = NO_CLOSURE_LABELS,
 ): Promise<ApplyStatusResult> {
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, externalAssigneeId: true, closureTypeId: true, closureTypeName: true },
+    select: { id: true, status: true, externalAssigneeId: true, closureTypeId: true, closureTypeName: true, externalLabels: true },
   });
   if (!conv) {
     return { outcome: "ignored", conversationId: null, warnings: ["conversation_updated sobre conversación inexistente → ignorado"] };
@@ -285,8 +311,13 @@ export async function applyConversationUpdatedFromEmozion(
 
   const data: Prisma.ConversationUpdateInput = {};
   if (n.assigneePresent && n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
+  if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
 
-  let eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
+  // El resultado del cierre: la etiqueta de cierre si la hay; si no, el tipo de cierre del evento.
+  const label = closureLabelOf(n.labels, closureLabels);
+  const closureId = label ? null : n.closureTypeId;
+  const closureName = label ?? n.closureTypeName;
+  let eventHasClosure = closureId != null || closureName != null;
   const isResolved = conv.status === "RESUELTA";
   if (eventHasClosure && n.eventAt) {
     const reopened = await tx.conversationStateHistory.findFirst({
@@ -301,9 +332,9 @@ export async function applyConversationUpdatedFromEmozion(
   }
   if (eventHasClosure) {
     if (isResolved || n.resolved) {
-      if (n.closureTypeId !== conv.closureTypeId || n.closureTypeName !== conv.closureTypeName) {
-        data.closureTypeId = n.closureTypeId;
-        data.closureTypeName = n.closureTypeName;
+      if (closureId !== conv.closureTypeId || closureName !== conv.closureTypeName) {
+        data.closureTypeId = closureId;
+        data.closureTypeName = closureName;
       }
     } else {
       warnings.push("conversation_updated con tipo de cierre sobre una conversación no resuelta → no se guarda");
@@ -318,10 +349,10 @@ export async function applyConversationUpdatedFromEmozion(
       orderBy: [{ changedAt: "desc" }, { id: "desc" }],
       select: { id: true, closureTypeId: true, closureTypeName: true },
     });
-    if (last && (last.closureTypeId !== n.closureTypeId || last.closureTypeName !== n.closureTypeName)) {
+    if (last && (last.closureTypeId !== closureId || last.closureTypeName !== closureName)) {
       await tx.conversationStateHistory.update({
         where: { id: last.id },
-        data: { closureTypeId: n.closureTypeId, closureTypeName: n.closureTypeName },
+        data: { closureTypeId: closureId, closureTypeName: closureName },
       });
     }
   }

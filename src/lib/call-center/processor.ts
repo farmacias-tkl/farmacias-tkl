@@ -8,6 +8,7 @@ import {
 } from "./ingest";
 import { parseTransientSourceUrls } from "./attachment-source";
 import { safeErrorCode } from "./safe-error";
+import { loadClosureLabels } from "./closure-labels";
 import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent, NormalizedUpdateEvent } from "./emozion-types";
 
 /**
@@ -120,6 +121,7 @@ function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
     closureTypeId: typeof u.closureTypeId === "string" ? u.closureTypeId : null,
     closureTypeName: typeof u.closureTypeName === "string" ? u.closureTypeName : null,
     eventAt: toDate(u.eventAt),
+    labels: Array.isArray(u.labels) ? u.labels.filter((l: unknown): l is string => typeof l === "string") : null,
   };
 }
 
@@ -131,6 +133,10 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
   if (!ev) return { status: "ERROR", outcome: "error", warnings: [], error: "WebhookEvent no encontrado" };
 
   const warnings: string[] = [];
+  // Etiquetas de cierre de la configuración vigente: solo hacen falta para estos dos eventos.
+  const closureLabels = ev.eventType === "conversation_status_changed" || ev.eventType === "conversation_updated"
+    ? await loadClosureLabels()
+    : new Set<string>();
   let domainOk = false;
   let outcome: DomainOutcome = "processed";
   let errorMsg: string | null = null;
@@ -175,15 +181,15 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
           break;
         }
         case "conversation_status_changed": {
-          const r = await applyStatusChangedFromEmozion(tx, hydrateStatusEvent(payload.statusEvent));
+          const r = await applyStatusChangedFromEmozion(tx, hydrateStatusEvent(payload.statusEvent), closureLabels);
           warnings.push(...r.warnings);
           // status change sobre conversación inexistente (fuera de orden).
           if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", "STATUS_OUT_OF_ORDER");
           break;
         }
         case "conversation_updated": {
-          // Solo tipo de cierre y asignado: sin mensajes, sin cambio de estado, sin filas nuevas.
-          const r = await applyConversationUpdatedFromEmozion(tx, hydrateUpdateEvent(payload.updateEvent));
+          // Solo tipo de cierre, asignado y etiquetas: sin mensajes, sin cambio de estado, sin filas nuevas.
+          const r = await applyConversationUpdatedFromEmozion(tx, hydrateUpdateEvent(payload.updateEvent), closureLabels);
           warnings.push(...r.warnings);
           break;
         }
@@ -219,18 +225,12 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
 
   // ── (2) FUERA de la transacción de dominio: marca (+ SyncLog solo en fallo) ──
   if (domainOk) {
-    // Diagnóstico temporal: si el receptor registró las rutas de claves del evento (solo
-    // nombres y tipos, nunca valores), se conservan en lugar del payload normalizado.
-    const keyPaths = (ev.payload as { keyPaths?: unknown } | null)?.keyPaths;
-    const keptPayload = Array.isArray(keyPaths) && keyPaths.every((k) => typeof k === "string")
-      ? ({ keyPaths } as Prisma.InputJsonValue)
-      : Prisma.JsonNull;
     await prisma.webhookEvent.update({
       where: { id: ev.id },
       data: {
         status: "PROCESSED",
         processedAt: new Date(),
-        payload: keptPayload, // minimización: el dato ya vive en el dominio
+        payload: Prisma.JsonNull, // minimización: el dato ya vive en el dominio
         // B6.3-C2: origen transitorio anulado en el MISMO update. DbNull (SQL NULL), NO JsonNull:
         // los barridos e invariantes usan `IS NULL`.
         transientSourceUrls: Prisma.DbNull,

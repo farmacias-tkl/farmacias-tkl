@@ -115,6 +115,28 @@ const branchOrderHoursSchema = z
 
 export type ConfigBranchOrderHours = z.infer<typeof branchOrderHoursSchema>;
 
+/**
+ * Resultado de una conversación según la etiqueta de cierre que elige el operador al resolver:
+ *  - VENTA: venta concretada;
+ *  - CONSULTA: consulta resuelta;
+ *  - PEDIDO_NO_CONCRETADO: el cliente no hizo el pedido;
+ *  - NO_SE_PUDO_VENDER: no lo trabajamos, sin stock o discontinuado;
+ *  - SOLO_BOT: solo navegó por el bot, sin atención de una persona;
+ *  - OTRO: etiqueta de cierre que no entra en los anteriores.
+ */
+export const CLOSURE_OUTCOMES = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_SE_PUDO_VENDER", "SOLO_BOT", "OTRO"] as const;
+export type ClosureOutcome = (typeof CLOSURE_OUTCOMES)[number];
+
+const closureLabelSchema = z
+  .object({
+    /** Nombre de la etiqueta en Emozion, tal como llega (por ejemplo "venta_concretada"). */
+    label: z.string().trim().min(1).max(64).regex(/^[\p{L}\p{N}_-]+$/u, "Solo letras, números, guion y guion bajo"),
+    outcome: z.enum(CLOSURE_OUTCOMES),
+  })
+  .strict();
+
+export type ConfigClosureLabel = z.infer<typeof closureLabelSchema>;
+
 export const callCenterMetricsConfigSchema = z
   .object({
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
@@ -147,6 +169,12 @@ export const callCenterMetricsConfigSchema = z
      * se marca dentro ni fuera de horario.
      */
     branchOrderHours: z.array(branchOrderHoursSchema).max(100).optional(),
+    /**
+     * Etiquetas de cierre: las que Emozion agrega al resolver con el resultado que eligió el
+     * operador, y a qué resultado corresponde cada una. OPCIONAL. Las demás etiquetas de una
+     * conversación (modalidad, sucursal, origen de la receta) no son de cierre.
+     */
+    closureLabels: z.array(closureLabelSchema).max(100).optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {
@@ -166,6 +194,13 @@ export const callCenterMetricsConfigSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["branchOrderHours"], message: "Sucursal repetida en el horario de pedidos" });
       }
       orderBranches.add(b.branchId);
+    }
+    const closure = new Set<string>();
+    for (const c of cfg.closureLabels ?? []) {
+      if (closure.has(c.label)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["closureLabels"], message: "Etiqueta de cierre repetida" });
+      }
+      closure.add(c.label);
     }
     const vendors = new Set<string>();
     for (const v of cfg.callCenterVendors) {

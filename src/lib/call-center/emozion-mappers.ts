@@ -196,11 +196,31 @@ export function normalizeClosure(conv: EmozionConversation | null | undefined): 
   return { closureTypeId, closureTypeName, warnings };
 }
 
-/** labels crudas → string[] limpio (sin unificar). Staging hacia futuro ConversationTag. */
+/** Tope de etiquetas por conversación y de largo de cada una. */
+export const LABELS_MAX = 50;
+export const LABEL_NAME_MAX = 64;
+
+/**
+ * labels crudas → string[] limpio (sin unificar). SOLO nombres de etiqueta: letras, números,
+ * guion y guion bajo, hasta LABEL_NAME_MAX caracteres. Cualquier otra cosa (texto con
+ * espacios, objetos) se descarta: una etiqueta no es texto libre.
+ */
 export function normalizeLabels(conv: EmozionConversation | null | undefined): string[] {
   const labels = conv?.labels;
   if (!Array.isArray(labels)) return [];
-  return labels.filter((l): l is string => typeof l === "string" && l.length > 0);
+  const out: string[] = [];
+  for (const l of labels) {
+    if (typeof l !== "string") continue;
+    const name = l.trim();
+    if (name.length > 0 && name.length <= LABEL_NAME_MAX && /^[\p{L}\p{N}_-]+$/u.test(name) && !out.includes(name)) out.push(name);
+    if (out.length >= LABELS_MAX) break;
+  }
+  return out;
+}
+
+/** Etiquetas del evento si trae la clave `labels` como lista (aunque esté vacía); null si no la trae. */
+export function labelsIfPresent(conv: EmozionConversation | null | undefined): string[] | null {
+  return Array.isArray(conv?.labels) ? normalizeLabels(conv) : null;
 }
 
 function normalizeContact(c: EmozionContact | null | undefined): { phone: string; displayName: string | null } | null {
@@ -337,6 +357,7 @@ export function normalizeStatusEvent(conv: EmozionConversation | null | undefine
       externalAssigneeId: normalizeExternalAssigneeId(conv),
       closureTypeId: closure.closureTypeId,
       closureTypeName: closure.closureTypeName,
+      labels: labelsIfPresent(conv),
     },
     warnings: [...st.warnings, ...closure.warnings],
     authorFallbackCount: 0,
@@ -344,9 +365,9 @@ export function normalizeStatusEvent(conv: EmozionConversation | null | undefine
 }
 
 /**
- * conversation_updated → NormalizedUpdateEvent. Lee SOLO closure_type_id, closure_type_name y
- * meta.assignee.id, con los mismos normalizadores que el cambio de estado. Nunca
- * closure_comment ni otro texto. insufficientData si falta el id o hay discrepancia.
+ * conversation_updated → NormalizedUpdateEvent. Lee SOLO closure_type_id, closure_type_name,
+ * meta.assignee.id y los nombres de las etiquetas, con los mismos normalizadores que el
+ * cambio de estado. Nunca closure_comment ni otro texto. insufficientData si falta el id o hay discrepancia.
  */
 export function normalizeUpdateEvent(conv: EmozionConversation | null | undefined): NormalizeResult<NormalizedUpdateEvent> {
   const { id, discrepancy } = resolveConversationId(conv);
@@ -368,39 +389,11 @@ export function normalizeUpdateEvent(conv: EmozionConversation | null | undefine
       closureTypeId: closure.closureTypeId,
       closureTypeName: closure.closureTypeName,
       eventAt: parseTimestamp(conv?.updated_at) ?? parseTimestamp(conv?.resolved_at),
+      labels: labelsIfPresent(conv),
     },
     warnings: closure.warnings,
     authorFallbackCount: 0,
   };
-}
-
-/** Tope de rutas que guarda keyPathsOf. */
-export const KEY_PATHS_MAX = 200;
-/** Claves cuyo contenido no se recorre: pueden tener nombres de clave puestos por el cliente o el operador. */
-const KEY_PATHS_OPAQUE = new Set(["custom_attributes", "additional_attributes"]);
-
-/**
- * Rutas de claves de un payload, con el TIPO de cada valor y NUNCA el valor: "meta.assignee.id:number".
- * Diagnóstico temporal para ubicar dónde viaja un campo. De un arreglo se mira solo el primer
- * elemento. Una clave que parece un dato (dígitos largos, arroba, espacios) se reemplaza por
- * "[clave]". PURO.
- */
-export function keyPathsOf(root: unknown, max: number = KEY_PATHS_MAX): string[] {
-  const out: string[] = [];
-  const typeOf = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
-  const safeKey = (k: string) => (k.length > 40 || /[0-9]{5,}|@|\s/.test(k) ? "[clave]" : k);
-  const walk = (node: unknown, path: string, depth: number) => {
-    if (out.length >= max || depth > 6 || node === null || typeof node !== "object") return;
-    if (Array.isArray(node)) { if (node.length > 0) walk(node[0], `${path}[0]`, depth + 1); return; }
-    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-      if (out.length >= max) return;
-      const p = path ? `${path}.${safeKey(k)}` : safeKey(k);
-      out.push(`${p}:${typeOf(v)}`);
-      if (!KEY_PATHS_OPAQUE.has(k)) walk(v, p, depth + 1);
-    }
-  };
-  walk(root, "", 0);
-  return out;
 }
 
 /** Id externo (string) de una conversación para denormalizar columnas (mismo criterio que los mappers). */
