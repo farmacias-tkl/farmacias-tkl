@@ -13,8 +13,11 @@ import type { WindowState } from "./whatsapp-window";
 /** Segundos de caché del bloque en el servidor y de refresco en la pantalla. */
 export const NOW_CACHE_SECONDS = 60;
 
-/** Semáforo de espera, en minutos hábiles del horario público. */
-export type WaitLevel = "EN_PLAZO" | "DEMORADO" | "CRITICO" | "FUERA_HORARIO";
+/**
+ * Semáforo de espera. En minutos hábiles del horario público; además es crítico todo caso con
+ * la ventana de WhatsApp cerrada (24 horas o más de reloj desde el último mensaje del cliente).
+ */
+export type WaitLevel = "EN_PLAZO" | "DEMORADO" | "CRITICO";
 
 /**
  * Responsable de un caso, según la cuenta de Emozion asignada y la configuración vigente:
@@ -46,7 +49,10 @@ export interface NowListItem {
    * más de 10 minutos después del bot. Si son las dos, URGENTE. null si ninguna.
    */
   alert: "URGENTE" | "INSISTIENDO" | null;
-  /** null si no hay configuración vigente: sin horario no hay semáforo. */
+  /**
+   * null si no hay configuración vigente y la ventana de WhatsApp sigue abierta: sin horario
+   * no hay semáforo. Con la ventana cerrada es CRITICO aunque no haya configuración.
+   */
   level: WaitLevel | null;
   /** Minutos hábiles de espera; null sin configuración. */
   businessMinutes: number | null;

@@ -5,10 +5,14 @@
  * vigente hoy: hasta la meta es "en plazo", hasta la demora crítica es "demorado" y más
  * allá es "crítico".
  *
- * Fuera del horario público el reloj está pausado. Un caso que todavía no pasó la meta NO
- * se muestra en plazo mientras el reloj no corre (tener cero minutos hábiles no es estar
- * bien): queda "fuera del horario público". Uno que ya venía demorado o crítico lo sigue
- * estando: la demora acumulada no se borra al cerrar.
+ * Un caso es crítico, además, cuando su ventana de WhatsApp está cerrada: pasaron 24 horas o
+ * más de reloj desde el último mensaje del cliente sin respuesta de un operador. Esa
+ * condición vale aunque el reloj hábil esté pausado o sume pocos minutos (entró un sábado al
+ * mediodía: 7 minutos hábiles y 36 horas reales). La aplica now.ts con whatsapp-window.ts.
+ *
+ * Fuera del horario público el reloj hábil está pausado, pero el caso conserva el color que
+ * le corresponde por lo acumulado: la demora no se borra al cerrar. Que el reloj esté
+ * pausado se informa al lado, como texto, no en lugar del color.
  *
  * Desde cuándo corre el reloj:
  *  - sin primera respuesta: desde la salida del bot (la misma regla de la meta de primera
@@ -33,10 +37,10 @@ export interface WaitContext {
 }
 
 /** PURO. */
-export function waitLevel(businessMinutes: number, inPublicHours: boolean, ctx: Pick<WaitContext, "goalMinutes" | "criticalMinutes">): WaitLevel {
+export function waitLevel(businessMinutes: number, ctx: Pick<WaitContext, "goalMinutes" | "criticalMinutes">): WaitLevel {
   if (businessMinutes > ctx.criticalMinutes) return "CRITICO";
   if (businessMinutes > ctx.goalMinutes) return "DEMORADO";
-  return inPublicHours ? "EN_PLAZO" : "FUERA_HORARIO";
+  return "EN_PLAZO";
 }
 
 /** Inicio del reloj hábil de un caso en espera. PURO. */
@@ -51,7 +55,7 @@ export function classifyWait(
   ctx: WaitContext,
 ): { level: WaitLevel; businessMinutes: number } {
   const businessMinutes = businessMinutesBetween(waitClockStart(c), now, ctx.pub);
-  return { level: waitLevel(businessMinutes, isWithinHours(now, ctx.pub), ctx), businessMinutes: Math.round(businessMinutes) };
+  return { level: waitLevel(businessMinutes, ctx), businessMinutes: Math.round(businessMinutes) };
 }
 
 /** Estado del horario al momento `now`. PURO. */

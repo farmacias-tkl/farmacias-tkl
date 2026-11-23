@@ -31,12 +31,11 @@ function whenLabel(iso: string, nowMs: number): string {
 const ownerLabel = (o: NowListItem["owner"]) =>
   o.kind === "SYSTEM" ? "Asignación automática" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin responsable identificado";
 
-/** Semáforo: fondo suave y la etiqueta siempre en texto. Fuera del horario público va sin color. */
+/** Semáforo: fondo suave y la etiqueta siempre en texto. */
 const LEVELS: Record<WaitLevel, { label: string; chip: string; dot: string }> = {
   EN_PLAZO: { label: "En plazo", chip: "border-green-200 bg-green-50 text-green-900", dot: "bg-green-600" },
   DEMORADO: { label: "Demorado", chip: "border-orange-200 bg-orange-50 text-orange-900", dot: "bg-orange-500" },
   CRITICO: { label: "Crítico", chip: "border-red-200 bg-red-50 text-red-900", dot: "bg-red-600" },
-  FUERA_HORARIO: { label: "Fuera del horario público", chip: "border-gray-300 bg-white text-gray-800", dot: "border border-gray-400 bg-white" },
 };
 
 const REASON_LABELS: Record<ClosedReason, string> = {
@@ -132,7 +131,8 @@ export default function NowPanel() {
           quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
           {" "}Los grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
           {d.schedule ? ` En plazo es hasta ${d.schedule.goalMinutes} minutos hábiles de espera, demorado hasta ${d.schedule.criticalMinutes} y crítico más de ${d.schedule.criticalMinutes}.` : ""}
-          {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso no se muestra en plazo.
+          {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso conserva su color. Además es crítico todo caso
+          con la ventana de WhatsApp cerrada: {d.window.hours} horas o más de espera real desde el último mensaje del cliente, sume lo que sume el reloj hábil.
         </More>
       </div>
 
@@ -180,7 +180,7 @@ export default function NowPanel() {
 
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
         Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" ? d.listTotal : shown.length)})` : ""}
-        <span className="ml-2 text-xs font-normal text-gray-600">del que más espera al que menos</span>
+        <span className="ml-2 text-xs font-normal text-gray-600">primero los de ventana cerrada, después del que más espera al que menos</span>
       </h2>
       {filter !== "all" && (
         <p className="mt-1 text-xs text-gray-700">
@@ -383,27 +383,31 @@ function ConversationLink({ id }: { id: string }) {
 
 /** Etiqueta del semáforo con el tiempo destacado, en una línea. Sin configuración no hay semáforo: solo la espera real. */
 function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["schedule"] }) {
-  if (it.level === null || it.businessMinutes === null) {
+  if (it.level === null) {
     return <p className="text-base font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>;
   }
   const l = LEVELS[it.level];
+  const paused = schedule !== null && !schedule.inPublicHours;
   return (
     <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-semibold ${l.chip}`}>
         <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
         {l.label}
-        {it.level === "FUERA_HORARIO" && schedule?.operatorShiftActive ? " · turno de operadores activo" : ""}
       </span>
       <span className="text-base font-semibold tabular-nums text-gray-900">
-        {it.level === "FUERA_HORARIO" ? formatWait(it.waitMinutes) : `${formatWait(it.businessMinutes)} hábiles`}
+        {it.businessMinutes === null || it.window === "CERRADA" ? `${formatWait(it.waitMinutes)} reales` : `${formatWait(it.businessMinutes)} hábiles`}
       </span>
+      {paused && (
+        <span className="basis-full text-xs text-gray-700">
+          Fuera del horario público · reloj hábil pausado{schedule?.operatorShiftActive ? " · turno de operadores activo" : ""}
+        </span>
+      )}
     </p>
   );
 }
 
 /** Tarjeta compacta: semáforo y tiempo, las dos etiquetas, desde cuándo espera y el enlace. */
 function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs: number; schedule: NowPayload["schedule"]; windowHours: number }) {
-  const paused = it.level !== null && !schedule?.inPublicHours;
   return (
     <li className="rounded-lg border border-gray-200 bg-white px-3 py-2">
       <div className="flex items-start justify-between gap-2">
@@ -429,8 +433,8 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
       )}
       <p className="mt-1 text-xs text-gray-700">
         Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>
-        {it.level !== null && it.level !== "FUERA_HORARIO" ? ` · espera real ${formatWait(it.waitMinutes)}` : ""}
-        {paused ? ` · reloj hábil pausado${it.level === "FUERA_HORARIO" && it.businessMinutes ? ` en ${formatWait(it.businessMinutes)}` : ""}` : ""}
+        {" "}· espera real <span className="font-semibold text-gray-900">{formatWait(it.waitMinutes)}</span>
+        {it.businessMinutes !== null ? ` · ${formatWait(it.businessMinutes)} hábiles` : ""}
         {it.thanksCandidate ? " · puede ser solo un agradecimiento" : ""}
       </p>
       <p className="text-xs text-gray-600">

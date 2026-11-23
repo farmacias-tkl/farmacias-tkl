@@ -31,16 +31,17 @@ test("umbrales: hasta la meta en plazo, hasta la crítica demorado, más allá c
   assert.deepEqual(classifyWait(never("2026-03-10T10:59"), now, ctx), { level: "CRITICO", businessMinutes: 61 });
 });
 
-test("fuera del horario público con cero minutos hábiles: nunca en plazo", () => {
+test("fuera del horario público el caso conserva su color: con cero minutos hábiles está en plazo y el reloj pausado va aparte", () => {
   // Entró a las 21:00 del martes; son las 22:00.
-  assert.deepEqual(classifyWait(never("2026-03-10T21:00"), at("2026-03-10T22:00"), ctx), { level: "FUERA_HORARIO", businessMinutes: 0 });
+  assert.deepEqual(classifyWait(never("2026-03-10T21:00"), at("2026-03-10T22:00"), ctx), { level: "EN_PLAZO", businessMinutes: 0 });
+  assert.equal(scheduleState(at("2026-03-10T22:00"), ctx).inPublicHours, false);
   // Fin de semana.
-  assert.equal(classifyWait(never("2026-03-14T10:00"), at("2026-03-14T18:00"), ctx).level, "FUERA_HORARIO");
+  assert.equal(classifyWait(never("2026-03-14T10:00"), at("2026-03-14T18:00"), ctx).level, "EN_PLAZO");
 });
 
 test("fuera del horario: el reloj se pausa, pero la demora acumulada no se borra", () => {
   const now = at("2026-03-10T21:00");
-  assert.deepEqual(classifyWait(never("2026-03-10T18:50"), now, ctx), { level: "FUERA_HORARIO", businessMinutes: 10 });
+  assert.deepEqual(classifyWait(never("2026-03-10T18:50"), now, ctx), { level: "EN_PLAZO", businessMinutes: 10 });
   assert.deepEqual(classifyWait(never("2026-03-10T18:30"), now, ctx), { level: "DEMORADO", businessMinutes: 30 });
   assert.deepEqual(classifyWait(never("2026-03-10T15:00"), now, ctx), { level: "CRITICO", businessMinutes: 240 });
 });
@@ -70,7 +71,7 @@ test("demora crítica de la configuración: valor por defecto 60 y nunca por deb
   assert.equal(criticalWaitMinutesOf({ firstResponseGoalMinutes: 15 }), 60);
   assert.equal(criticalWaitMinutesOf({ firstResponseGoalMinutes: 15, criticalWaitMinutes: 45 }), 45);
   assert.equal(criticalWaitMinutesOf({ firstResponseGoalMinutes: 90 }), 91);
-  assert.equal(waitLevel(16, true, { goalMinutes: 15, criticalMinutes: 45 }), "DEMORADO");
+  assert.equal(waitLevel(16, { goalMinutes: 15, criticalMinutes: 45 }), "DEMORADO");
 });
 
 console.log(`\nmetrics/wait-level: ${passed} ok, ${failures.length} fail`);

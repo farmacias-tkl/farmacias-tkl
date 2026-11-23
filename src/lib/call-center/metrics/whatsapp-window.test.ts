@@ -117,6 +117,54 @@ test("Ahora: los antiguos y las cerradas sin responder marcan si su ventana est�
   assert.equal(payload([]).window.closedUnansweredClosed, null);
 });
 
+// ── Semáforo y ventana ────────────────────────────────────────────────────────────────
+
+const at2 = (s: string) => new Date(`${s}:00.000-03:00`);
+/** Público lunes a viernes 09–19, sábado 08–13; 2026-03-09 (lunes) es feriado de prueba. */
+const pubHours = (day: string) => {
+  if (day === "2026-03-09") return [];
+  const wd = new Date(`${day}T12:00:00.000Z`).getUTCDay();
+  return wd === 0 ? [] : wd === 6 ? [{ from: 8 * 60, to: 13 * 60 }] : [{ from: 9 * 60, to: 19 * 60 }];
+};
+const waitCtx = { pub: pubHours, ops: pubHours, goalMinutes: 15, criticalMinutes: 60 };
+const at36 = (rows: WaitingRow[], nowIso: string, extras: NowExtras = { ...NONE, wait: waitCtx }) =>
+  toNowPayload(buildQueueSnapshot(rows, at2(nowIso), SINCE), extras, { lastWebhookAt: null, lastMessageAt: null }, 72);
+
+test("semáforo: sábado 12:52 con 36 horas reales es crítico aunque sume 8 minutos hábiles", () => {
+  const t = at2("2026-03-07T12:52");
+  const p = at36([open("sabado", { createdAt: t, waitStart: t, lastCustomerAt: t, botExitAt: t })], "2026-03-09T00:52");
+  const it = p.list[0];
+  assert.deepEqual([it.level, it.businessMinutes, it.window, it.waitMinutes], ["CRITICO", 8, "CERRADA", 36 * 60]);
+  assert.equal(p.waiting.critical, 1);
+  assert.equal(p.schedule!.inPublicHours, false, "el reloj hábil está pausado y aun así es crítico");
+});
+
+test("semáforo: feriado con 2 horas reales conserva el color por minutos hábiles, con el reloj pausado", () => {
+  // Lunes feriado 09/03: entra a las 10:00, son las 12:00. Cero minutos hábiles: en plazo, y el horario público está cerrado.
+  const t = at2("2026-03-09T10:00");
+  const p = at36([open("feriado", { createdAt: t, waitStart: t, lastCustomerAt: t, botExitAt: t })], "2026-03-09T12:00");
+  assert.deepEqual([p.list[0].level, p.list[0].businessMinutes, p.list[0].window, p.list[0].waitMinutes], ["EN_PLAZO", 0, "ABIERTA", 120]);
+  assert.equal(p.schedule!.inPublicHours, false);
+  // Uno que venía demorado del sábado (30 minutos hábiles hasta las 13:00) sigue demorado en el feriado.
+  const v = at2("2026-03-07T12:30");
+  const q = at36([open("sabado", { createdAt: v, waitStart: v, lastCustomerAt: at2("2026-03-09T09:00"), botExitAt: v })], "2026-03-09T12:00");
+  assert.deepEqual([q.list[0].level, q.list[0].businessMinutes], ["DEMORADO", 30]);
+});
+
+test("orden de casos: primero los de ventana cerrada, del que más espera real al que menos; después el resto como venía", () => {
+  const p = payload([
+    open("abierta-vieja", { waitStart: hoursAgo(40), lastCustomerAt: hoursAgo(2) }),
+    open("cerrada-30", { waitStart: hoursAgo(30), lastCustomerAt: hoursAgo(30) }),
+    open("cerrada-50", { waitStart: hoursAgo(60), lastCustomerAt: hoursAgo(50) }),
+    open("cerrada-26", { waitStart: hoursAgo(70), lastCustomerAt: hoursAgo(26) }),
+    open("abierta-nueva", { waitStart: hoursAgo(1), lastCustomerAt: hoursAgo(1) }),
+  ]);
+  assert.deepEqual(p.list.map((i) => i.conversationId), ["cerrada-50", "cerrada-30", "cerrada-26", "abierta-vieja", "abierta-nueva"]);
+  // Sin configuración no hay semáforo, salvo los críticos por ventana cerrada.
+  assert.deepEqual(p.list.map((i) => i.level), ["CRITICO", "CRITICO", "CRITICO", null, null]);
+  assert.equal(p.waiting.critical, 3);
+});
+
 function week() {
   const d = [{ from: "09:00", to: "19:00" }];
   return { "1": d, "2": d, "3": d, "4": d, "5": d, "6": [], "7": [] };
