@@ -18,7 +18,7 @@ import {
   readEnvelope,
   normalizeConversation,
   normalizeMessage,
-  normalizeStatusEvent,
+  normalizeStatusEvent, normalizeUpdateEvent, keyPathsOf,
   conversationExternalId,
 } from "./emozion-mappers";
 import {
@@ -81,7 +81,7 @@ const rawAtt = (id: number, fileType = "image", fileSize = 1024, sentinel = "") 
 });
 
 // B6.3-C2: opciones de captura que espejan el handler (modo efectivo + allowlist + debug).
-type CaptureOpts = { capture?: { mode: CaptureMode; allowedHosts: string[] }; debugOn?: boolean };
+type CaptureOpts = { capture?: { mode: CaptureMode; allowedHosts: string[] }; debugOn?: boolean; keyPaths?: boolean };
 
 // Espeja la construcción de payload del handler usando los MAPPERS REALES (y, desde B6.3-C2,
 // el MISMO gate de transientSourceUrls que usa el route).
@@ -107,6 +107,10 @@ function buildFromRaw(raw: any, opts: CaptureOpts = {}): { eventType: string; ex
   } else if (eventType === "conversation_status_changed") {
     const r = normalizeStatusEvent(env.conversation);
     if (r.outcome === "processed") payload = { event: eventType, statusEvent: r.data };
+    else status = "ERROR";
+  } else if (eventType === "conversation_updated") {
+    const r = normalizeUpdateEvent(env.conversation);
+    if (r.outcome === "processed") payload = { event: eventType, updateEvent: r.data, ...(opts.keyPaths ? { keyPaths: keyPathsOf(raw) } : {}) };
     else status = "ERROR";
   }
   // Debug capture (espeja el route): el payload pasa a ser la vista estructural, no el normalizado.
@@ -299,6 +303,116 @@ async function main() {
       assert.equal(conv!.status, "SIN_ASIGNAR");
       assert.equal(conv!.externalAssigneeId, null);
       assert.equal(conv!.closureTypeId, null);
+    });
+
+    // 5g. conversation_updated: solo tipo de cierre y asignado (datos inventados).
+    const UPD = 39600;
+    const rawUpd = (event: string, status: string, assigneeId: number | null, extra: Record<string, unknown> = {}) => ({
+      ...rawConvCreated(UPD, "+5491100000005", "Cliente Ficticio Updated", status, [], assigneeId, event), ...extra,
+    });
+    const run = async (raw: any, opts: CaptureOpts = {}) => {
+      const { id } = await fromRaw(raw, opts);
+      assert.equal((await processWebhookEvent(id)).status, "PROCESSED");
+      return id;
+    };
+    const convUpd = () => prisma.conversation.findUnique({ where: { externalConversationId: String(UPD) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] }, messages: true } });
+    const CIERRE = { closure_type_id: 9, closure_type_name: "Tipo inventado U", closure_comment: "SENTINEL_UPDATED_COMMENT" };
+
+    await check("5g. tipo de cierre DESPUÉS del cambio de estado: se guarda en la conversación y completa la fila RESUELTA, sin filas nuevas", async () => {
+      await run(rawUpd("conversation_created", "open", 77));
+      await run(rawUpd("conversation_status_changed", "resolved", 77));
+      const antes = await convUpd();
+      assert.deepEqual([antes!.status, antes!.closureTypeId], ["RESUELTA", null]);
+      await run(rawUpd("conversation_updated", "resolved", 77, CIERRE));
+      const c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId, c!.closureTypeName], ["RESUELTA", "9", "Tipo inventado U"]);
+      assert.equal(c!.stateHistory.length, antes!.stateHistory.length, "no agrega filas al historial");
+      const last = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([last.toStatus, last.closureTypeId, last.closureTypeName], ["RESUELTA", "9", "Tipo inventado U"]);
+      assert.equal(c!.messages.length, 0, "no crea mensajes");
+    });
+    await check("5h. conversation_updated repetidos: idempotente, sin filas duplicadas", async () => {
+      const filas = (await convUpd())!.stateHistory.length;
+      await run(rawUpd("conversation_updated", "resolved", 77, CIERRE));
+      await run(rawUpd("conversation_updated", "resolved", 77, CIERRE));
+      // Un evento sin tipo de cierre no borra el que hay.
+      await run(rawUpd("conversation_updated", "resolved", 77));
+      const c = await convUpd();
+      assert.deepEqual([c!.stateHistory.length, c!.closureTypeId, c!.status], [filas, "9", "RESUELTA"]);
+    });
+    await check("5i. un cambio de estado posterior sin tipo de cierre no lo pisa con null", async () => {
+      await run(rawUpd("conversation_status_changed", "resolved", 77));
+      const c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId, c!.closureTypeName], ["RESUELTA", "9", "Tipo inventado U"]);
+      assert.equal(c!.stateHistory[c!.stateHistory.length - 1].closureTypeId, "9");
+    });
+    await check("5j. reapertura: el tipo de cierre de la conversación se limpia y queda en el historial de esa resolución", async () => {
+      await run(rawUpd("conversation_status_changed", "open", 77));
+      const c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId, c!.closureTypeName], ["ASIGNADA", null, null]);
+      assert.ok(c!.stateHistory.some((h) => h.toStatus === "RESUELTA" && h.closureTypeId === "9"));
+      // Con la conversación abierta y un evento que no dice resuelta, el tipo de cierre no se guarda.
+      await run(rawUpd("conversation_updated", "open", 77, CIERRE));
+      assert.equal((await convUpd())!.closureTypeId, null);
+    });
+    await check("5k. tipo de cierre ANTES del cambio de estado: el evento dice resuelta, y el cambio de estado sin cierre lo conserva", async () => {
+      const filas = (await convUpd())!.stateHistory.length;
+      await run(rawUpd("conversation_updated", "resolved", 77, { closure_type_id: 4, closure_type_name: "Tipo inventado V", updated_at: new Date(Date.now() + 1000).toISOString() }));
+      const previo = await convUpd();
+      assert.deepEqual([previo!.status, previo!.closureTypeId, previo!.stateHistory.length], ["ASIGNADA", "4", filas], "no cambia el estado ni agrega filas");
+      await run(rawUpd("conversation_status_changed", "resolved", 77));
+      const c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId, c!.closureTypeName], ["RESUELTA", "4", "Tipo inventado V"]);
+      const last = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([last.toStatus, last.closureTypeId], ["RESUELTA", "4"]);
+      assert.equal(c!.stateHistory.filter((h) => h.toStatus === "RESUELTA" && h.closureTypeId === "9").length >= 1, true, "la resolución anterior conserva su tipo");
+    });
+    await check("5k2. evento atrasado: un conversation_updated anterior a la última reapertura no vuelve a pegar el cierre viejo", async () => {
+      // Reapertura ahora; después llega un evento de la resolución anterior, con hora de hace una hora.
+      await run(rawUpd("conversation_status_changed", "open", 77));
+      const vieja = new Date(Date.now() - 3_600_000).toISOString();
+      await run(rawUpd("conversation_updated", "resolved", 77, { ...CIERRE, updated_at: vieja }));
+      let c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId, c!.closureTypeName], ["ASIGNADA", null, null]);
+      // Tampoco con resolved_at viejo y sin updated_at.
+      await run({ ...rawUpd("conversation_updated", "resolved", 77, CIERRE), resolved_at: vieja });
+      assert.equal((await convUpd())!.closureTypeId, null);
+      // La resolución nueva sin tipo de cierre no hereda nada.
+      await run(rawUpd("conversation_status_changed", "resolved", 77));
+      c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId], ["RESUELTA", null]);
+      // Y un evento con hora posterior a la reapertura sí se guarda.
+      await run(rawUpd("conversation_updated", "resolved", 77, { closure_type_id: 4, closure_type_name: "Tipo inventado V", updated_at: new Date(Date.now() + 1000).toISOString() }));
+      c = await convUpd();
+      assert.deepEqual([c!.closureTypeId, c!.stateHistory[c!.stateHistory.length - 1].closureTypeId], ["4", "4"]);
+    });
+    await check("5l. asignado: el evento lo actualiza sin cambiar el estado; sin la clave meta.assignee no se toca", async () => {
+      await run(rawUpd("conversation_updated", "resolved", 80));
+      let c = await convUpd();
+      assert.deepEqual([c!.externalAssigneeId, c!.status], ["80", "RESUELTA"]);
+      const { meta: _meta, ...sinMeta } = rawUpd("conversation_updated", "resolved", null);
+      await run(sinMeta);
+      c = await convUpd();
+      assert.equal(c!.externalAssigneeId, "80");
+    });
+    await check("5m. conversación inexistente: se procesa sin crear nada; el comentario de cierre no llega a ninguna tabla", async () => {
+      const raw = { ...rawConvCreated(39699, "+5491100000006", "Cliente Ficticio Sin Conversación", "resolved", [], 1, "conversation_updated"), ...CIERRE };
+      await run(raw);
+      assert.equal(await prisma.conversation.count({ where: { externalConversationId: "39699" } }), 0);
+      const dump = JSON.stringify([await convUpd(), await prisma.webhookEvent.findMany({ where: { externalConversationId: { in: [String(UPD), "39699"] } } })]);
+      assert.ok(!dump.includes("SENTINEL_UPDATED_COMMENT"), "closure_comment no llega a ninguna tabla");
+    });
+    await check("5n. rutas de claves: quedan en el evento procesado, solo con nombres y tipos", async () => {
+      const id = await run(rawUpd("conversation_updated", "resolved", 80, CIERRE), { keyPaths: true });
+      const ev = await prisma.webhookEvent.findUniqueOrThrow({ where: { id } });
+      const payload = ev.payload as { keyPaths?: string[]; updateEvent?: unknown };
+      assert.ok(Array.isArray(payload.keyPaths) && payload.keyPaths.includes("closure_type_id:number") && payload.keyPaths.includes("meta.assignee.id:number"));
+      assert.equal(payload.updateEvent, undefined, "el normalizado se descarta");
+      const dump = JSON.stringify(ev);
+      assert.ok(!/SENTINEL_UPDATED_COMMENT|Tipo inventado|5491100000005|Cliente Ficticio/.test(dump), "ningún valor");
+      // Sin registro de claves, el payload queda vacío como en los demás eventos.
+      const otro = await run(rawUpd("conversation_updated", "resolved", 80));
+      assert.equal((await prisma.webhookEvent.findUniqueOrThrow({ where: { id: otro } })).payload, null);
     });
 
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)

@@ -154,6 +154,28 @@ export interface NormalizedStatusEvent {
   closureTypeName?: string | null;    // closure_type_name (catálogo); NUNCA closure_comment
 }
 
+/**
+ * conversation_updated: SOLO tipo de cierre y asignado. Este evento no crea mensajes ni
+ * cambia el estado; `resolved` (el estado que informa el evento) se usa únicamente para
+ * decidir si el tipo de cierre corresponde a una resolución.
+ */
+export interface NormalizedUpdateEvent {
+  externalConversationId: string;
+  /** El evento dice que la conversación está resuelta. No se usa para cambiar el estado. */
+  resolved: boolean;
+  /** El evento trae la clave meta.assignee (con un asignado o con null). Si no la trae, el asignado no se toca. */
+  assigneePresent: boolean;
+  externalAssigneeId: string | null;
+  closureTypeId: string | null;
+  closureTypeName: string | null;
+  /**
+   * Hora del evento según Emozion: updated_at o, si no viene, resolved_at. null si no trae
+   * ninguna parseable. Sirve para descartar el tipo de cierre de un evento atrasado.
+   * Opcional: los eventos guardados antes de este campo no lo traen.
+   */
+  eventAt?: Date | null;
+}
+
 // ── Resultados ────────────────────────────────────────────────────────────────────
 export type IngestOutcome = "processed" | "ignored" | "needsRetry" | "insufficientData";
 

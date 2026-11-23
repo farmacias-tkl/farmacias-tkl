@@ -7,6 +7,7 @@ import type {
   NormalizedMessage,
   NormalizedAttachment,
   NormalizedStatusEvent,
+  NormalizedUpdateEvent,
   NormalizeResult,
   NormalizedStatus,
   NormalizedAuthor,
@@ -32,7 +33,7 @@ import { isUsableAttachmentId, emozionAttachmentSourceExternalId } from "./attac
 export const BOT_SENDER_ID = 1;
 
 /** Whitelist de eventos que procesa 4B. */
-export const SUPPORTED_EVENTS = ["conversation_created", "message_created", "conversation_status_changed"] as const;
+export const SUPPORTED_EVENTS = ["conversation_created", "message_created", "conversation_status_changed", "conversation_updated"] as const;
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 /** Parsea timestamp del fork: ISO string (new Date) o epoch number (seg→*1000, o ms). null si inválido. */
@@ -340,6 +341,66 @@ export function normalizeStatusEvent(conv: EmozionConversation | null | undefine
     warnings: [...st.warnings, ...closure.warnings],
     authorFallbackCount: 0,
   };
+}
+
+/**
+ * conversation_updated → NormalizedUpdateEvent. Lee SOLO closure_type_id, closure_type_name y
+ * meta.assignee.id, con los mismos normalizadores que el cambio de estado. Nunca
+ * closure_comment ni otro texto. insufficientData si falta el id o hay discrepancia.
+ */
+export function normalizeUpdateEvent(conv: EmozionConversation | null | undefined): NormalizeResult<NormalizedUpdateEvent> {
+  const { id, discrepancy } = resolveConversationId(conv);
+  if (discrepancy) {
+    return { outcome: "insufficientData", data: null, warnings: ["ids de conversación discrepantes → no se mapea"], authorFallbackCount: 0 };
+  }
+  if (!id) {
+    return { outcome: "insufficientData", data: null, warnings: ["conversation_updated sin id de conversación → no se mapea"], authorFallbackCount: 0 };
+  }
+  const closure = normalizeClosure(conv);
+  const meta = conv?.meta;
+  return {
+    outcome: "processed",
+    data: {
+      externalConversationId: id,
+      resolved: conv?.status === "resolved",
+      assigneePresent: !!meta && typeof meta === "object" && "assignee" in meta,
+      externalAssigneeId: normalizeExternalAssigneeId(conv),
+      closureTypeId: closure.closureTypeId,
+      closureTypeName: closure.closureTypeName,
+      eventAt: parseTimestamp(conv?.updated_at) ?? parseTimestamp(conv?.resolved_at),
+    },
+    warnings: closure.warnings,
+    authorFallbackCount: 0,
+  };
+}
+
+/** Tope de rutas que guarda keyPathsOf. */
+export const KEY_PATHS_MAX = 200;
+/** Claves cuyo contenido no se recorre: pueden tener nombres de clave puestos por el cliente o el operador. */
+const KEY_PATHS_OPAQUE = new Set(["custom_attributes", "additional_attributes"]);
+
+/**
+ * Rutas de claves de un payload, con el TIPO de cada valor y NUNCA el valor: "meta.assignee.id:number".
+ * Diagnóstico temporal para ubicar dónde viaja un campo. De un arreglo se mira solo el primer
+ * elemento. Una clave que parece un dato (dígitos largos, arroba, espacios) se reemplaza por
+ * "[clave]". PURO.
+ */
+export function keyPathsOf(root: unknown, max: number = KEY_PATHS_MAX): string[] {
+  const out: string[] = [];
+  const typeOf = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+  const safeKey = (k: string) => (k.length > 40 || /[0-9]{5,}|@|\s/.test(k) ? "[clave]" : k);
+  const walk = (node: unknown, path: string, depth: number) => {
+    if (out.length >= max || depth > 6 || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) { if (node.length > 0) walk(node[0], `${path}[0]`, depth + 1); return; }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (out.length >= max) return;
+      const p = path ? `${path}.${safeKey(k)}` : safeKey(k);
+      out.push(`${p}:${typeOf(v)}`);
+      if (!KEY_PATHS_OPAQUE.has(k)) walk(v, p, depth + 1);
+    }
+  };
+  walk(root, "", 0);
+  return out;
 }
 
 /** Id externo (string) de una conversación para denormalizar columnas (mismo criterio que los mappers). */

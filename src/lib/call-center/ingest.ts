@@ -6,6 +6,7 @@ import type {
   NormalizedConversation,
   NormalizedMessage,
   NormalizedStatusEvent,
+  NormalizedUpdateEvent,
   UpsertConversationResult,
   UpsertMessageResult,
   ApplyStatusResult,
@@ -196,7 +197,7 @@ export async function applyStatusChangedFromEmozion(
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, closedAt: true },
+    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true },
   });
   if (!conv) {
     return {
@@ -214,14 +215,18 @@ export async function applyStatusChangedFromEmozion(
   // Asignado y tipo de cierre: a diferencia del resto (merge conservador), acá el evento
   // MANDA, porque describen el estado actual y no un dato que se completa una vez:
   //  - externalAssigneeId: el del evento, también null (quedó sin asignado).
-  //  - tipo de cierre: solo vale mientras está RESUELTA. Al resolver se guarda el del evento
-  //    (null si Emozion no lo mandó, para no arrastrar el de un cierre anterior); en cualquier
-  //    otro estado vuelve a null. Cada cierre queda en su fila de StateHistory.
+  //  - tipo de cierre: solo vale mientras está RESUELTA. Al resolver se guarda el del evento.
+  //    Si el evento no lo trae, se conserva el que ya tenga la conversación: lo dejó un
+  //    conversation_updated de ESTA resolución (antes o después de este evento), y un cambio
+  //    de estado sin tipo de cierre no lo pisa con null. No arrastra el de un cierre anterior,
+  //    porque en cualquier otro estado (una reapertura) vuelve a null. Cada cierre queda en
+  //    su fila de StateHistory.
   // `?? null`: los eventos guardados antes de estos campos no los traen.
   const externalAssigneeId = n.externalAssigneeId ?? null;
   const resolved = n.status === "RESUELTA";
-  const closureTypeId = resolved ? n.closureTypeId ?? null : null;
-  const closureTypeName = resolved ? n.closureTypeName ?? null : null;
+  const eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
+  const closureTypeId = !resolved ? null : eventHasClosure ? n.closureTypeId ?? null : conv.closureTypeId;
+  const closureTypeName = !resolved ? null : eventHasClosure ? n.closureTypeName ?? null : conv.closureTypeName;
 
   await tx.conversation.update({
     where: { id: conv.id },
@@ -245,5 +250,80 @@ export async function applyStatusChangedFromEmozion(
       closureTypeName,
     },
   });
+  return { outcome: "processed", conversationId: conv.id, warnings };
+}
+
+/**
+ * Aplica un conversation_updated: SOLO tipo de cierre y asignado. No crea mensajes, no cambia
+ * el estado y no agrega filas al historial, así que varios eventos seguidos son idempotentes.
+ *
+ *  - Tipo de cierre: se guarda si la conversación está RESUELTA, o si el propio evento dice
+ *    que está resuelta (llegó antes que el cambio de estado; ese cambio lo conserva). Si ya
+ *    está RESUELTA se completa también la última fila RESUELTA del historial. Un evento sin
+ *    tipo de cierre nunca borra el que hay.
+ *  - Evento atrasado: si la conversación se reabrió y la hora del evento (updated_at o
+ *    resolved_at) es anterior a esa reapertura, el tipo de cierre es de una resolución vieja
+ *    y se ignora. Se compara contra la REAPERTURA y no contra cualquier cambio de estado: la
+ *    hora del historial es la de procesamiento, y el evento que acompaña a una resolución
+ *    puede traer una hora unos segundos anterior a la fila de esa misma resolución.
+ *  - Asignado: solo si el evento trae la clave meta.assignee; con null queda sin asignado.
+ *
+ * Conversación inexistente → "ignored" (sin reintento: el evento no trae con qué crearla).
+ */
+export async function applyConversationUpdatedFromEmozion(
+  tx: Prisma.TransactionClient,
+  n: NormalizedUpdateEvent,
+): Promise<ApplyStatusResult> {
+  const warnings: string[] = [];
+  const conv = await tx.conversation.findUnique({
+    where: { externalConversationId: n.externalConversationId },
+    select: { id: true, status: true, externalAssigneeId: true, closureTypeId: true, closureTypeName: true },
+  });
+  if (!conv) {
+    return { outcome: "ignored", conversationId: null, warnings: ["conversation_updated sobre conversación inexistente → ignorado"] };
+  }
+
+  const data: Prisma.ConversationUpdateInput = {};
+  if (n.assigneePresent && n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
+
+  let eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
+  const isResolved = conv.status === "RESUELTA";
+  if (eventHasClosure && n.eventAt) {
+    const reopened = await tx.conversationStateHistory.findFirst({
+      where: { conversationId: conv.id, fromStatus: "RESUELTA", toStatus: { not: "RESUELTA" } },
+      orderBy: [{ changedAt: "desc" }, { id: "desc" }],
+      select: { changedAt: true },
+    });
+    if (reopened && n.eventAt.getTime() < reopened.changedAt.getTime()) {
+      eventHasClosure = false;
+      warnings.push("conversation_updated atrasado: su tipo de cierre es anterior a la última reapertura → no se guarda");
+    }
+  }
+  if (eventHasClosure) {
+    if (isResolved || n.resolved) {
+      if (n.closureTypeId !== conv.closureTypeId || n.closureTypeName !== conv.closureTypeName) {
+        data.closureTypeId = n.closureTypeId;
+        data.closureTypeName = n.closureTypeName;
+      }
+    } else {
+      warnings.push("conversation_updated con tipo de cierre sobre una conversación no resuelta → no se guarda");
+    }
+  }
+  if (Object.keys(data).length > 0) await tx.conversation.update({ where: { id: conv.id }, data });
+
+  if (eventHasClosure && isResolved) {
+    // Completa la fila de ESTA resolución; no agrega una fila nueva.
+    const last = await tx.conversationStateHistory.findFirst({
+      where: { conversationId: conv.id, toStatus: "RESUELTA" },
+      orderBy: [{ changedAt: "desc" }, { id: "desc" }],
+      select: { id: true, closureTypeId: true, closureTypeName: true },
+    });
+    if (last && (last.closureTypeId !== n.closureTypeId || last.closureTypeName !== n.closureTypeName)) {
+      await tx.conversationStateHistory.update({
+        where: { id: last.id },
+        data: { closureTypeId: n.closureTypeId, closureTypeName: n.closureTypeName },
+      });
+    }
+  }
   return { outcome: "processed", conversationId: conv.id, warnings };
 }
