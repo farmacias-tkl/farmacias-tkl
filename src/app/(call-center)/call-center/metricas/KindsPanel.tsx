@@ -17,7 +17,7 @@ const ORDER_LABELS: Record<OrderKind, string> = { DOMICILIO: "A domicilio", RETI
 const NO_TAKE_LABELS: Record<NoTakeKind, string> = {
   SIN_STOCK: "Sin stock o falta del laboratorio", DERIVADO_PRESENCIAL: "Derivado a compra presencial", DERIVADO_MEDICAMENTO: "Derivado a compra presencial por tipo de medicamento",
 };
-const LOST_LABELS: Record<LostKind, string> = { OTRO_LADO: "Compró en otro lado o canceló", NO_DICE_DONDE: "No dice dónde compró" };
+const LOST_LABELS: Record<LostKind, string> = { OTRO_LADO: "Compró en otro lado o canceló", PROBABLE: "Probable: va a buscar en otra farmacia", NO_DICE_DONDE: "No dice dónde compró" };
 const CONSULT_LABELS: Record<ConsultKind, string> = {
   SERVICIOS: "Vacunas y servicios", PRECIO: "Precio", STOCK: "Stock o disponibilidad", HORARIOS: "Horarios y sucursales", COBERTURA: "Obra social o cobertura",
   PAGO: "Modalidad de pago", TIENDA_ONLINE: "Tienda online", OTRAS: "Otras",
@@ -120,12 +120,12 @@ function Report({ data }: { data: KindsPayload }) {
               : k === "DERIVADO_MEDICAMENTO" ? "El medicamento solo se vende en forma presencial en una sucursal." : undefined} />
         ))}
         <Line label="El cliente no respondió o quedó en volver" value={`${nf.format(t.PEDIDO_SIN_CONFIRMAR)} · ${pct(t.PEDIDO_SIN_CONFIRMAR, base)}`}
-          note="Completó el recorrido del bot y la conversación terminó sin confirmación, sin aviso de falta y sin que diga que compró en otro lado." />
+          note="Completó el recorrido del bot, o mandó una receta o un adjunto sin texto, y la conversación terminó sin confirmación, sin aviso de falta y sin que diga que compró en otro lado." />
       </Box>
 
       <Box title="Aparte">
         <Line label="Compró presencial en TKL" value={`${nf.format(t.COMPRO_TKL)} · ${pct(t.COMPRO_TKL, base)}`}
-          note="El cliente dice que lo compró en una sucursal TKL. Es una venta de TKL, no una venta perdida, aunque el pedido no se tomó por acá." />
+          note="El cliente dice que lo compró en una sucursal TKL, o avisa que pasa a pagar después de que le ofrecieron stock. Es una venta de TKL, no una venta perdida." />
         <Line label="Seguimiento / postventa" value={`${nf.format(t.SEGUIMIENTO)} · ${pct(t.SEGUIMIENTO, base)}`}
           note="Pregunta por un pago o un pedido ya hecho, o avisa que espera algo para seguir." />
         <Line label="Sin motivo claro" value={`${nf.format(t.SIN_MOTIVO)} · ${pct(t.SIN_MOTIVO, base)}`}

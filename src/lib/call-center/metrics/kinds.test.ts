@@ -16,7 +16,7 @@ const at = (s: string) => new Date(`${s}:00.000-03:00`);
 let n = 0;
 const row = (over: Partial<KindRow> = {}): KindRow => ({
   conversationId: `k${++n}`, createdAt: at("2026-03-03T10:00"), claim: false, prescription: false, homeDelivery: false, pickup: false,
-  botOrderComplete: false, confirmed: false, saleLost: false, saleElsewhere: false, boughtAtTkl: false, declined: false, followUp: false, hasHumanResponse: false,
+  botOrderComplete: false, confirmed: false, saleLost: false, saleElsewhere: false, saleProbable: false, notALoss: false, boughtAtTkl: false, declined: false, followUp: false, hasHumanResponse: false,
   operatorInPersonOnly: false, operatorNoStock: false, operatorDerived: false, customerMedia: false, hasFreeText: true, onlyEmptyText: false,
   hasQuestionMark: false, services: false, price: false, stock: false, hours: false, coverage: false, paymentMethod: false, onlineStore: false, ...over,
 });
@@ -43,6 +43,11 @@ test("el cliente dice que ya compró: en TKL es una venta presencial; si no, ven
   assert.deepEqual(kind({ saleLost: true, boughtAtTkl: true }), { main: "COMPRO_TKL", sub: null });
   assert.deepEqual(kind({ saleLost: true, saleElsewhere: true }), { main: "VENTA_PERDIDA", sub: "OTRO_LADO" });
   assert.deepEqual(kind({ saleLost: true }), { main: "VENTA_PERDIDA", sub: "NO_DICE_DONDE" });
+  assert.deepEqual(kind({ saleProbable: true }), { main: "VENTA_PERDIDA", sub: "PROBABLE" });
+  // Pasa a pagar después de que le ofrecieron stock: la marca ya viene resuelta en boughtAtTkl.
+  assert.deepEqual(kind({ boughtAtTkl: true }), { main: "COMPRO_TKL", sub: null });
+  // Se confundió de receta: no es una pérdida.
+  assert.deepEqual(kind({ saleLost: true, notALoss: true }), { main: "SIN_MOTIVO", sub: null });
   assert.equal(kind({ saleLost: true, botOrderComplete: true, operatorNoStock: true }).main, "VENTA_PERDIDA", "gana sobre no se pudo tomar");
   assert.equal(kind({ saleLost: true, prescription: true }).main, "VENTA_PERDIDA", "mandó la receta y después compró en otro lado");
 });
@@ -78,9 +83,10 @@ test("consulta: el cliente pregunta por un tema; el subtipo sale de las palabras
   assert.equal(kind({ coverage: true, paymentMethod: true }).sub, "COBERTURA");
   assert.equal(kind({ paymentMethod: true, onlineStore: true }).sub, "PAGO");
   assert.equal(kind({ onlineStore: true }).sub, "TIENDA_ONLINE");
-  // Una pregunta o un adjunto sin tema reconocible.
-  assert.deepEqual(kind({ hasQuestionMark: true }), { main: "CONSULTA", sub: "OTRAS" });
-  assert.deepEqual(kind({ customerMedia: true, hasFreeText: false }), { main: "CONSULTA", sub: "OTRAS" });
+  // Una pregunta sin tema reconocible.
+  assert.deepEqual(kind({ hasQuestionMark: true, customerMedia: true }), { main: "CONSULTA", sub: "OTRAS" });
+  // Una receta o un adjunto solo, sin texto: pedido sin confirmar, no consulta.
+  assert.deepEqual(kind({ customerMedia: true, hasFreeText: false }), { main: "PEDIDO_SIN_CONFIRMAR", sub: null });
 });
 
 test("seguimiento / postventa: pregunta por un pago o un pedido ya hecho; un tema reconocible gana", () => {
@@ -91,7 +97,7 @@ test("seguimiento / postventa: pregunta por un pago o un pedido ya hecho; un tem
 test("saludo o agradecimiento: saludos, agradecimientos o solo botones del bot, sin adjuntos", () => {
   assert.equal(kind({ onlyEmptyText: true }).main, "SALUDO");
   assert.equal(kind({ hasFreeText: false }).main, "SALUDO", "tocó botones del bot y no escribió nada");
-  assert.equal(kind({ onlyEmptyText: true, customerMedia: true }).main, "CONSULTA", "un agradecimiento con una foto tiene contenido");
+  assert.equal(kind({ onlyEmptyText: true, customerMedia: true }).main, "PEDIDO_SIN_CONFIRMAR", "un agradecimiento con una foto tiene contenido");
 });
 
 test("sin motivo claro: escribió algo y no hay evidencia; que un operador responda no alcanza", () => {
@@ -117,7 +123,7 @@ test("informe: totales, subtipos, por día y por hora de Buenos Aires", () => {
   assert.deepEqual([r.conversations, r.source], [12, "DETECTADO"]);
   assert.deepEqual([r.orders.RETIRO, r.orders.RECETA, r.orders.DOMICILIO, r.consults.PRECIO, r.consultsAnswered], [1, 1, 0, 1, 1]);
   assert.deepEqual(r.noTake, { SIN_STOCK: 0, DERIVADO_PRESENCIAL: 1, DERIVADO_MEDICAMENTO: 0 });
-  assert.deepEqual(r.lost, { OTRO_LADO: 0, NO_DICE_DONDE: 1 });
+  assert.deepEqual(r.lost, { OTRO_LADO: 0, PROBABLE: 0, NO_DICE_DONDE: 1 });
   assert.deepEqual(r.byDay.map((d) => [d.day, d.PEDIDO, d.CONSULTA, d.RECLAMO]), [["2026-03-03", 2, 1, 0], ["2026-03-04", 0, 1, 1]]);
   assert.deepEqual([r.byHour.length, r.byHour[9].PEDIDO, r.byHour[15].PEDIDO, r.byHour[23].CONSULTA, r.byHour[10].RECLAMO], [24, 1, 1, 1, 1]);
   // Cada conversación cuenta una sola vez.

@@ -31,9 +31,9 @@ export const MAIN_KINDS: readonly MainKind[] = [
   "RECLAMO", "PEDIDO", "COMPRO_TKL", "VENTA_PERDIDA", "NO_SE_PUDO_TOMAR", "PEDIDO_SIN_CONFIRMAR", "CONSULTA", "SEGUIMIENTO", "SALUDO", "SIN_MOTIVO",
 ];
 
-/** Venta perdida: confirmada (otra farmacia, otro lado o cancela) o sin decir dónde compró. */
-export type LostKind = "OTRO_LADO" | "NO_DICE_DONDE";
-export const LOST_KINDS: readonly LostKind[] = ["OTRO_LADO", "NO_DICE_DONDE"];
+/** Venta perdida: confirmada (otra farmacia, otro lado o cancela), probable (va a buscar en otra farmacia) o sin decir dónde compró. */
+export type LostKind = "OTRO_LADO" | "PROBABLE" | "NO_DICE_DONDE";
+export const LOST_KINDS: readonly LostKind[] = ["OTRO_LADO", "PROBABLE", "NO_DICE_DONDE"];
 
 export type OrderKind = "DOMICILIO" | "RETIRO" | "RECETA" | "SIN_MODALIDAD";
 /** Por qué no se pudo tomar el pedido. */

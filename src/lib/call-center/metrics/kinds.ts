@@ -8,9 +8,13 @@
  *  2. Pedido confirmado: el operador da el número de control, avisa que ya se puede retirar,
  *     confirma el retiro o la salida del envío, o hay evidencia de pago. Elegir "Pedir
  *     medicamentos" NO alcanza, y que el operador informe un precio tampoco.
+ *     El cierre "gracias por confiar" no vale si después el operador deja el pedido en
+ *     espera o lo cancela, salvo que haya número de control o pago recibido.
  *  3. El cliente dice, en cualquier momento, que ya lo compró, que ya fue o que cancela:
- *     "Compró presencial en TKL" si en ese mensaje nombra a TKL o a una sucursal; si no,
- *     venta perdida (confirmada si dice otra farmacia o cancela; "no dice dónde" si no).
+ *     "Compró presencial en TKL" si en ese mensaje nombra a TKL o a una sucursal, o si avisa
+ *     que pasa a pagar después de que le ofrecieron stock; si no, venta perdida (confirmada
+ *     si dice otra farmacia o cancela; probable si va a buscar en otra; "no dice dónde" si
+ *     no). Confundirse de receta no es una pérdida.
  *  4. No se pudo tomar: el cliente quería pedir (completó el bot o mandó una receta) y el
  *     operador lo derivó a comprar en la sucursal, o avisó que no hay stock.
  *  5. Pedido por receta digital: el mensaje armado de cualquier plataforma de recetas, salvo
@@ -21,7 +25,8 @@
  *  7. Consulta: el cliente pregunta por un tema (precio, stock, horarios, cobertura…). Los
  *     botones del bot sin texto no alcanzan, y que un operador haya respondido tampoco.
  *  8. Seguimiento / postventa: pregunta por un pago o un pedido ya hecho.
- *  9. Consulta sin tema reconocible: una pregunta o un adjunto.
+ *  9. Consulta sin tema reconocible: una pregunta. Una receta o un adjunto solo, sin
+ *     pregunta, va a pedido sin confirmar.
  * 10. Saludo / agradecimiento: solo saludos, agradecimientos (también largos) o botones.
  * 11. Sin motivo claro: lo que queda.
  *
@@ -37,7 +42,7 @@ import { branchNamesRegex } from "./detected-patterns";
 import {
   BOT_BUTTONS, BUTTON_HOME, BUTTON_PICKUP,
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
-  BOUGHT_AT_TKL, CUSTOMER_DECLINED, EMPTY_MESSAGE, FOLLOW_UP_CUSTOMER, OPERATOR_DERIVED, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
+  BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_ON_HOLD, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_DERIVED, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
 } from "./kinds-patterns";
 import {
@@ -64,7 +69,14 @@ export interface KindRow {
   saleLost: boolean;
   /** Lo dice nombrando otra farmacia u otro lado, o cancela. */
   saleElsewhere: boolean;
-  /** En el mismo mensaje nombra a TKL o a una sucursal: compró en forma presencial. */
+  /** Todavía no compró: avisa que va a buscar en otra farmacia. */
+  saleProbable: boolean;
+  /** Se confundió de receta o de producto: lo que dice no es una pérdida. */
+  notALoss: boolean;
+  /**
+   * Compró en forma presencial en TKL: en el mismo mensaje en que dice que compró nombra a
+   * TKL o a una sucursal, o avisa que pasa a pagar después de que el operador ofreció stock.
+   */
   boughtAtTkl: boolean;
   /** Avisa que al final no necesita nada. */
   declined: boolean;
@@ -111,10 +123,9 @@ export function classifyKind(r: Flags): ConversationKind {
   if (r.confirmed) {
     return { main: "PEDIDO", sub: r.homeDelivery ? "DOMICILIO" : r.pickup ? "RETIRO" : r.prescription ? "RECETA" : "SIN_MODALIDAD" };
   }
-  if (r.saleLost) {
-    if (r.boughtAtTkl) return { main: "COMPRO_TKL", sub: null };
-    return { main: "VENTA_PERDIDA", sub: r.saleElsewhere ? "OTRO_LADO" : "NO_DICE_DONDE" };
-  }
+  if (r.boughtAtTkl) return { main: "COMPRO_TKL", sub: null };
+  if (r.saleLost && !r.notALoss) return { main: "VENTA_PERDIDA", sub: r.saleElsewhere ? "OTRO_LADO" : "NO_DICE_DONDE" };
+  if (r.saleProbable && !r.notALoss) return { main: "VENTA_PERDIDA", sub: "PROBABLE" };
   // Quería pedir: completó el recorrido del bot o mandó una receta para pedir.
   const orderIntent = r.botOrderComplete || r.prescription;
   if (orderIntent && r.operatorInPersonOnly) return { main: "NO_SE_PUDO_TOMAR", sub: "DERIVADO_MEDICAMENTO" };
@@ -130,8 +141,10 @@ export function classifyKind(r: Flags): ConversationKind {
   }
   if (topic) return { main: "CONSULTA", sub: consultKind(r) };
   if (r.followUp) return { main: "SEGUIMIENTO", sub: null };
-  // Una pregunta o un adjunto sin tema reconocible.
-  if (r.hasQuestionMark || r.customerMedia) return { main: "CONSULTA", sub: "OTRAS" };
+  // Una pregunta sin tema reconocible.
+  if (r.hasQuestionMark) return { main: "CONSULTA", sub: "OTRAS" };
+  // Una receta o un adjunto solo, sin pregunta: es un pedido que nadie confirmó, no una consulta.
+  if (r.customerMedia) return { main: "PEDIDO_SIN_CONFIRMAR", sub: null };
   if (!r.hasFreeText || r.onlyEmptyText) return { main: "SALUDO", sub: null };
   return { main: "SIN_MOTIVO", sub: null };
 }
@@ -194,6 +207,9 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const flag = (cond: Prisma.Sql) => Prisma.sql`coalesce(bool_or(${cond}), false)`;
   // Un saludo, un sí/no o un agradecimiento (también largo) sin pregunta: no tiene contenido.
   const empty = Prisma.sql`(m.body ~* ${EMPTY_MESSAGE} OR (m.body ~* ${THANKS_MESSAGE} AND m.body NOT LIKE '%?%'))`;
+  // Evidencia firme (número de control, pago recibido) y evidencia de venta en general.
+  const strong = Prisma.sql`(${op} AND m.body ~* ${ORDER_STRONG_OPERATOR}) OR (${cust} AND m.body ~* ${PAYMENT_CUSTOMER})`;
+  const evidence = Prisma.sql`${op} AND m.body ~* ${ORDER_CONFIRMED_OPERATOR}`;
   // Los nombres de las sucursales salen de la tabla, no del código.
   const branches = await prisma.branch.findMany({ select: { name: true } });
   const branchRegex = branchNamesRegex(branches.map((b) => b.name));
@@ -206,10 +222,14 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOME}`)} AS "homeDelivery",
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_PICKUP}`)} AS "pickup",
         ${flag(Prisma.sql`m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}`)} AS "botOrderComplete",
-        ${flag(Prisma.sql`(${op} AND m.body ~* ${ORDER_CONFIRMED_OPERATOR}) OR (${cust} AND m.body ~* ${PAYMENT_CUSTOMER})`)} AS "confirmed",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER}`)} AS "saleLost",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_ELSEWHERE}`)} AS "saleElsewhere",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body ~* ${tkl}`)} AS "boughtAtTkl",
+        (${flag(strong)} OR (max(m."sentAt") FILTER (WHERE ${evidence}) IS NOT NULL
+          AND coalesce(max(m."sentAt") FILTER (WHERE ${op} AND m.body ~* ${OPERATOR_ON_HOLD}) < max(m."sentAt") FILTER (WHERE ${evidence}), true))) AS "confirmed",
+        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_PROBABLE}`)} AS "saleProbable",
+        ${flag(Prisma.sql`${cust} AND m.body ~* ${NOT_A_LOSS}`)} AS "notALoss",
+        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleLost",
+        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_ELSEWHERE} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleElsewhere",
+        (${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body ~* ${tkl}`)}
+          OR (${flag(Prisma.sql`${cust} AND m.body ~* ${CUSTOMER_GOES_TO_BRANCH}`)} AND ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_OFFERED_STOCK}`)})) AS "boughtAtTkl",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${CUSTOMER_DECLINED}`)} AS "declined",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${FOLLOW_UP_CUSTOMER}`)} AS "followUp",
         ${flag(op)} AS "hasHumanResponse",

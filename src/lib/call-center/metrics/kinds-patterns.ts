@@ -29,6 +29,19 @@ export const ORDER_CONFIRMED_OPERATOR =
   // Cierre fijo de venta y avisos de retiro o de envío.
   "|gracias por confiar en farmacias tkl|podr[aá]s retirar|pued(e|en|es) pasar a (buscar|retirar)|c[oó]digo de retiro|a nombre de [^|]{0,40}[0-9]{3,}" +
   "|el env[ií]o lo realizamos|realizando el env[ií]o|receta fue validada|comunicamos al cadete";
+/**
+ * Evidencia firme: número de control o pago recibido. Con esto el pedido sigue confirmado
+ * aunque después el operador escriba que queda a la espera.
+ */
+export const ORDER_STRONG_OPERATOR = "n[uú]mero de control|(recibimos|registramos|acreditamos) (el|tu|su) pago|pago (fue |ya fue )?(recibido|acreditado|registrado)";
+
+/**
+ * El operador deja el pedido en espera o lo cancela. Si lo escribe DESPUÉS de la última
+ * evidencia de venta (por ejemplo, del cierre "gracias por confiar"), el pedido no quedó
+ * confirmado, salvo que haya evidencia firme.
+ */
+export const OPERATOR_ON_HOLD = "aguardamos|quedamos atentos|esperamos (tu|su) contacto|cancel(amos|ar|aremos) el pedido";
+
 /** El cliente dice que pagó o manda el comprobante. */
 export const PAYMENT_CUSTOMER = "ya (pagu[eé]|abon[eé]|transfer[ií])|comprobante|te (paso|env[ií]o) el pago";
 
@@ -43,20 +56,31 @@ export const PRESCRIPTION_ORDER = "quiero (hacer|realizar) un pedido[^|]{0,40}re
 
 /** Venta perdida, por lo que dice el cliente en cualquier momento: ya lo compró, ya fue, cancela. */
 export const SALE_LOST_CUSTOMER =
-  "vine directo|\\mya\\M[^|]{0,25}(compr|fui\\M|consegu)|\\m(lo|la) compr[eé]\\M|acabo de comprar|\\mcancel(o|ó|ar|en|amos)\\M|fue alguien|otra farmacia|ya no (lo|la|los|las) necesito";
+  "vine directo|no (lo |la |los |las )?prepar(en|es)|buscar[eé] (en )?otra farmacia|\\mya\\M[^|]{0,25}(compr|fui\\M|consegu)|\\m(lo|la) compr[eé]\\M|acabo de comprar|\\mcancel(o|ó|ar|en|amos)\\M|fue alguien|otra farmacia|ya no (lo|la|los|las) necesito";
 
 /** Venta perdida confirmada: lo compró en otra farmacia o en otro lado, o cancela. Sin esto, "no dice dónde". */
-export const SALE_LOST_ELSEWHERE = "otra farmacia|otro lado|\\mcancel(o|ó|ar|en|amos)\\M|ya no (lo|la|los|las) necesito";
+export const SALE_LOST_ELSEWHERE = "no (lo |la |los |las )?prepar(en|es)|otra farmacia|otro lado|\\mcancel(o|ó|ar|en|amos)\\M|ya no (lo|la|los|las) necesito";
 
 /**
  * Menciona a TKL en el mismo mensaje en que dice que compró: es una venta presencial de TKL,
  * no una venta perdida. Se completa con los nombres de las sucursales (branchNamesRegex).
  */
-export const BOUGHT_AT_TKL = "\\m(tkl|sucursal|mostrador|local)\\M|vine directo";
+export const BOUGHT_AT_TKL = "\\m(tkl|sucursal|mostrador|local|ah[ií])\\M|vine directo";
+
+/** Venta perdida probable: todavía no compró, avisa que va a buscar en otra farmacia. */
+export const SALE_LOST_PROBABLE = "(voy|vamos|iba) a (ver|buscar|probar|fijarme|consultar)[^|]{0,40}(otra farmacia|otro lado)";
+
+/** No es una pérdida: se confundió de receta o de producto. */
+export const NOT_A_LOSS = "me confund[ií]|me equivoqu[eé]|en (verdad|realidad) no necesito";
+
+/** El cliente avisa que pasa a pagar o a comprar por la sucursal. Cuenta si el operador ofreció stock o reserva. */
+export const CUSTOMER_GOES_TO_BRANCH = "voy a pagar(lo|la)? en efectivo|paso a (pagar|comprar|buscar)|pas[oó] a (pagar|comprar)(lo|la)?";
+/** El operador ofreció stock o una reserva en una sucursal. */
+export const OPERATOR_OFFERED_STOCK = "(tenemos|contamos con|cuenta con|hay|tiene) stock|\\mreserv";
 
 /** El cliente pregunta por un pago o un pedido ya hecho, o avisa que espera algo para seguir. */
 export const FOLLOW_UP_CUSTOMER =
-  "se pudo registrar el pago|pudieron (registrar|ver) (el|mi) pago|\\m(s[ií]+|ya) (me )?lleg[oó]|lleg[oó] el pedido|espero el contacto|quedo a la espera|estoy esperando (una|la) receta";
+  "ya est[aá] en camino|cu[aá]ndo llega|a qu[eé] hora llega|el se[nñ]or de la moto|se pudo registrar el pago|pudieron (registrar|ver) (el|mi) pago|\\m(s[ií]+|ya) (me )?lleg[oó]|lleg[oó] el pedido|espero el contacto|quedo a la espera|estoy esperando (una|la) receta";
 
 /** El cliente avisa que al final no necesita nada. */
 export const CUSTOMER_DECLINED = "^[^[:alnum:]]*(en nada|nada|no necesito nada|no,? nada)[^[:alnum:]]*(,? ?(muchas )?gracias)?[^[:alnum:]]*$";

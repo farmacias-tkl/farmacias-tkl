@@ -45,6 +45,15 @@ async function main() {
     await add("confirmadoControl", [[C, "Hola, necesito un producto inventado"], [O, "Podrá retirar con el número de control 123"]]);
     await add("confirmadoCierre", [[C, "Pedir medicamentos"], [B, FLOW], [C, "A mi domicilio"], [B, DONE], [O, "La receta fue validada, el envío lo realizamos hoy"], [O, "¡Muchas gracias por confiar en Farmacias TKL!"]]);
     await add("faltaYVenta", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "La sucursal no cuenta con stock de un producto"], [O, "Podrás retirar el pedido a nombre de Inventada 1234"]]);
+    await add("cierreEnEspera", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "¡Muchas gracias por confiar en Farmacias TKL!"], [O, "Aguardamos la receta para avanzar"]]);
+    await add("controlYEspera", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "Podrá retirar con el número de control 123"], [O, "Quedamos atentos"]]);
+    await add("esperaYCierre", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "Aguardamos el token"], [O, "La receta fue validada. ¡Muchas gracias por confiar en Farmacias TKL!"]]);
+    await add("pasaAPagar", [[C, "Tienen el producto inventado"], [O, "Sí, tenemos stock en la sucursal, se lo reservo"], [C, "Genial, paso a pagar a la tarde"]]);
+    await add("comproAhi", [[C, "Tienen el producto inventado"], [C, "Ya lo compré ahí, gracias"]]);
+    await add("confundida", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Particular"], [B, DONE], [C, "Perdón, me confundí de receta, cancelo"]]);
+    await add("probable", [[C, "Tienen el producto inventado"], [C, "Bueno, voy a ver si consigo en otra farmacia"]]);
+    await add("noPreparen", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [C, "No lo preparen, gracias"]]);
+    await add("enCamino", [[C, "Hola, a qué hora llega"], [O, "En un rato"]]);
     await add("soloPrecio", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Retiro en sucursal"], [B, DONE], [O, "El producto tiene un valor de $ 100, el total es 100"]]);
     await add("recetaMeducar", [[C, "Hola, quiero realizar un pedido sobre esta receta: https://cdn.meducar.com/r/inventada"], [B, "Texto del bot"]]);
     await add("recetaOtra", [[C, "¡Hola! Quiero hacer un pedido. Tengo esta receta para descargar https://recetas.inventada.example/r/1"], [O, "Hola, ¿en qué te ayudo?"]]);
@@ -96,6 +105,18 @@ async function main() {
     await check("seguimiento de un pago; un agradecimiento largo es un saludo", () => {
       assert.deepEqual([k("seguimiento"), k("graciasLargo")], ["SEGUIMIENTO", "SALUDO"]);
     });
+    await check("el cierre de venta no vale si después el operador deja el pedido en espera; con número de control sí, y si la espera fue antes también", () => {
+      assert.deepEqual([k("cierreEnEspera"), k("controlYEspera"), k("esperaYCierre")], ["PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO", "PEDIDO/RETIRO"]);
+    });
+    await check("compró en TKL: pasa a pagar después de que le ofrecieron stock, o dice que lo compró ahí", () => {
+      assert.deepEqual([k("pasaAPagar"), k("comproAhi")], ["COMPRO_TKL", "COMPRO_TKL"]);
+    });
+    await check("confundirse de receta no es pérdida; ir a buscar a otra farmacia es probable; 'no lo preparen' es venta perdida", () => {
+      assert.deepEqual([k("confundida"), k("probable"), k("noPreparen")], ["PEDIDO_SIN_CONFIRMAR", "VENTA_PERDIDA/PROBABLE", "VENTA_PERDIDA/OTRO_LADO"]);
+    });
+    await check("seguimiento: pregunta a qué hora llega", () => {
+      assert.equal(k("enCamino"), "SEGUIMIENTO");
+    });
     await check("que el operador informe un precio no confirma el pedido", () => {
       assert.equal(k("soloPrecio"), "PEDIDO_SIN_CONFIRMAR");
     });
@@ -114,8 +135,8 @@ async function main() {
     await check("la nota interna del operador no confirma un pedido", () => {
       assert.equal(k("notaConfirma"), "CONSULTA/STOCK");
     });
-    await check("saludo o agradecimiento: gracias, qué tal, o solo botones; con foto es una consulta", () => {
-      assert.deepEqual([k("gracias"), k("queTal"), k("menuAbandono"), k("graciasFoto"), k("adjunto")], ["SALUDO", "SALUDO", "SALUDO", "CONSULTA/OTRAS", "CONSULTA/OTRAS"]);
+    await check("saludo o agradecimiento: gracias, qué tal, o solo botones; un adjunto solo es un pedido sin confirmar", () => {
+      assert.deepEqual([k("gracias"), k("queTal"), k("menuAbandono"), k("graciasFoto"), k("adjunto")], ["SALUDO", "SALUDO", "SALUDO", "PEDIDO_SIN_CONFIRMAR", "PEDIDO_SIN_CONFIRMAR"]);
     });
     await check("consulta por palabras: cobertura, pago y vacunas; los botones del bot sin texto no alcanzan", () => {
       assert.deepEqual([k("horariosBoton"), k("cobertura"), k("medioPago"), k("tienda"), k("vacuna")],
