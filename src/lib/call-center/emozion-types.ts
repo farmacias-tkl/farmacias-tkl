@@ -168,6 +168,12 @@ export interface NormalizedUpdateEvent {
   externalAssigneeId: string | null;
   closureTypeId: string | null;
   closureTypeName: string | null;
+  /**
+   * Hora del evento según Emozion: updated_at o, si no viene, resolved_at. null si no trae
+   * ninguna parseable. Sirve para descartar el tipo de cierre de un evento atrasado.
+   * Opcional: los eventos guardados antes de este campo no lo traen.
+   */
+  eventAt?: Date | null;
 }
 
 // ── Resultados ────────────────────────────────────────────────────────────────────

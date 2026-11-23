@@ -295,8 +295,12 @@ test("updated. está en la lista de eventos y lee SOLO tipo de cierre, asignado 
   } as never);
   assert.equal(r.outcome, "processed");
   assert.deepEqual(r.data, {
-    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", closureTypeId: "9", closureTypeName: "Tipo inventado C",
+    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null,
   });
+  // Hora del evento: updated_at (ISO o epoch) o, si no viene, resolved_at.
+  assert.equal(normalizeUpdateEvent({ id: 707, updated_at: ISO2, resolved_at: ISO }).data?.eventAt?.toISOString(), new Date(ISO2).toISOString());
+  assert.equal(normalizeUpdateEvent({ id: 708, resolved_at: ISO }).data?.eventAt?.toISOString(), new Date(ISO).toISOString());
+  assert.equal(normalizeUpdateEvent({ id: 709, updated_at: 1781735745 }).data?.eventAt?.getTime(), 1781735745000);
   const json = JSON.stringify(r);
   assert.ok(!/COMENTARIO|closure_comment|5491100000003|Nombre Ficticio|etiqueta/.test(json), "ni comentario, ni teléfono, ni nombre, ni etiquetas");
 });

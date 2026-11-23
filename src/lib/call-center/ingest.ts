@@ -261,6 +261,11 @@ export async function applyStatusChangedFromEmozion(
  *    que está resuelta (llegó antes que el cambio de estado; ese cambio lo conserva). Si ya
  *    está RESUELTA se completa también la última fila RESUELTA del historial. Un evento sin
  *    tipo de cierre nunca borra el que hay.
+ *  - Evento atrasado: si la conversación se reabrió y la hora del evento (updated_at o
+ *    resolved_at) es anterior a esa reapertura, el tipo de cierre es de una resolución vieja
+ *    y se ignora. Se compara contra la REAPERTURA y no contra cualquier cambio de estado: la
+ *    hora del historial es la de procesamiento, y el evento que acompaña a una resolución
+ *    puede traer una hora unos segundos anterior a la fila de esa misma resolución.
  *  - Asignado: solo si el evento trae la clave meta.assignee; con null queda sin asignado.
  *
  * Conversación inexistente → "ignored" (sin reintento: el evento no trae con qué crearla).
@@ -281,8 +286,19 @@ export async function applyConversationUpdatedFromEmozion(
   const data: Prisma.ConversationUpdateInput = {};
   if (n.assigneePresent && n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
 
-  const eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
+  let eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
   const isResolved = conv.status === "RESUELTA";
+  if (eventHasClosure && n.eventAt) {
+    const reopened = await tx.conversationStateHistory.findFirst({
+      where: { conversationId: conv.id, fromStatus: "RESUELTA", toStatus: { not: "RESUELTA" } },
+      orderBy: [{ changedAt: "desc" }, { id: "desc" }],
+      select: { changedAt: true },
+    });
+    if (reopened && n.eventAt.getTime() < reopened.changedAt.getTime()) {
+      eventHasClosure = false;
+      warnings.push("conversation_updated atrasado: su tipo de cierre es anterior a la última reapertura → no se guarda");
+    }
+  }
   if (eventHasClosure) {
     if (isResolved || n.resolved) {
       if (n.closureTypeId !== conv.closureTypeId || n.closureTypeName !== conv.closureTypeName) {

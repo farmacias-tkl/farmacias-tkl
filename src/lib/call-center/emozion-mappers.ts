@@ -367,6 +367,7 @@ export function normalizeUpdateEvent(conv: EmozionConversation | null | undefine
       externalAssigneeId: normalizeExternalAssigneeId(conv),
       closureTypeId: closure.closureTypeId,
       closureTypeName: closure.closureTypeName,
+      eventAt: parseTimestamp(conv?.updated_at) ?? parseTimestamp(conv?.resolved_at),
     },
     warnings: closure.warnings,
     authorFallbackCount: 0,

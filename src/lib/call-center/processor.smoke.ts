@@ -357,7 +357,7 @@ async function main() {
     });
     await check("5k. tipo de cierre ANTES del cambio de estado: el evento dice resuelta, y el cambio de estado sin cierre lo conserva", async () => {
       const filas = (await convUpd())!.stateHistory.length;
-      await run(rawUpd("conversation_updated", "resolved", 77, { closure_type_id: 4, closure_type_name: "Tipo inventado V" }));
+      await run(rawUpd("conversation_updated", "resolved", 77, { closure_type_id: 4, closure_type_name: "Tipo inventado V", updated_at: new Date(Date.now() + 1000).toISOString() }));
       const previo = await convUpd();
       assert.deepEqual([previo!.status, previo!.closureTypeId, previo!.stateHistory.length], ["ASIGNADA", "4", filas], "no cambia el estado ni agrega filas");
       await run(rawUpd("conversation_status_changed", "resolved", 77));
@@ -366,6 +366,25 @@ async function main() {
       const last = c!.stateHistory[c!.stateHistory.length - 1];
       assert.deepEqual([last.toStatus, last.closureTypeId], ["RESUELTA", "4"]);
       assert.equal(c!.stateHistory.filter((h) => h.toStatus === "RESUELTA" && h.closureTypeId === "9").length >= 1, true, "la resolución anterior conserva su tipo");
+    });
+    await check("5k2. evento atrasado: un conversation_updated anterior a la última reapertura no vuelve a pegar el cierre viejo", async () => {
+      // Reapertura ahora; después llega un evento de la resolución anterior, con hora de hace una hora.
+      await run(rawUpd("conversation_status_changed", "open", 77));
+      const vieja = new Date(Date.now() - 3_600_000).toISOString();
+      await run(rawUpd("conversation_updated", "resolved", 77, { ...CIERRE, updated_at: vieja }));
+      let c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId, c!.closureTypeName], ["ASIGNADA", null, null]);
+      // Tampoco con resolved_at viejo y sin updated_at.
+      await run({ ...rawUpd("conversation_updated", "resolved", 77, CIERRE), resolved_at: vieja });
+      assert.equal((await convUpd())!.closureTypeId, null);
+      // La resolución nueva sin tipo de cierre no hereda nada.
+      await run(rawUpd("conversation_status_changed", "resolved", 77));
+      c = await convUpd();
+      assert.deepEqual([c!.status, c!.closureTypeId], ["RESUELTA", null]);
+      // Y un evento con hora posterior a la reapertura sí se guarda.
+      await run(rawUpd("conversation_updated", "resolved", 77, { closure_type_id: 4, closure_type_name: "Tipo inventado V", updated_at: new Date(Date.now() + 1000).toISOString() }));
+      c = await convUpd();
+      assert.deepEqual([c!.closureTypeId, c!.stateHistory[c!.stateHistory.length - 1].closureTypeId], ["4", "4"]);
     });
     await check("5l. asignado: el evento lo actualiza sin cambiar el estado; sin la clave meta.assignee no se toca", async () => {
       await run(rawUpd("conversation_updated", "resolved", 80));

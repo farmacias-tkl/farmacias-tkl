@@ -119,6 +119,7 @@ function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
     externalAssigneeId: typeof u.externalAssigneeId === "string" ? u.externalAssigneeId : null,
     closureTypeId: typeof u.closureTypeId === "string" ? u.closureTypeId : null,
     closureTypeName: typeof u.closureTypeName === "string" ? u.closureTypeName : null,
+    eventAt: toDate(u.eventAt),
   };
 }
 
