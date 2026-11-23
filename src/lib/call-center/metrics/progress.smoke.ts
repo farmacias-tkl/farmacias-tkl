@@ -42,7 +42,7 @@ async function conv(prisma: PrismaClient, key: string, o: {
 
 async function main() {
   await withEphemeralDb("tkl_cc_metrics_progress_smoke", async (prisma) => {
-    const { loadShiftRows, buildShiftProgress } = await import("./progress");
+    const { loadShiftRows, buildShiftProgress, loadWindowRows, countWindowClosures } = await import("./progress");
     const C = "CUSTOMER" as const, O = "OPERATOR" as const;
 
     // Pendiente al empezar y sigue sin respuesta.
@@ -87,6 +87,32 @@ async function main() {
       const dump = JSON.stringify(rows);
       assert.ok(!dump.includes("+549") && !dump.includes("inventado") && !dump.includes("pr-"));
       assert.deepEqual(Object.keys(rows[0]).sort(), ["attendedSince", "statusAtStart", "waitStart"]);
+    });
+
+    // ── Ventanas de WhatsApp cerradas sin respuesta ──
+    // Tramo: de hace 10 horas hasta ahora. La ventana cierra 24 horas después del último mensaje del cliente.
+    await conv(prisma, "v-cerro", { status: "SIN_ASIGNAR", createdH: 40, msgs: [{ author: C, h: 40 }, { author: C, h: 30 }] });                    // cerró hace 6 h
+    await conv(prisma, "v-tarde", { status: "ASIGNADA", createdH: 40, msgs: [{ author: C, h: 29 }, { author: O, h: 2 }] });                         // cerró hace 5 h; respuesta posterior
+    await conv(prisma, "v-nota", { status: "ASIGNADA", createdH: 40, msgs: [{ author: C, h: 28 }, { author: O, h: 27, isPrivate: true }] });        // la nota interna no responde
+    await conv(prisma, "v-a-tiempo", { status: "ASIGNADA", createdH: 40, msgs: [{ author: C, h: 30 }, { author: O, h: 20 }, { author: C, h: 19 }] }); // respondida dentro de la ventana
+    await conv(prisma, "v-insistio", { status: "SIN_ASIGNAR", createdH: 40, msgs: [{ author: C, h: 30 }, { author: C, h: 12 }] });                  // volvió a escribir: sigue abierta
+    await conv(prisma, "v-ayer", { status: "SIN_ASIGNAR", createdH: 60, msgs: [{ author: C, h: 50 }] });                                           // cerró antes del tramo
+    const FROM = hoursAgo(10);
+    const win = await loadWindowRows(FROM, NOW);
+
+    await check("ventana cerrada sin respuesta: último mensaje del cliente antes de la primera respuesta pública", () => {
+      assert.equal(countWindowClosures(win, FROM, NOW), 3);
+      // La respondida a tiempo llega como candidata (su ventana cerraba en el tramo) y el conteo la descarta.
+      assert.deepEqual(win.map((r) => r.lastCustomerAt.getTime()).sort(), [hoursAgo(30), hoursAgo(30), hoursAgo(29), hoursAgo(28)].map((d) => d.getTime()).sort());
+      assert.equal(win.filter((r) => r.firstHumanAt !== null).length, 2);
+    });
+    await check("ventana: vista a una hora anterior, solo cuentan los mensajes y los cierres hasta esa hora", async () => {
+      // Hace 5 horas y media solo se había cerrado la primera (cerró hace 6 h).
+      const cut = hoursAgo(5.5);
+      assert.equal(countWindowClosures(await loadWindowRows(FROM, cut), FROM, cut), 1);
+    });
+    await check("ventana: las filas no traen ids, teléfono ni texto", () => {
+      assert.deepEqual(Object.keys(win[0]).sort(), ["firstHumanAt", "lastCustomerAt"]);
     });
   });
 

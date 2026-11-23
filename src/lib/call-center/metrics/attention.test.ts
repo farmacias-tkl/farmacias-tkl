@@ -302,5 +302,31 @@ test("semana con domingo: el cumplimiento se calcula sin las respondidas del dom
   assert.deepEqual([t.outsidePublicHours.answered, t.firstResponseBusiness!.n, t.answered], [2, 2, 4]);
 });
 
+// ── Ventana de WhatsApp ───────────────────────────────────────────────────────────────
+
+test("ventana de WhatsApp cerrada sin respuesta: 24 horas de reloj desde el último mensaje del cliente", () => {
+  const rows = [
+    // Sin respuesta y ya pasaron más de 24 horas.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-02T11:05") }),
+    // Respondida a las 26 horas: la ventana ya se había cerrado.
+    row("2026-03-02T11:00", { answered: "2026-03-03T13:10", lastCustomerBeforeResponseAt: at("2026-03-02T11:05") }),
+    // Respondida a las 23 horas: dentro de la ventana, aunque tarde para la meta.
+    row("2026-03-02T11:00", { answered: "2026-03-03T10:00", lastCustomerBeforeResponseAt: at("2026-03-02T11:05") }),
+    // El cliente insistió: la ventana corre desde su último mensaje, y todavía no pasaron 24 horas.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-03T15:00") }),
+    // Sin el dato no se evalúa.
+    row("2026-03-02T11:00"),
+  ];
+  const r = report(rows, "2026-03-04T10:00");
+  assert.equal(r.total.windowClosed, 2);
+  assert.equal(r.days[0].windowClosed, 2);
+});
+
+test("ventana de WhatsApp: corre el fin de semana, cuando el reloj hábil está pausado", () => {
+  // Sábado 07/03 a las 20:00, sin respuesta. Domingo 08/03 a las 21:00: ventana cerrada, pero todavía en plazo para la meta.
+  const t = report([row("2026-03-07T20:00", { lastCustomerBeforeResponseAt: at("2026-03-07T20:00") })], "2026-03-08T21:00").total;
+  assert.deepEqual([t.windowClosed, t.goal!.pendingWithin, t.goal!.pendingOverdue], [1, 1, 0]);
+});
+
 console.log(`\nmetrics/attention: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

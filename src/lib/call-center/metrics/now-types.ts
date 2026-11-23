@@ -116,6 +116,12 @@ export interface NowProgress {
   } | null;
   /** Hoy hasta ahora, y el mismo día de la semana anterior cortado a la misma hora. */
   firstResponse: { today: ProgressSide; previous: ProgressSide };
+  /**
+   * Conversaciones cuya ventana de 24 horas de WhatsApp se cerró sin la primera respuesta:
+   * hoy hasta ahora, y el mismo día de la semana anterior hasta la misma hora. Por momento
+   * del cierre, no por fecha de entrada. null si no se pudo calcular.
+   */
+  windowClosed: { today: number; previous: number } | null;
 }
 
 /** Controles de "Calidad de datos" sobre los últimos `days` días. */

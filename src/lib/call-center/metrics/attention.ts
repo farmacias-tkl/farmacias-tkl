@@ -25,6 +25,7 @@ import {
 } from "./business-time";
 import { configForDay, type ConfigVersion } from "./config";
 import { publicHours } from "./schedule";
+import { windowClosedUnanswered } from "./whatsapp-window";
 import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, isThanksCandidate } from "./patterns";
 import {
   BOT_ORDER_FLOW_LIKE, CUSTOMER_ORDER_OPTION, MEDUCAR_LINK_REGEX, MEDUCAR_PHRASE_REGEX,
@@ -43,6 +44,11 @@ export interface EntryRow {
   firstHumanAt: Date | null;
   /** Cuenta de Emozion que dio la primera respuesta. */
   firstHumanAccount: string | null;
+  /**
+   * Último mensaje del cliente anterior a la primera respuesta (o el último, si no hubo
+   * respuesta): desde acá corre la ventana de 24 horas de WhatsApp. Ausente o null: no se evalúa.
+   */
+  lastCustomerBeforeResponseAt?: Date | null;
   orderFlow: boolean;
   firstCustomerMessageIsMeducar: boolean;
   customerChars: number;
@@ -77,6 +83,12 @@ export interface EntryFact extends EntryRow {
    * corre desde la apertura.
    */
   outsidePublicHours: boolean;
+  /**
+   * La ventana de 24 horas de WhatsApp se cerró sin la primera respuesta: pasaron más de 24
+   * horas de reloj desde el último mensaje del cliente y nadie había respondido (o la primera
+   * respuesta llegó después). Para retomarla hizo falta una plantilla.
+   */
+  windowClosed: boolean;
   answeredSameDay: boolean;
   enteredInPublicHours: boolean | null;
 }
@@ -153,6 +165,8 @@ export interface AttentionSummary {
    * respuesta: la meta no aplica. Con su espera de reloj, que es la espera real del cliente.
    */
   outsidePublicHours: { answered: number; clock: Distribution };
+  /** Conversaciones cuya ventana de WhatsApp se cerró sin la primera respuesta. */
+  windowClosed: number;
 }
 
 export interface AttentionDay extends AttentionSummary {
@@ -208,6 +222,7 @@ export function toEntryFact(row: EntryRow, now: Date, versions: readonly ConfigV
       : null,
     botMinutes: row.botExitAt ? Math.max(0, (row.botExitAt.getTime() - row.createdAt.getTime()) / MS_MIN) : null,
     outsidePublicHours,
+    windowClosed: row.lastCustomerBeforeResponseAt ? windowClosedUnanswered(row.lastCustomerBeforeResponseAt, answered, now) : false,
     goal: version && !outsidePublicHours
       ? {
           ...classifyAgainstGoal(clockStart, answered, now, version.data.firstResponseGoalMinutes, pub),
@@ -240,8 +255,10 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
   const unanswered = { total: 0, inHours: 0, inHoursKnown: 0, completedOrders: 0 };
   const late = { total: 0, answeredSameDay: 0 };
   const offHoursClock: number[] = [];
+  let windowClosed = 0;
 
   for (const f of facts) {
+    if (f.windowClosed) windowClosed++;
     byManagementType[f.managementType]++;
     byPath[f.botExitPath].conversations++;
     if (f.botMinutes !== null) botTimes[f.botExitPath].push(f.botMinutes);
@@ -316,6 +333,7 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
     lateOrders: late,
     withoutConfig,
     outsidePublicHours: { answered: offHoursClock.length, clock: distribution(offHoursClock) },
+    windowClosed,
   };
 }
 
@@ -376,6 +394,7 @@ interface RawEntryRow {
   botOrderCompleteAt: Date | null;
   firstHumanAt: Date | null;
   firstHumanAccount: string | null;
+  lastCustBeforeOp: Date | null;
   orderFlow: boolean | null;
   meducar: boolean | null;
   custChars: number | null;
@@ -425,6 +444,9 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       (SELECT m."externalSenderId" FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'OPERATOR' AND NOT m."isPrivate"
         ORDER BY m."sentAt", m.id LIMIT 1) AS "firstHumanAccount",
+      (SELECT max(m."sentAt") FROM "ConversationMessage" m
+        WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
+          AND (a.first_op IS NULL OR m."sentAt" < a.first_op)) AS "lastCustBeforeOp",
       a.order_flow AS "orderFlow",
       (SELECT (m.author = 'CUSTOMER' AND m.body ~* ${MEDUCAR_LINK_REGEX} AND m.body ~* ${MEDUCAR_PHRASE_REGEX})
         FROM "ConversationMessage" m
@@ -451,6 +473,7 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
     botOrderCompleteAt: r.botOrderCompleteAt,
     firstHumanAt: r.firstHumanAt,
     firstHumanAccount: r.firstHumanAccount,
+    lastCustomerBeforeResponseAt: r.lastCustBeforeOp,
     orderFlow: r.orderFlow === true,
     firstCustomerMessageIsMeducar: r.meducar === true,
     customerChars: Number(r.custChars ?? 0),

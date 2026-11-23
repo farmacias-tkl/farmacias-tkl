@@ -224,6 +224,27 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     needsConfig: false,
   },
   {
+    key: "whatsapp_window.closed_unanswered",
+    block: "ATENCION",
+    label: "Ventana de WhatsApp cerrada sin respuesta",
+    definition:
+      "Conversaciones en las que pasaron más de 24 horas de reloj desde el último mensaje del cliente sin la " +
+      "primera respuesta de una persona, o en las que esa respuesta llegó después. Para retomarlas hace falta " +
+      "una plantilla aprobada: es una oportunidad perdida. En \"Atención y demoras\" cuenta las que entraron en " +
+      "el período; en Avances, las que se cerraron hoy contra el mismo día de la semana anterior a la misma hora.",
+    source: "ConversationMessage.sentAt",
+    population: "ENTRADA",
+    denominator: null,
+    evidence: "MEDIDO",
+    limitations: [
+      "Mira solo la primera respuesta: no cuenta las ventanas que se cierran más adelante en la conversación, " +
+        "porque ahí el último mensaje del cliente suele ser un agradecimiento.",
+      "Incluye conversaciones en las que el cliente solo saludó o agradeció y nadie respondió.",
+      "Las conversaciones de los últimos dos días pueden no haber llegado todavía a las 24 horas.",
+    ],
+    needsConfig: false,
+  },
+  {
     key: "queue.not_customers",
     block: "DATOS",
     label: "No son clientes",

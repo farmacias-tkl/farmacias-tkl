@@ -94,6 +94,8 @@ async function main() {
       assert.equal(r.firstHumanAt?.toISOString(), at("2026-03-02T10:20").toISOString()); // la nota de las 10:05 no cuenta
       assert.equal(r.firstHumanAccount, "9001");
       assert.equal(r.firstCustomerMessageIsMeducar, false);
+      // Último mensaje del cliente anterior a la primera respuesta: desde ahí corre la ventana de WhatsApp.
+      assert.equal(r.lastCustomerBeforeResponseAt?.toISOString(), at("2026-03-02T10:00").toISOString());
     });
     await check("Meducar: solo por el primer mensaje del cliente", () => {
       assert.equal(byId.get(ids.meducar)!.firstCustomerMessageIsMeducar, true);

@@ -322,8 +322,23 @@ function ProgressCard({ d }: { d: NowPayload }) {
           </div>
         </dl>
       )}
+      <h3 className="mt-3 border-t border-gray-100 pt-2 text-xs font-semibold text-gray-700">Ventana de WhatsApp</h3>
+      {p.windowClosed ? (
+        <div className="mt-1 text-sm text-gray-800">
+          <div className="flex items-baseline justify-between gap-3">
+            <span>Conversaciones cuya ventana se cerró sin respuesta, hoy</span>
+            <span className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(p.windowClosed.today)} <span className="font-normal text-gray-600">· antes {nf.format(p.windowClosed.previous)}</span></span>
+          </div>
+          <Trend better={p.windowClosed.today < p.windowClosed.previous} same={p.windowClosed.today === p.windowClosed.previous}
+            text={`${nf.format(Math.abs(p.windowClosed.today - p.windowClosed.previous))} ${p.windowClosed.today < p.windowClosed.previous ? "menos" : "más"}`} />
+        </div>
+      ) : (
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+      )}
       <More>
-        Pendientes al empezar el turno: conversaciones abiertas, con el último mensaje del cliente y hasta {d.windowHours} horas de espera, a la hora en que empieza el
+        Ventana cerrada sin respuesta: pasaron {d.window.hours} horas de reloj desde el último mensaje del cliente sin la primera respuesta de una persona. Cuenta las
+        ventanas que se cerraron hoy, hayan entrado cuando hayan entrado, contra las del mismo día de la semana pasada hasta esta misma hora.
+        {" "}Pendientes al empezar el turno: conversaciones abiertas, con el último mensaje del cliente y hasta {d.windowHours} horas de espera, a la hora en que empieza el
         horario de operadores. La comparación toma lo que había entrado y lo que se había respondido el mismo día de la semana pasada a esta misma hora
         ({nf.format(today.entries)} entradas hoy, {nf.format(previous.entries)} ese día). &quot;Sin datos&quot; quiere decir que no hay con qué calcularlo, no que sea cero.
       </More>

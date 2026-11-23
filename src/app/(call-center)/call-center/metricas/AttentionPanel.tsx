@@ -137,11 +137,15 @@ function Headline({ total }: { total: Summary }) {
     </p>
   ) : null;
   if (!goal || goal.compliance === null) {
-    if (offHours) return offHours;
     return (
-      <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
-        No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
-      </p>
+      <>
+        {offHours ?? (
+          <p className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-800">
+            No se puede decir cuántas conversaciones recibieron respuesta dentro de la meta: en este período no hay configuración vigente o todavía no hay conversaciones evaluables.
+          </p>
+        )}
+        <WindowClosedNote total={total} />
+      </>
     );
   }
   return (
@@ -152,7 +156,19 @@ function Headline({ total }: { total: Summary }) {
       {median !== null && <> Entre las respondidas, la mitad esperó <span className="font-semibold">{formatMinutes(median)} hábiles</span>.</>}
     </p>
     {offHours}
+    <WindowClosedNote total={total} />
     </>
+  );
+}
+
+/** Pérdida de oportunidad: ventanas de 24 horas de WhatsApp que se cerraron sin la primera respuesta. */
+function WindowClosedNote({ total }: { total: Summary }) {
+  return (
+    <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
+      <span className="font-semibold">Conversaciones cuya ventana se cerró sin respuesta: {nf.format(total.windowClosed)}</span> de {nf.format(total.entries)}.{" "}
+      Pasaron más de 24 horas desde el último mensaje del cliente sin la primera respuesta de una persona: para retomarlas hace falta una plantilla de WhatsApp.
+      <span className="mt-1 block text-[11px] text-gray-500">{EVIDENCE_LABELS.MEDIDO}</span>
+    </p>
   );
 }
 
