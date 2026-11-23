@@ -11,6 +11,17 @@ import type { CallCenterMetricsConfigData, ClosureOutcome } from "./config-schem
 
 export type ClosureMap = ReadonlyMap<string, ClosureOutcome>;
 
+/** Texto de cada resultado de cierre. */
+export const CLOSURE_OUTCOME_TEXT: Record<ClosureOutcome, string> = {
+  VENTA: "Venta",
+  CONSULTA: "Consulta resuelta",
+  PEDIDO_NO_CONCRETADO: "Pedido no concretado",
+  NO_LO_TRABAJAMOS: "No se pudo vender · no lo trabajamos",
+  SIN_STOCK: "No se pudo vender · sin stock o discontinuado",
+  SOLO_BOT: "Solo bot, sin atención de una persona",
+  OTRO: "Otro",
+};
+
 /** Mapa etiqueta → resultado de una versión de la configuración. Vacío si no tiene el campo. */
 export function closureMapOf(data: Pick<CallCenterMetricsConfigData, "closureLabels"> | null | undefined): ClosureMap {
   return new Map((data?.closureLabels ?? []).map((c) => [c.label, c.outcome]));

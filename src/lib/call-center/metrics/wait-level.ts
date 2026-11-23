@@ -34,6 +34,8 @@ export interface WaitContext {
   criticalMinutes: number;
   /** Horas antes del cierre de la ventana de WhatsApp desde las que un caso está "por vencer". */
   windowWarningHours?: number;
+  /** Minutos sin respuesta de un operador desde los que se muestra el aviso "para revisar". */
+  lastResponseWarningMinutes?: number;
 }
 
 /** PURO. */

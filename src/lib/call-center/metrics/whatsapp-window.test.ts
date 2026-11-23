@@ -112,7 +112,8 @@ test("Ahora: los antiguos y las cerradas sin responder marcan si su ventana est√
   ], { ...NONE, closed });
   assert.deepEqual(p.stale.items.map((i) => [i.conversationId, i.windowClosed]), [["antigua", true], ["antigua-insistio", false]]);
   assert.deepEqual(p.closedUnanswered!.items.map((i) => [i.conversationId, i.windowClosed]), [["c-reciente", false], ["c-vieja", true]]);
-  assert.deepEqual([p.window.staleClosed, p.window.closedUnansweredClosed, p.window.closed], [1, 1, 0]);
+  // El posible pendiente antiguo con la ventana cerrada cuenta tambi√©n en la alerta de ventana cerrada.
+  assert.deepEqual([p.window.staleClosed, p.window.closedUnansweredClosed, p.window.closed], [1, 1, 1]);
   // Sin las cerradas calculadas: null, no cero.
   assert.equal(payload([]).window.closedUnansweredClosed, null);
 });

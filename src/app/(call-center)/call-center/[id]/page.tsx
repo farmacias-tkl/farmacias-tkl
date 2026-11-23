@@ -7,6 +7,9 @@ import { formatDateTimeAR } from "@/lib/dates/format";
 import { formatAttachmentMeta, groupAttachmentsByMessage, STORAGE_DISPLAY_META, type StorageDisplay } from "@/lib/call-center/attachment-display";
 import { loadAttachmentsForDetail } from "@/lib/call-center/attachment-detail-read";
 import ConversationActions from "./ConversationActions";
+import { loadOperatorDirectory } from "@/lib/call-center/operator-directory";
+import { agoLabel, operatorInfo, shortHistory } from "@/lib/call-center/operator-display";
+import { accountDisplay, accountRef } from "@/lib/call-center/metrics/account-label";
 
 export const metadata = { title: "Call Center — Conversación" };
 
@@ -51,6 +54,18 @@ export default async function ConversationDetailPage({
 
   const m = STATUS_META[conv.status];
 
+  // Operador: cuenta de Emozion asignada (medido) y último operador que respondió (detectado).
+  // Los nombres salen de la configuración de métricas vigente; sin alias, "Cuenta N".
+  const { accounts, closureMap } = await loadOperatorDirectory();
+  const now = new Date();
+  const lastOperatorMsg = [...conv.messages].reverse().find((x) => x.author === "OPERATOR" && !x.isPrivate) ?? null;
+  const op = operatorInfo(conv.externalAssigneeId, lastOperatorMsg?.externalSenderId ?? null, accounts);
+  // Sin cuenta en el mensaje no se sabe quién respondió, pero sí cuándo.
+  const lastResponderText = !lastOperatorMsg || (op.hasAssignee && lastOperatorMsg.externalSenderId === conv.externalAssigneeId)
+    ? null
+    : `${op.lastResponder ?? "cuenta no registrada"} · ${agoLabel(lastOperatorMsg.sentAt, now)}`;
+  const history = shortHistory(conv.stateHistory, accounts, closureMap);
+
   // B5: anclar cada adjunto a su mensaje vía messageId; los huérfanos van a un bloque al pie.
   const messageIds = new Set(conv.messages.map((msg) => msg.id));
   const { byMessage: attachmentsByMessage, orphans: orphanAttachments } = groupAttachmentsByMessage(attachments, messageIds);
@@ -70,10 +85,34 @@ export default async function ConversationDetailPage({
         </span>
       </div>
 
+      {/* Operador: quién la atiende, quién respondió último y el recorrido corto */}
+      <section aria-label="Operador" style={{ marginTop: 20, padding: 16, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12 }}>
+        <div style={{ fontSize: 15, color: "#111827" }}>
+          <span style={{ color: "#6b7280" }}>Atendida por: </span>
+          <span style={{ fontWeight: 700 }}>{op.attendedBy}</span>
+        </div>
+        {lastResponderText && (
+          <div style={{ fontSize: 13.5, color: "#374151", marginTop: 6 }}>
+            <span style={{ border: "1px solid #d1d5db", borderRadius: 4, padding: "0 4px", fontSize: 11, fontWeight: 600, marginRight: 6, color: "#6b7280" }}>Detectado</span>
+            <span style={{ color: "#6b7280" }}>Último en responder: </span>
+            {lastResponderText}
+          </div>
+        )}
+        {history.length > 0 && (
+          <ol style={{ listStyle: "none", margin: "10px 0 0", padding: "10px 0 0", borderTop: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: 4 }}>
+            {history.map((e, i) => (
+              <li key={i} style={{ fontSize: 12.5, color: "#374151" }}>
+                <span style={{ color: "#9ca3af" }}>{formatDateTimeAR(e.at)}</span>{" · "}{e.text}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
       {/* Metadatos */}
       <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px 24px", marginTop: 20, padding: 16, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12 }}>
         <Meta label="Teléfono (snapshot)" value={conv.customerPhoneSnapshot ?? conv.customer.phone} />
-        <Meta label="Operador asignado" value={conv.assignedTo?.name ?? "—"} />
+        <Meta label="Tomada en esta plataforma por" value={conv.assignedTo?.name ?? "—"} />
         <Meta label="Origen" value={conv.source ?? "—"} />
         <Meta label="ID externo" value={conv.externalConversationId ?? "—"} />
         <Meta label="Creada" value={formatDateTimeAR(conv.createdAt)} />
@@ -117,6 +156,9 @@ export default async function ConversationDetailPage({
                   <AttachmentLine key={a.id} att={a} />
                 ))}
                 <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, textAlign: "right" }}>
+                  {msg.author === "OPERATOR" && msg.externalSenderId
+                    ? <><span style={{ color: "#4b5563", fontWeight: 600 }}>{accountDisplay(accountRef(msg.externalSenderId, accounts))}</span>{" · "}</>
+                    : null}
                   {formatDateTimeAR(msg.sentAt)}
                 </div>
               </div>

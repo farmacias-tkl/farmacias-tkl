@@ -19,7 +19,7 @@ import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered, isProbablyClosed, loadOpenBlockRows, type ClosedBlockRow } from "./closed-unanswered";
 import { loadDailyActivityRows } from "./activity";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
-import { DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, isSystemAccount, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
+import { DEFAULT_LAST_RESPONSE_WARNING_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, lastResponseWarningMinutesOf, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
 import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
@@ -28,6 +28,15 @@ import {
 } from "./now-types";
 import { loadProgress } from "./progress";
 import { loadQualityChecks } from "./quality";
+import { accountRef, ownerKeyOf } from "./account-label";
+import { buildOwners, detectedOwnerLabel, loadOpenOwnerRows, type OpenOwnerRow } from "./owners";
+import { buildObserved, loadObservedRows, type ObservedInput } from "./observed-activity";
+import { isWithinHours } from "./business-time";
+import { shiftStartOf } from "./progress";
+import { getQueueTrend } from "./queue-trend";
+import type { NowTrend } from "./now-types";
+import { loadClaimMotives } from "./detected";
+import type { ClaimMotive } from "./detected-patterns";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -51,14 +60,21 @@ export interface NowExtras {
   openBlocks: readonly ClosedBlockRow[] | null;
   progress: NowProgress | null;
   checks: QualityChecks | null;
+  /** Todas las abiertas con su asignado, para "Quién tiene cada caso". null u omitido si no se pudieron leer. */
+  openOwners?: readonly OpenOwnerRow[] | null;
+  /** Respuestas públicas de operador por cuenta, para "Actividad observada". null u omitido si no se pudieron leer. */
+  observed?: ObservedInput | null;
+  /** Evolución de la cola, ya calculada. null u omitido si no se pudo calcular. */
+  trend?: NowTrend | null;
+  /** Motivos de reclamo detectados, por conversación pendiente. null u omitido si no se pudieron revisar. */
+  claims?: ReadonlyMap<string, ClaimMotive[]> | null;
 }
 
 /** Responsable de un caso. PURO. */
 export function ownerOf(assignee: string | null, accounts: readonly ConfigAccount[]): NowOwner {
-  const cfg = assignee ? accounts.find((a) => a.externalId === assignee) : undefined;
-  if (!cfg) return { kind: "UNKNOWN" };
-  if (isSystemAccount(cfg)) return { kind: "SYSTEM" };
-  return { kind: "ACCOUNT", label: cfg.alias ?? `cuenta ${cfg.externalId}` };
+  if (!assignee) return { kind: "UNKNOWN" };
+  const ref = accountRef(assignee, accounts);
+  return ref.role === "SISTEMA" ? { kind: "SYSTEM" } : { kind: "ACCOUNT", label: ref.label };
 }
 
 /** Horario y umbrales con la configuración vigente al momento `now`. PURO. */
@@ -71,6 +87,7 @@ export function waitContext(versions: readonly ConfigVersion[], now: Date): Wait
     goalMinutes: current.data.firstResponseGoalMinutes,
     criticalMinutes: criticalWaitMinutesOf(current.data),
     windowWarningHours: windowWarningHoursOf(current.data),
+    lastResponseWarningMinutes: lastResponseWarningMinutesOf(current.data),
   };
 }
 
@@ -91,6 +108,8 @@ export function toNowPayload(
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
   const { history, today, closed, wait, accounts, openBlocks, progress, checks } = extras;
+  const openOwners = extras.openOwners ?? null;
+  const ownerRowById = openOwners ? new Map(openOwners.map((r) => [r.conversationId, r])) : null;
   const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
   // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
   const now = snapshot.generatedAt;
@@ -104,14 +123,21 @@ export function toNowPayload(
   });
   const probableClose = blockById ? staleItems.filter((i) => i.kind === "PROBABLE_CLOSE").length : null;
   const closedItems = closed ? closed.items.map((it) => ({ ...it, windowClosed: windowOf(new Date(it.lastCustomerAt)) === "CERRADA" })) : null;
+  // Posibles pendientes antiguos: los antiguos sin señal de cierre (o sin clasificar). Entran
+  // en la lista y en las alertas; nunca se excluye un caso solo por antiguo.
+  const staleKind = new Map(staleItems.map((s) => [s.conversationId, s.kind]));
+  const oldPending = stale.filter((it) => staleKind.get(it.conversationId) !== "PROBABLE_CLOSE");
+  const oldPendingIds = new Set(oldPending.map((it) => it.conversationId));
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
-  const items = waiting.map((it) => {
+  const items = [...oldPending, ...waiting].map((it) => {
     const window = windowOf(it.lastCustomerAt);
     const byClock = wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null };
     return {
     conversationId: it.conversationId,
     status: it.status,
     owner: ownerOf(it.externalAssigneeId, accounts),
+    ownerKey: ownerKeyOf(it.externalAssigneeId, accounts),
+    detectedOwner: it.externalAssigneeId ? null : detectedOwnerLabel(ownerRowById?.get(it.conversationId), accounts),
     createdAt: it.createdAt.toISOString(),
     waitStart: it.waitStart.toISOString(),
     waitMinutes: Math.round(it.waitHours * 60),
@@ -124,6 +150,8 @@ export function toNowPayload(
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
     thanksCandidate: it.thanksCandidate,
+    claims: extras.claims ? extras.claims.get(it.conversationId) ?? [] : null,
+    oldPending: oldPendingIds.has(it.conversationId),
     };
   });
   // Primero los críticos por ventana cerrada, del que más espera real al que menos; después el resto, como venía.
@@ -138,18 +166,20 @@ export function toNowPayload(
     schedule: wait ? { ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes } : null,
     waiting: {
       total: waiting.length,
+      oldPending: oldPending.length,
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
-      completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
+      completedOrders: items.filter((it) => !it.hasHumanResponse && it.botOrderComplete).length,
       // Sin configuración solo se pueden contar los críticos por ventana cerrada: si no hay ninguno, queda sin dato.
       critical: wait || items.some((it) => it.level === "CRITICO") ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
       urgent: items.filter((it) => it.alert === "URGENTE").length,
       insisting: items.filter((it) => it.alert === "INSISTIENDO").length,
+      claims: extras.claims ? items.filter((it) => it.claims !== null && it.claims.length > 0).length : null,
     },
     today,
     list: closedFirst.slice(0, maxRows),
-    listTotal: waiting.length,
+    listTotal: items.length,
     stale: {
       total: stale.length,
       probableClose,
@@ -168,6 +198,16 @@ export function toNowPayload(
       staleClosed: staleItems.filter((it) => it.windowClosed).length,
       closedUnansweredClosed: closedItems ? closedItems.filter((it) => it.windowClosed).length : null,
     },
+    // Sobre todos los que esperan, no solo sobre las filas que entran en la lista.
+    owners: openOwners ? buildOwners(openOwners, items, accounts) : null,
+    observed: extras.observed
+      ? buildObserved(extras.observed, {
+          now, accounts, pending: items.length,
+          inOperatorHours: wait ? isWithinHours(now, wait.ops) : null,
+          warningMinutes: wait?.lastResponseWarningMinutes ?? DEFAULT_LAST_RESPONSE_WARNING_MINUTES,
+        })
+      : null,
+    trend: extras.trend ?? null,
     progress,
     quality: {
       freshness: {
@@ -229,15 +269,26 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness, today, openBlocks, versions] = await Promise.all([
+  const [snapshot, freshness, today, openBlocks, versions, openOwners] = await Promise.all([
     getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null), loadOpenBlockRows().catch(() => null),
     loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
+    loadOpenOwnerRows().catch(() => null),
   ]);
   const wait = waitContext(versions, now);
   const current = configForDay(versions, arDayISO(now));
   const accounts = current?.data.accounts ?? [];
   const checks = await loadQualityChecks(now, current ? accounts : null).catch(() => null);
   const progress = await loadProgress(now, versions, wait?.ops ?? null).catch(() => null);
+  // Actividad observada: desde el inicio del turno de operadores de hoy o, si no hay, desde el comienzo del día.
+  const shiftStart = wait ? shiftStartOf(now, wait.ops) : null;
+  const observedSince = shiftStart ?? arDayStartUTC(arDayISO(now));
+  const observed = await loadObservedRows(observedSince, now)
+    .then((rows) => ({ rows, since: observedSince, sinceIsShift: shiftStart !== null }))
+    .catch(() => null);
+  // Reclamos detectados: solo en las abiertas que esperan respuesta.
+  const claims = await loadClaimMotives(snapshot.items.filter((it) => it.open).map((it) => it.conversationId)).catch(() => null);
+  // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
+  const trend = await getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null);
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -255,7 +306,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

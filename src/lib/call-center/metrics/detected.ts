@@ -168,6 +168,32 @@ export async function loadDetectedRows(fromDay: string, toDayInclusive: string):
   return { rows: mapped.filter((r) => classifySale(r) !== null || claimsOf(r).length > 0), conversations: total };
 }
 
+/**
+ * Motivos de reclamo detectados en un conjunto dado de conversaciones (las pendientes de
+ * "Ahora"), con las mismas reglas que el informe. Solo lectura; las que no tienen ninguno no
+ * aparecen. Mira solo esas conversaciones, no el período entero.
+ */
+export async function loadClaimMotives(conversationIds: readonly string[]): Promise<Map<string, ClaimMotive[]>> {
+  const out = new Map<string, ClaimMotive[]>();
+  if (conversationIds.length === 0) return out;
+  const claimColumns = CLAIM_MOTIVES.map((motive) => Prisma.sql`${anyMessage(CLAIM_PATTERNS[motive])} AS ${Prisma.raw(`"claim_${motive}"`)}`);
+  const rows = await prisma.$queryRaw<Array<{ conversationId: string; nothingArrived: boolean; homeDelivery: boolean } & Record<string, unknown>>>(Prisma.sql`
+    SELECT m."conversationId" AS "conversationId",
+      ${anyMessage(NOTHING_ARRIVED)} AS "nothingArrived",
+      coalesce(bool_or(m.body = ${CUSTOMER_HOME_DELIVERY_OPTION}), false) AS "homeDelivery",
+      ${Prisma.join(claimColumns, ", ")}
+    FROM "ConversationMessage" m
+    WHERE m."conversationId" IN (${Prisma.join(conversationIds)}) AND m.author = 'CUSTOMER' AND m.body IS NOT NULL
+    GROUP BY 1
+  `);
+  for (const r of rows) {
+    const claims = claimFlags(Object.fromEntries(CLAIM_MOTIVES.map((mo) => [mo, r[`claim_${mo}`] === true])) as Record<ClaimMotive, boolean>, r);
+    const motives = claimsOf({ claims });
+    if (motives.length > 0) out.set(r.conversationId, motives);
+  }
+  return out;
+}
+
 const CACHE_MAX_ENTRIES = 20;
 const cache = new Map<string, { at: number; payload: DetectedPayload }>();
 const CACHE_MS = 60_000;

@@ -9,6 +9,7 @@
  */
 import type { QueueGroupCounts } from "./queue-types";
 import type { WindowState } from "./whatsapp-window";
+import type { ClaimMotive } from "./detected-patterns";
 
 /** Segundos de caché del bloque en el servidor y de refresco en la pantalla. */
 export const NOW_CACHE_SECONDS = 60;
@@ -21,19 +22,103 @@ export type WaitLevel = "EN_PLAZO" | "DEMORADO" | "CRITICO";
 
 /**
  * Responsable de un caso, según la cuenta de Emozion asignada y la configuración vigente:
- * una cuenta de sistema (asignación automática), una cuenta configurada, o nadie identificado
- * (sin asignado, o asignado a una cuenta que no está en la configuración).
+ * una cuenta de sistema (asignación automática: nadie lo tomó), una cuenta, o sin dato de
+ * asignado.
  */
 export type NowOwner =
   | { kind: "SYSTEM" }
-  | { kind: "ACCOUNT"; /** Alias de la configuración, o "cuenta N" si no tiene. */ label: string }
+  | { kind: "ACCOUNT"; /** Alias de la configuración, o "Cuenta N" si no tiene o no está configurada. */ label: string }
   | { kind: "UNKNOWN" };
+
+/** Grupo de una fila de "Quién tiene cada caso". */
+export type OwnerGroup = "OPERADOR" | "SUPERVISION" | "SIN_TOMAR" | "SIN_DATO";
+
+/** Una cuenta (o fila especial) con conversaciones abiertas, según el asignado actual. */
+export interface NowOwnerRow {
+  /** Clave de la fila: la misma que lleva cada caso de la lista (ownerKey). */
+  key: string;
+  group: OwnerGroup;
+  /** Alias, "Cuenta N", "Sin tomar" o "Sin dato de asignado". */
+  label: string;
+  /** Conversaciones abiertas asignadas, de cualquier antigüedad. */
+  open: number;
+  /** De esas, las que esperan respuesta de un operador y están en la lista "Casos". */
+  waiting: number;
+  /** ISO. Desde cuándo espera la más vieja de las que esperan; null si ninguna espera. */
+  oldestWaitStart: string | null;
+  /** De las que esperan, cuántas tienen la ventana de WhatsApp cerrada. */
+  windowClosed: number;
+  /**
+   * Solo en "Sin dato de asignado". DETECTADO, no medido: la cuenta del último mensaje
+   * público de un operador en cada conversación, y cuántas no tuvieron ninguno.
+   */
+  detected: { byAccount: Array<{ label: string; open: number }>; none: number } | null;
+}
+
+/**
+ * Actividad observada: respuestas públicas de operador que se registraron. No es presencia.
+ * No cuenta el bot, las notas internas ni las cuentas de sistema.
+ */
+export interface NowObserved {
+  /** ISO. Última respuesta pública de un operador; null si no hubo ninguna en `lookbackDays` días. */
+  lastResponseAt: string | null;
+  /** Para revisar: hay pendientes, es horario de operadores y pasaron más de `warningMinutes` sin una respuesta. */
+  review: boolean;
+  warningMinutes: number;
+  /** null sin configuración vigente: no se conoce el horario de operadores. */
+  inOperatorHours: boolean | null;
+  /** ISO. Desde cuándo se cuentan las conversaciones atendidas por cuenta. */
+  since: string;
+  /** `since` es el inicio del turno de operadores de hoy; si no, el comienzo del día. */
+  sinceIsShift: boolean;
+  lookbackDays: number;
+  /** Por número de cuenta, sin ranking. */
+  accounts: Array<{ label: string; lastResponseAt: string; conversations: number }>;
+}
+
+/**
+ * Evolución de la cola durante el turno y últimos 60 minutos. "Pendiente" es siempre la misma
+ * regla en todos los momentos: abierta, último mensaje del cliente y hasta `windowHours` de
+ * espera (los pendientes recientes; sin los posibles pendientes antiguos).
+ */
+export interface NowTrend {
+  /** ISO. Cuándo se calculó: se guarda unos minutos, puede ser anterior al resto de la pantalla. */
+  generatedAt: string;
+  /** ISO. Primer punto: inicio del horario de operadores de hoy o, si no hay, comienzo del día. */
+  from: string;
+  fromIsShift: boolean;
+  stepMinutes: number;
+  /** Pendientes a cada hora, de la más vieja a la más nueva; el último punto es `generatedAt`. */
+  points: Array<{ at: string; pending: number }>;
+  lastHour: {
+    /** Conversaciones creadas en los últimos 60 minutos. */
+    newConversations: number;
+    /** Conversaciones con al menos una respuesta pública de un operador en los últimos 60 minutos. */
+    answered: number;
+    /** Pendientes hace 60 minutos y ahora, con la misma regla. */
+    pendingBefore: number;
+    pendingNow: number;
+  };
+}
+
+export interface NowOwners {
+  /** Todas las conversaciones abiertas. */
+  open: number;
+  rows: NowOwnerRow[];
+}
 
 export interface NowListItem {
   conversationId: string;
   /** Estado de la conversación: PENDIENTE, SIN_ASIGNAR o ASIGNADA. */
   status: string;
   owner: NowOwner;
+  /** Clave de quién lo tiene: la de su fila en "Quién tiene cada caso". */
+  ownerKey: string;
+  /**
+   * Solo sin dato de asignado: cuenta del último operador que respondió. Es un dato DETECTADO,
+   * no el asignado. null si hay asignado, si nadie respondió o si no se pudo leer.
+   */
+  detectedOwner: string | null;
   /** ISO. Cuándo entró la conversación. */
   createdAt: string;
   /** ISO. Desde cuándo espera: primer mensaje del cliente del bloque sin responder. */
@@ -59,6 +144,17 @@ export interface NowListItem {
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
   thanksCandidate: boolean;
+  /**
+   * Motivos de reclamo DETECTADOS por palabras en los mensajes del cliente (las reglas de
+   * "Reclamos y pérdidas"). Vacío si no hay ninguno; null si no se pudieron revisar. No es un
+   * reclamo confirmado: todavía no hay un registro de reclamos.
+   */
+  claims: ClaimMotive[] | null;
+  /**
+   * Posible pendiente antiguo: espera hace más de `windowHours` y su último mensaje no parece
+   * un cierre. Es una detección por palabras, por eso "posible".
+   */
+  oldPending: boolean;
 }
 
 /**
@@ -165,9 +261,15 @@ export interface NowPayload {
     goalMinutes: number;
     criticalMinutes: number;
   } | null;
-  /** Abiertas con hasta `windowHours` de espera. */
+  /**
+   * Abiertas esperando. `total`, `neverHuman`, `awaitingNext` y `oldestWaitStart` son de las
+   * recientes (hasta `windowHours` de espera). Las alertas (`critical`, `urgent`, `insisting`,
+   * `completedOrders`) cuentan también los posibles pendientes antiguos.
+   */
   waiting: {
     total: number;
+    /** Posibles pendientes antiguos: más de `windowHours` de espera y sin señal de cierre. Se suman al total de pendientes. */
+    oldPending: number;
     /** Esperan la primera respuesta de una persona. */
     neverHuman: number;
     /** Ya les respondieron y volvieron a escribir. */
@@ -180,6 +282,8 @@ export interface NowPayload {
     /** Clientes urgentes (por palabras) e insistiendo (sin contar los urgentes), sin respuesta de un operador. */
     urgent: number;
     insisting: number;
+    /** Pendientes con algún reclamo detectado. null si no se pudieron revisar. */
+    claims: number | null;
   };
   /**
    * Hoy, día de Buenos Aires. null si no se pudo calcular. Son dos poblaciones:
@@ -188,11 +292,11 @@ export interface NowPayload {
    *    hayan creado cuando se hayan creado (incluye el atraso de días anteriores).
    */
   today: { entered: number; answered: number; attended: number } | null;
-  /** Las de `waiting`, de la espera más vieja a la más nueva. */
+  /** Las recientes y los posibles pendientes antiguos: primero las de ventana cerrada, después de la espera más vieja a la más nueva. */
   list: NowListItem[];
   /** Filas de la lista antes del tope. */
   listTotal: number;
-  /** Abiertas con más de `windowHours` de espera: no cuentan como clientes esperando. */
+  /** Abiertas con más de `windowHours` de espera. Las que siguen pendientes están además en `list`. */
   stale: {
     total: number;
     /** null si no se pudieron clasificar. Las dos suman `total`: ninguna desaparece. */
@@ -211,7 +315,7 @@ export interface NowPayload {
     hours: number;
     /** Aviso de "por vencer", de la configuración vigente o el valor por defecto. */
     warningHours: number;
-    /** Entre los que esperan (`waiting`): cerrada, y por vencer. */
+    /** Entre los casos de la lista (recientes y posibles pendientes antiguos): cerrada, y por vencer. */
     closed: number;
     closing: number;
     /** Entre los antiguos (`stale`). */
@@ -219,6 +323,12 @@ export interface NowPayload {
     /** Entre las cerradas sin responder; null si no se pudieron calcular. */
     closedUnansweredClosed: number | null;
   };
+  /** "Quién tiene cada caso": abiertas por cuenta asignada. null si no se pudo calcular. */
+  owners: NowOwners | null;
+  /** Actividad observada. null si no se pudo calcular. */
+  observed: NowObserved | null;
+  /** Evolución de la cola. null si no se pudo calcular. */
+  trend: NowTrend | null;
   /** null si no se pudo calcular. */
   progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */

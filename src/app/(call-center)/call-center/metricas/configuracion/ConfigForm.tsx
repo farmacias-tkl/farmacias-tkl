@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CLOSURE_OUTCOMES, CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, ISO_WEEKDAYS, criticalWaitMinutesOf, parseConfigData, windowWarningHoursOf,
+  CLOSURE_OUTCOMES, CONFIG_SCHEMA_VERSION, DEFAULT_CRITICAL_WAIT_MINUTES, DEFAULT_LAST_RESPONSE_WARNING_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, ISO_WEEKDAYS, criticalWaitMinutesOf, lastResponseWarningMinutesOf, parseConfigData, windowWarningHoursOf,
   type CallCenterMetricsConfigData, type ClosureOutcome, type ConfigAccount, type IsoWeekday,
 } from "@/lib/call-center/metrics/config-schema";
 import {
@@ -42,6 +42,7 @@ export default function ConfigForm({
   const [goal, setGoal] = useState(String(base?.data.firstResponseGoalMinutes ?? ""));
   const [critical, setCritical] = useState(String(base ? criticalWaitMinutesOf(base.data) : DEFAULT_CRITICAL_WAIT_MINUTES));
   const [windowWarning, setWindowWarning] = useState(String(base ? windowWarningHoursOf(base.data) : DEFAULT_WINDOW_WARNING_HOURS));
+  const [lastResponseWarning, setLastResponseWarning] = useState(String(base ? lastResponseWarningMinutesOf(base.data) : DEFAULT_LAST_RESPONSE_WARNING_MINUTES));
   const [accounts, setAccounts] = useState<ConfigAccount[]>(() => initialAccounts(base?.data ?? null, options.accounts));
   const [newAccount, setNewAccount] = useState("");
   const [vendors, setVendors] = useState<Set<string>>(
@@ -115,6 +116,8 @@ export default function ConfigForm({
     }
     const warningNumber = Number(windowWarning);
     if (!/^\d+$/.test(windowWarning.trim()) || warningNumber < 1 || warningNumber > 23) problems.push("El aviso de ventana por vencer tiene que ser un número entero de horas, entre 1 y 23.");
+    const lastResponseNumber = Number(lastResponseWarning);
+    if (!/^\d+$/.test(lastResponseWarning.trim()) || lastResponseNumber < 1 || lastResponseNumber > 1440) problems.push("El aviso de última respuesta tiene que ser un número entero de minutos, entre 1 y 1440.");
     if (problems.length > 0 || !pub.ok || !ops.ok) { setErrors(problems); return; }
 
     const data: CallCenterMetricsConfigData = {
@@ -124,6 +127,7 @@ export default function ConfigForm({
       firstResponseGoalMinutes: goalNumber,
       criticalWaitMinutes: criticalNumber,
       windowWarningHours: warningNumber,
+      lastResponseWarningMinutes: lastResponseNumber,
       // Sin sucursales cargadas el campo no se guarda, como en las versiones anteriores.
       ...(branchOrderHours.length > 0 ? { branchOrderHours } : {}),
       ...(closureLabels.some((c) => c.label.trim()) ? { closureLabels: closureLabels.filter((c) => c.label.trim()).map((c) => ({ label: c.label.trim(), outcome: c.outcome })) } : {}),
@@ -232,6 +236,15 @@ export default function ConfigForm({
         <div className="mt-2 flex items-center gap-2">
           <input id="windowWarning" inputMode="numeric" value={windowWarning} onChange={(e) => setWindowWarning(e.target.value)} className={`w-24 ${input}`} />
           <span className="text-sm text-gray-600">horas</span>
+        </div>
+        <label htmlFor="lastResponseWarning" className="mt-4 block text-sm font-semibold text-gray-800">Aviso de última respuesta de un operador</label>
+        <p className="text-xs text-gray-500">
+          Minutos sin una respuesta pública de un operador desde los que &quot;Ahora&quot; muestra el aviso &quot;para revisar&quot;. Solo aparece si además hay pendientes
+          y es horario de operadores.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <input id="lastResponseWarning" inputMode="numeric" value={lastResponseWarning} onChange={(e) => setLastResponseWarning(e.target.value)} className={`w-24 ${input}`} />
+          <span className="text-sm text-gray-600">minutos</span>
         </div>
       </section>
 

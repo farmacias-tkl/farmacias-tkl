@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import type { ClaimMotive, DetectedPayload, DetectedSection, SaleKind } from "@/lib/call-center/metrics/detected-types";
+import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
 import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
 import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
 
@@ -26,21 +27,6 @@ const SALE_NOTES: Record<SaleKind, string> = {
   DERIVED_IN_HOURS: "El operador lo mandó a comprar a la sucursal dentro del horario de pedidos cargado para esa sucursal, y no hay evidencia de venta. Posible venta perdida.",
 };
 
-const CLAIM_LABELS: Record<ClaimMotive, string> = {
-  DEMORA: "Demora",
-  SIN_NOVEDADES: "Pedido sin novedades",
-  INCORRECTO: "Producto o cantidad incorrectos",
-  STOCK: "Stock",
-  FACTURA: "Factura",
-  PRECIO: "Precio o cobertura",
-  PAGO: "Pago o devolución",
-  TRATO: "Trato",
-  OTROS: "Otros",
-  ENVIO_NO_LLEGO: "No llegó el pedido",
-  ENVIO_ENTREGA: "Problema con la entrega",
-  WEB_SIN_CONFIRMACION: "Pagó y no recibió la confirmación",
-  WEB_PAGINA: "Problemas con la página",
-};
 
 type State =
   | { status: "loading" }

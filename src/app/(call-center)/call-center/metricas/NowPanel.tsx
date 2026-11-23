@@ -4,7 +4,8 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
-import type { ClosedReason, NowListItem, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
+import type { ClosedReason, NowListItem, NowOwnerRow, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
+import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
 import { useNowData } from "./useNowData";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -29,7 +30,7 @@ function whenLabel(iso: string, nowMs: number): string {
 }
 
 const ownerLabel = (o: NowListItem["owner"]) =>
-  o.kind === "SYSTEM" ? "Asignación automática" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin responsable identificado";
+  o.kind === "SYSTEM" ? "Sin tomar" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin dato de asignado";
 
 /** Semáforo: fondo suave y la etiqueta siempre en texto. */
 const LEVELS: Record<WaitLevel, { label: string; chip: string; dot: string }> = {
@@ -44,7 +45,7 @@ const REASON_LABELS: Record<ClosedReason, string> = {
   ATTACHMENT: "Mandó una receta o un comprobante",
 };
 
-type CaseFilter = "all" | "urgent" | "insisting" | "closing" | "closed" | "critical" | "orders" | "longest";
+type CaseFilter = "all" | "claims" | "urgent" | "insisting" | "closing" | "closed" | "critical" | "orders" | "longest";
 
 /** "3 h 20 min" o "45 min" que faltan para que se cierre la ventana de WhatsApp. */
 function windowLeftLabel(lastCustomerAt: string, nowMs: number, hours: number): string {
@@ -62,6 +63,7 @@ function windowClosedAgoLabel(lastCustomerAt: string, nowMs: number, hours: numb
 }
 
 const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
+  claims: "pendientes con un reclamo detectado",
   urgent: "clientes urgentes",
   insisting: "clientes insistiendo",
   closing: "con la ventana de WhatsApp por vencer, de la que vence antes a la que vence después",
@@ -74,6 +76,8 @@ const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
 export default function NowPanel() {
   const { state, refreshing, reload } = useNowData();
   const [filter, setFilter] = useState<CaseFilter>("all");
+  // Filtro por quién tiene el caso (clave de la fila de "Quién tiene cada caso"). Se combina con el anterior.
+  const [ownerKey, setOwnerKey] = useState<string | null>(null);
 
   if (state.status === "loading") return <p className="mt-6 text-sm text-gray-600">Cargando…</p>;
   if (state.status === "error") {
@@ -89,21 +93,43 @@ export default function NowPanel() {
   const nowMs = new Date(d.generatedAt).getTime();
   const w = d.waiting;
   const toggle = (f: CaseFilter) => setFilter((cur) => (cur === f ? "all" : f));
-  const shown =
-    filter === "urgent" ? d.list.filter((it) => it.alert === "URGENTE")
+  const ownerRow = ownerKey ? d.owners?.rows.find((r) => r.key === ownerKey) ?? null : null;
+  const byOwner = (list: NowListItem[]) => (ownerKey ? list.filter((it) => it.ownerKey === ownerKey) : list);
+  const shown = byOwner(
+    filter === "claims" ? d.list.filter((it) => it.claims !== null && it.claims.length > 0)
+    : filter === "urgent" ? d.list.filter((it) => it.alert === "URGENTE")
     : filter === "insisting" ? d.list.filter((it) => it.alert === "INSISTIENDO")
     : filter === "closing" ? d.list.filter((it) => it.window === "POR_VENCER").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : 1))
     : filter === "closed" ? d.list.filter((it) => it.window === "CERRADA")
     : filter === "critical" ? d.list.filter((it) => it.level === "CRITICO")
     : filter === "orders" ? d.list.filter((it) => it.botOrderComplete && !it.hasHumanResponse)
     : filter === "longest" ? d.list.slice(0, 1)
-    : d.list;
+    : d.list);
 
   return (
     <section className="mt-4" aria-label="Ahora">
-      <p className="text-xs text-gray-600">
-        Actualizado a las {timeFmt.format(new Date(d.generatedAt))} · últimas {d.windowHours} horas{refreshing ? " · actualizando…" : ""}
-      </p>
+      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+        <p className="text-sm font-medium text-gray-900">
+          {!d.schedule ? "Sin configuración de horarios cargada"
+            : d.schedule.inPublicHours ? "Dentro del horario público"
+            : d.schedule.operatorShiftActive ? "Fuera del horario público · dentro del horario de operadores"
+            : "Fuera del horario público y del horario de operadores"}
+        </p>
+        <p className="mt-0.5 text-xs text-gray-600">
+          Pantalla calculada a las {timeFmt.format(new Date(d.generatedAt))}{refreshing ? " · actualizando…" : ""}
+          {" · "}último evento recibido: {d.quality.freshness.lastWebhookAt ? whenLabel(d.quality.freshness.lastWebhookAt, nowMs) : "sin dato"}
+        </p>
+        {d.quality.checks && d.quality.checks.events.error > 0 && (
+          <p role="status" className="mt-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs text-orange-900">
+            Hay {nf.format(d.quality.checks.events.error)} {d.quality.checks.events.error === 1 ? "evento" : "eventos"} de Emozion con error en los últimos {d.quality.checks.days} días:
+            los indicadores pueden estar incompletos. El detalle está en &quot;Calidad de datos&quot;.
+          </p>
+        )}
+        <More>
+          El horario público determina el cálculo de la meta. El horario de operadores indica cuándo está previsto que trabaje el equipo; no demuestra presencia.
+          La actividad observada son las respuestas que efectivamente se registraron. Que no lleguen eventos nuevos no prueba, por sí solo, una falla: puede no haber movimiento.
+        </More>
+      </div>
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
         <h2 className="text-sm font-semibold text-gray-800">Requiere acción</h2>
@@ -112,6 +138,10 @@ export default function NowPanel() {
             active={filter === "urgent"} onClick={() => toggle("urgent")} />
           <ActionButton label="Cliente insistiendo" value={nf.format(w.insisting)} tone={w.insisting ? "warning" : "plain"}
             active={filter === "insisting"} onClick={() => toggle("insisting")} />
+        </div>
+        <div className="mt-2 grid grid-cols-1 gap-2">
+          <ActionButton label="Reclamos pendientes de atención · detectados por palabras, para revisar" value={w.claims === null ? "—" : nf.format(w.claims)}
+            tone={w.claims ? "warning" : "plain"} active={filter === "claims"} disabled={w.claims === null} onClick={() => toggle("claims")} />
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <ActionButton label={`Ventana de WhatsApp por vencer (menos de ${d.window.warningHours} h)`} value={nf.format(d.window.closing)} tone={d.window.closing ? "warning" : "plain"}
@@ -127,6 +157,16 @@ export default function NowPanel() {
           <ActionButton label="Mayor espera" value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} tone="plain"
             active={filter === "longest"} disabled={!w.oldestWaitStart} onClick={() => toggle("longest")} />
         </div>
+        <a href="#cerradas-sin-responder"
+          className={`mt-2 flex min-h-[44px] items-center justify-between gap-3 rounded-md border px-2 py-1.5 ${d.closedUnanswered?.total ? "border-orange-200 bg-orange-50" : "border-gray-200 bg-white"}`}>
+          <span className="text-[11px] leading-tight text-gray-700">
+            Cerradas sin responder{d.closedUnanswered ? ` · últimos ${d.closedUnanswered.days} días` : ""}
+            <span className="block">No suman al total de pendientes. Tocá para revisarlas.</span>
+          </span>
+          <span className={`text-xl font-semibold tabular-nums ${d.closedUnanswered?.total ? "text-orange-900" : "text-gray-900"}`}>
+            {d.closedUnanswered ? nf.format(d.closedUnanswered.total) : "—"}
+          </span>
+        </a>
         <p className="mt-2 text-xs text-gray-700">
           Tocá un número para ver esos casos.
           {w.critical === null ? " Sin configuración cargada no se puede marcar la demora crítica." : ""}
@@ -134,10 +174,14 @@ export default function NowPanel() {
         <More>
           Cliente urgente: en mensajes que todavía no tuvieron respuesta de un operador, pide urgencia o avisa que se va a otro lado. Cliente insistiendo: después de
           completar el bot escribió 2 mensajes o más, separados por más de 10 minutos, y sigue sin respuesta. Los dos dejan de mostrarse cuando un operador responde.
+          {" "}Reclamos pendientes: conversaciones que esperan respuesta y en las que algún mensaje del cliente coincide con un motivo de reclamo de la pestaña
+          &quot;Reclamos y pérdidas&quot; (demora, pedido sin novedades, pago, entrega y los demás). Son detectados por palabras, no confirmados: todavía no hay un
+          registro de reclamos. Cuentan los que entraron cualquier día y siguen sin respuesta, no solo los de hoy.
           {" "}Ventana de WhatsApp: desde el último mensaje del cliente hay {d.window.hours} horas de reloj para responder libremente, también de noche, los fines de semana y
           los feriados. Pasado ese plazo la conversación solo se reabre con una plantilla aprobada. &quot;Por vencer&quot; son las que todavía se pueden responder y les
           quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
           {" "}Los grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
+          {" "}Las alertas cuentan los casos recientes y los posibles pendientes antiguos. Las cerradas sin responder ya no están abiertas: son una alerta aparte y no suman al total.
           {d.schedule ? ` En plazo es hasta ${d.schedule.goalMinutes} minutos hábiles de espera, demorado hasta ${d.schedule.criticalMinutes} y crítico más de ${d.schedule.criticalMinutes}.` : ""}
           {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso conserva su color. Además es crítico todo caso
           con la ventana de WhatsApp cerrada: {d.window.hours} horas o más de espera real desde el último mensaje del cliente, sume lo que sume el reloj hábil.
@@ -145,22 +189,33 @@ export default function NowPanel() {
       </div>
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-gray-700">Conversaciones esperando respuesta</h2>
+        <h2 className="text-sm font-medium text-gray-700">Total de pendientes</h2>
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-gray-900">
-          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.total)}</span>
-          <span className="text-sm">en las últimas {d.windowHours} h</span>
-          <span className="text-2xl font-semibold tabular-nums">+ {nf.format(d.stale.total)}</span>
-          <span className="text-sm">antiguas por revisar</span>
+          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.total + w.oldPending)}</span>
+          <span className="text-sm">conversaciones esperando respuesta</span>
         </p>
+        <dl className="mt-2 space-y-0.5 text-sm text-gray-800">
+          <div className="flex justify-between gap-2"><dt>Recientes (últimas {d.windowHours} h)</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(w.total)}</dd></div>
+          <div className="flex justify-between gap-2"><dt>Posibles pendientes antiguos</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(w.oldPending)}</dd></div>
+          {d.stale.probableClose !== null && d.stale.probableClose > 0 && (
+            <div className="flex justify-between gap-2 text-gray-600"><dt>Aparte, antiguas probablemente resueltas (por revisar)</dt><dd className="tabular-nums">{nf.format(d.stale.probableClose)}</dd></div>
+          )}
+        </dl>
         <p className="mt-1 text-sm text-gray-700">
-          {w.oldestWaitStart ? <>La que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay ninguna esperando en las últimas horas."}
+          {w.oldestWaitStart ? <>La reciente que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay ninguna esperando en las últimas horas."}
         </p>
         {w.total > 0 && (
           <p className="mt-2 text-xs text-gray-600">
-            {nf.format(w.neverHuman)} esperan la primera respuesta · {nf.format(w.awaitingNext)} esperan la siguiente
+            De las recientes, {nf.format(w.neverHuman)} esperan la primera respuesta y {nf.format(w.awaitingNext)} la siguiente.
           </p>
         )}
-        <Evidence level="MEDIDO" />
+        <More>
+          Pendiente es una conversación abierta cuyo último mensaje es del cliente. Las {d.windowHours} horas solo separan las recientes de las antiguas: ninguna se
+          excluye por antigua. &quot;Posibles pendientes antiguos&quot; son las que esperan hace más de {d.windowHours} horas y cuyo último mensaje no parece un cierre;
+          la separación es por palabras, por eso &quot;posibles&quot;. Las antiguas cuyo último mensaje es un agradecimiento o un cierre no se suman: están abajo, para
+          revisar y cerrar si corresponde. Nada se cierra por antigüedad.
+        </More>
+        <Evidence level={w.oldPending > 0 ? "DETECTADO" : "MEDIDO"} />
       </div>
 
       <div className="mt-3">
@@ -180,15 +235,27 @@ export default function NowPanel() {
           ) : (
             <p className="mt-1 text-sm text-gray-600">No disponible</p>
           )}
+          <More>
+            Son poblaciones distintas y no se restan entre sí. &quot;Nuevas de hoy&quot; son las conversaciones creadas hoy y, de esas, las que ya tienen una respuesta
+            pública de un operador. &quot;Respondidas hoy en total&quot; son todas las conversaciones con una respuesta pública de un operador hoy, también las que entraron
+            días anteriores. El total de pendientes de arriba es otra cosa: las abiertas cuyo último mensaje es del cliente, entren cuando entren. Ninguno cuenta las
+            respuestas del bot ni las notas internas.
+          </More>
           <Evidence level={d.today ? "MEDIDO" : "NO_DISPONIBLE"} />
         </div>
       </div>
 
+      <ObservedCard d={d} nowMs={nowMs} />
+
+      <TrendCard d={d} />
+
       <ProgressCard d={d} />
 
+      <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
+
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
-        Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" ? d.listTotal : shown.length)})` : ""}
-        <span className="ml-2 text-xs font-normal text-gray-600">primero los de ventana cerrada, después del que más espera al que menos</span>
+        Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" && !ownerKey ? d.listTotal : shown.length)})` : ""}
+        <span className="ml-2 text-xs font-normal text-gray-600">ordenados por espera real: primero los de ventana cerrada, después del que más espera al que menos</span>
       </h2>
       {filter !== "all" && (
         <p className="mt-1 text-xs text-gray-700">
@@ -196,12 +263,21 @@ export default function NowPanel() {
           <button type="button" onClick={() => setFilter("all")} className="font-medium text-[#1E2D5A] underline">Ver todos</button>
         </p>
       )}
+      {ownerKey && (
+        <p className="mt-1">
+          <button type="button" onClick={() => setOwnerKey(null)} aria-label={`Quitar el filtro: ${ownerRow?.label ?? "cuenta"}`}
+            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-full border border-[#1E2D5A] bg-white px-3 text-xs font-semibold text-[#1E2D5A]">
+            <span>Quién lo tiene: {ownerRow?.label ?? "cuenta sin casos abiertos"}</span>
+            <span aria-hidden="true">✕</span>
+          </button>
+        </p>
+      )}
       {d.listTotal > d.list.length && (
         <p className="mt-1 text-xs text-gray-600">Se muestran los {nf.format(d.list.length)} que más esperan.</p>
       )}
       {shown.length === 0 ? (
         <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
-          {filter === "all" ? "No hay nadie esperando una respuesta." : "Ningún caso en este grupo."}
+          {filter === "all" && !ownerKey ? "No hay nadie esperando una respuesta." : "Ningún caso en este grupo."}
         </p>
       ) : (
         <ul className="mt-2 grid gap-2 lg:grid-cols-2">
@@ -212,6 +288,227 @@ export default function NowPanel() {
       <StaleCard d={d} nowMs={nowMs} />
       <ClosedCard d={d} nowMs={nowMs} />
     </section>
+  );
+}
+
+/**
+ * Gráfico chico de pendientes durante el turno: una sola serie, línea fina, eje recesivo y los
+ * valores inicial, máximo y actual rotulados. Cada punto tiene su valor al pasar el cursor
+ * o tocarlo, y la misma información está en la tabla desplegable.
+ */
+function TrendChart({ points }: { points: NonNullable<NowPayload["trend"]>["points"] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 320, H = 96, PL = 26, PR = 30, PT = 10, PB = 18;
+  const t0 = new Date(points[0].at).getTime();
+  const t1 = new Date(points[points.length - 1].at).getTime();
+  const max = Math.max(1, ...points.map((p) => p.pending));
+  const x = (iso: string) => PL + (t1 === t0 ? 0 : ((new Date(iso).getTime() - t0) / (t1 - t0)) * (W - PL - PR));
+  const y = (v: number) => PT + (1 - v / max) * (H - PT - PB);
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at).toFixed(1)},${y(p.pending).toFixed(1)}`).join(" ");
+  const last = points[points.length - 1];
+  const h = hover !== null ? points[hover] : null;
+  return (
+    <div className="mt-2">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" className="h-24 w-full max-w-md" onMouseLeave={() => setHover(null)}
+        aria-label={`Pendientes durante el turno: ${points[0].pending} a las ${timeFmt.format(new Date(points[0].at))}, ${last.pending} a las ${timeFmt.format(new Date(last.at))}, máximo ${max}.`}>
+        {/* Eje y líneas de referencia, recesivos */}
+        <line x1={PL} x2={W - PR} y1={y(0)} y2={y(0)} stroke="#d1d5db" strokeWidth="1" />
+        <line x1={PL} x2={W - PR} y1={y(max)} y2={y(max)} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="2 3" />
+        <text x={PL - 4} y={y(max) + 3} textAnchor="end" fontSize="9" fill="#6b7280">{max}</text>
+        <text x={PL - 4} y={y(0) + 3} textAnchor="end" fontSize="9" fill="#6b7280">0</text>
+        <text x={PL} y={H - 4} textAnchor="start" fontSize="9" fill="#6b7280">{timeFmt.format(new Date(points[0].at))}</text>
+        <text x={W - PR} y={H - 4} textAnchor="end" fontSize="9" fill="#6b7280">{timeFmt.format(new Date(last.at))}</text>
+        <path d={path} fill="none" stroke="#1E2D5A" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* Valor actual, rotulado en tinta de texto */}
+        <circle cx={x(last.at)} cy={y(last.pending)} r="4" fill="#1E2D5A" stroke="#fff" strokeWidth="2" />
+        <text x={x(last.at) + 7} y={y(last.pending) + 3} fontSize="11" fontWeight="600" fill="#111827">{last.pending}</text>
+        {h && (
+          <>
+            <line x1={x(h.at)} x2={x(h.at)} y1={PT} y2={y(0)} stroke="#9ca3af" strokeWidth="1" />
+            <circle cx={x(h.at)} cy={y(h.pending)} r="4" fill="#1E2D5A" stroke="#fff" strokeWidth="2" />
+          </>
+        )}
+        {/* Zonas de contacto más anchas que la marca */}
+        {points.map((p, i) => {
+          const left = i === 0 ? PL : (x(points[i - 1].at) + x(p.at)) / 2;
+          const right = i === points.length - 1 ? W - PR : (x(p.at) + x(points[i + 1].at)) / 2;
+          return <rect key={p.at} x={left} y={0} width={Math.max(1, right - left)} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />;
+        })}
+      </svg>
+      <p className="h-4 text-xs tabular-nums text-gray-700" aria-live="polite">
+        {h ? <>{timeFmt.format(new Date(h.at))} · <span className="font-semibold text-gray-900">{nf.format(h.pending)}</span> pendientes</> : null}
+      </p>
+      <details>
+        <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver como tabla</summary>
+        <table className="mt-1 text-xs text-gray-800">
+          <thead><tr><th className="pr-4 text-left font-medium text-gray-600">Hora</th><th className="text-right font-medium text-gray-600">Pendientes</th></tr></thead>
+          <tbody>
+            {points.map((p) => <tr key={p.at}><td className="pr-4 tabular-nums">{timeFmt.format(new Date(p.at))}</td><td className="text-right tabular-nums">{nf.format(p.pending)}</td></tr>)}
+          </tbody>
+        </table>
+      </details>
+    </div>
+  );
+}
+
+/** "Últimos 60 minutos" y la evolución de la cola durante el turno. */
+function TrendCard({ d }: { d: NowPayload }) {
+  const t = d.trend;
+  if (!t) {
+    return (
+      <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+        <h2 className="text-sm font-semibold text-gray-800">Últimos 60 minutos</h2>
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+        <Evidence level="NO_DISPONIBLE" />
+      </div>
+    );
+  }
+  const h = t.lastHour;
+  const diff = h.pendingNow - h.pendingBefore;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">
+        Últimos 60 minutos
+        <span className="ml-2 text-xs font-normal text-gray-600">calculado a las {timeFmt.format(new Date(t.generatedAt))}</span>
+      </h2>
+      <p className="mt-1 text-sm text-gray-900">
+        <span className="text-lg font-semibold" aria-hidden="true">{diff > 0 ? "↑" : diff < 0 ? "↓" : "→"}</span>{" "}
+        <span className="font-semibold">
+          {diff === 0 ? "La cola está igual" : diff > 0 ? `La cola subió ${nf.format(diff)}` : `La cola bajó ${nf.format(-diff)}`}
+        </span>
+        : había {nf.format(h.pendingBefore)} pendientes hace una hora y hay {nf.format(h.pendingNow)} ahora.
+      </p>
+      <dl className="mt-2 space-y-0.5 text-sm text-gray-800">
+        <div className="flex justify-between gap-2"><dt>Conversaciones nuevas</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(h.newConversations)}</dd></div>
+        <div className="flex justify-between gap-2"><dt>Conversaciones que recibieron una respuesta de un operador</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(h.answered)}</dd></div>
+      </dl>
+      <h3 className="mt-3 text-xs font-semibold text-gray-700">
+        Pendientes {t.fromIsShift ? "desde el inicio del horario de operadores" : "desde el comienzo del día"}
+      </h3>
+      {t.points.length >= 2 ? <TrendChart points={t.points} /> : <p className="mt-1 text-sm text-gray-600">Todavía no hay puntos para mostrar.</p>}
+      <More>
+        &quot;Pendiente&quot; es, en todos los momentos, una conversación abierta cuyo último mensaje era del cliente y que esperaba hace hasta {d.windowHours} horas. No
+        incluye los posibles pendientes antiguos, por eso el número de ahora puede ser menor que el total de pendientes de arriba. La variación compara la cola en dos
+        momentos con la misma regla; no es conversaciones nuevas menos respondidas, porque en el medio hay reaperturas, cierres y clientes que vuelven a escribir. Que la
+        cola baje no quiere decir que se atendió esa cantidad de casos. Hay un punto cada {t.stepMinutes} minutos y el cálculo se renueva cada 5 minutos.
+      </More>
+      <Evidence level="MEDIDO" />
+    </div>
+  );
+}
+
+/** "Actividad observada": la última respuesta pública de un operador y el detalle por cuenta. No es presencia. */
+function ObservedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
+  const o = d.observed;
+  const pending = d.waiting.total + d.waiting.oldPending;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">Actividad observada</h2>
+      {!o ? (
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-gray-800">
+            Última respuesta pública de un operador:{" "}
+            <span className="text-lg font-semibold tabular-nums text-gray-900">
+              {o.lastResponseAt ? `hace ${formatWait(minutesSince(o.lastResponseAt, nowMs))}` : `ninguna en los últimos ${o.lookbackDays} días`}
+            </span>
+            {o.lastResponseAt ? <span className="text-xs text-gray-600"> · {whenLabel(o.lastResponseAt, nowMs)}</span> : null}
+          </p>
+          {o.review && (
+            <p role="status" className="mt-2 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs text-orange-900">
+              <span className="font-semibold">Para revisar:</span> hay {nf.format(pending)} {pending === 1 ? "pendiente" : "pendientes"}, es horario de operadores y pasaron más de{" "}
+              {formatWait(o.warningMinutes)} sin una respuesta pública. No significa que nadie esté trabajando.
+            </p>
+          )}
+          {o.accounts.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver por cuenta</summary>
+              <ul className="mt-1 divide-y divide-gray-100">
+                {o.accounts.map((a) => (
+                  <li key={a.label} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1 text-xs text-gray-700">
+                    <span className="font-medium text-gray-900">{a.label}</span>
+                    <span className="tabular-nums">
+                      última respuesta {whenLabel(a.lastResponseAt, nowMs)} · <span className="font-semibold text-gray-900">{nf.format(a.conversations)}</span>{" "}
+                      {a.conversations === 1 ? "conversación atendida" : "conversaciones atendidas"} {o.sinceIsShift ? "en el turno" : "hoy"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <More>
+            Es actividad registrada, no presencia: cuenta los mensajes públicos de operador que llegaron, sin el bot, las notas internas ni las cuentas de asignación
+            automática. Conviene leerlo junto con los pendientes y con la hora del último evento recibido. Las conversaciones atendidas se cuentan desde{" "}
+            {o.sinceIsShift ? "el inicio del horario de operadores de hoy" : "el comienzo del día"}, a las {timeFmt.format(new Date(o.since))}; una conversación en la que
+            respondieron dos cuentas cuenta en las dos.{o.inOperatorHours === null ? " Sin configuración cargada no se conoce el horario de operadores y no se muestra el aviso." : ""}
+          </More>
+        </>
+      )}
+      <Evidence level={o ? "MEDIDO" : "NO_DISPONIBLE"} />
+    </div>
+  );
+}
+
+const OWNER_GROUP_NOTES: Partial<Record<NowOwnerRow["group"], string>> = {
+  SUPERVISION: "supervisión",
+  SIN_TOMAR: "asignación automática",
+};
+
+/**
+ * "Quién tiene cada caso": una fila por cuenta con conversaciones abiertas, según el asignado
+ * actual. Cada fila es un botón que filtra la lista de casos. Compacto: en el celular cada
+ * fila ocupa dos líneas.
+ */
+function OwnersCard({ d, nowMs, selected, onSelect }: { d: NowPayload; nowMs: number; selected: string | null; onSelect: (key: string) => void }) {
+  const o = d.owners;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">
+        Quién tiene cada caso
+        {o ? <span className="ml-2 text-xs font-normal text-gray-600">{nf.format(o.open)} conversaciones abiertas</span> : null}
+      </h2>
+      {!o ? (
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+      ) : o.rows.length === 0 ? (
+        <p className="mt-1 text-sm text-gray-600">No hay conversaciones abiertas.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-gray-100">
+          {o.rows.map((r) => (
+            <li key={r.key}>
+              <button type="button" onClick={() => onSelect(r.key)} aria-pressed={selected === r.key}
+                className={`flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 text-left ${selected === r.key ? "bg-blue-50 ring-2 ring-[#1E2D5A]" : "hover:bg-gray-50"}`}>
+                <span className="min-w-0 text-sm font-medium text-gray-900">
+                  {r.label}
+                  {OWNER_GROUP_NOTES[r.group] ? <span className="ml-1.5 text-xs font-normal text-gray-600">{OWNER_GROUP_NOTES[r.group]}</span> : null}
+                </span>
+                <span className="text-xs tabular-nums text-gray-700">
+                  <span className="font-semibold text-gray-900">{nf.format(r.open)}</span> abiertas
+                  {" · "}<span className="font-semibold text-gray-900">{nf.format(r.waiting)}</span> esperan
+                  {r.oldestWaitStart ? <> · la más vieja <span className="font-semibold text-gray-900">{formatWait(minutesSince(r.oldestWaitStart, nowMs))}</span></> : null}
+                  {r.windowClosed > 0 ? <> · <span className="font-semibold text-red-800">{nf.format(r.windowClosed)} con ventana cerrada</span></> : null}
+                </span>
+              </button>
+              {r.detected && (r.detected.byAccount.length > 0 || r.detected.none > 0) && (
+                <p className="px-2 pb-1.5 text-[11px] leading-snug text-gray-600">
+                  <span className="mr-1 rounded border border-gray-300 px-1 font-semibold text-gray-700">Detectado</span>
+                  último operador que respondió:{" "}
+                  {[...r.detected.byAccount.map((a) => `${a.label} ${nf.format(a.open)}`), ...(r.detected.none > 0 ? [`ninguno ${nf.format(r.detected.none)}`] : [])].join(" · ")}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-gray-700">Tocá una fila para ver sus casos.</p>
+      <More>
+        Cada conversación abierta va en la fila de la cuenta de Emozion que tiene asignada según el último evento recibido. Una reasignación que no cambia el estado
+        puede tardar en verse. &quot;Esperan&quot; son las que están en la lista de casos: el último mensaje es del cliente y esperan hace hasta {d.windowHours} horas;
+        las más viejas van en los casos antiguos. &quot;Sin tomar&quot; son las que siguen en una cuenta de asignación automática. &quot;Sin dato de asignado&quot; son
+        las que no traen asignado: para esas se muestra, como dato detectado y aparte, la cuenta del último mensaje de un operador, que no es lo mismo que tenerla asignada.
+      </More>
+      <Evidence level={o ? "MEDIDO" : "NO_DISPONIBLE"} />
+    </div>
   );
 }
 
@@ -392,7 +689,7 @@ function ConversationLink({ id }: { id: string }) {
 /** Etiqueta del semáforo con el tiempo destacado, en una línea. Sin configuración no hay semáforo: solo la espera real. */
 function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["schedule"] }) {
   if (it.level === null) {
-    return <p className="text-base font-semibold tabular-nums text-gray-900">{formatWait(it.waitMinutes)}</p>;
+    return <p className="text-base font-semibold tabular-nums text-gray-900">Espera real: {formatWait(it.waitMinutes)}</p>;
   }
   const l = LEVELS[it.level];
   const paused = schedule !== null && !schedule.inPublicHours;
@@ -402,12 +699,11 @@ function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["sc
         <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${l.dot}`} />
         {l.label}
       </span>
-      <span className="text-base font-semibold tabular-nums text-gray-900">
-        {it.businessMinutes === null || it.window === "CERRADA" ? `${formatWait(it.waitMinutes)} reales` : `${formatWait(it.businessMinutes)} hábiles`}
-      </span>
-      {paused && (
+      <span className="text-base font-semibold tabular-nums text-gray-900">Espera real: {formatWait(it.waitMinutes)}</span>
+      {it.businessMinutes !== null && (
         <span className="basis-full text-xs text-gray-700">
-          Fuera del horario público · reloj hábil pausado{schedule?.operatorShiftActive ? " · turno de operadores activo" : ""}
+          Tiempo hábil acumulado: {formatWait(it.businessMinutes)}
+          {paused ? ` · reloj pausado${schedule?.operatorShiftActive ? " · dentro del horario de operadores" : ""}` : ""}
         </span>
       )}
     </p>
@@ -425,10 +721,20 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <ConversationLink id={it.conversationId} />
       </div>
       <p className="mt-1 flex flex-wrap gap-1.5">
+        {it.oldPending && <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900">Posible pendiente antiguo</span>}
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{ownerLabel(it.owner)}</span>
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
         {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
       </p>
+      {it.claims !== null && it.claims.length > 0 && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-900">Reclamo detectado · {it.claims.map((c) => CLAIM_LABELS[c]).join(" · ")}</span></p>
+      )}
+      {it.detectedOwner && (
+        <p className="mt-1 text-xs text-gray-700">
+          <span className="mr-1 rounded border border-gray-300 px-1 text-[11px] font-semibold text-gray-700">Detectado</span>
+          último operador que respondió: <span className="font-medium text-gray-900">{it.detectedOwner}</span>
+        </p>
+      )}
       {it.alert === "URGENTE" && (
         <p className="mt-1"><span className="inline-block rounded-md border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-900">Urgente · el cliente pide urgencia o avisa que se va</span></p>
       )}
@@ -446,9 +752,7 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <p className="mt-1"><span className="inline-block rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana vence en {windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}</span></p>
       )}
       <p className="mt-1 text-xs text-gray-700">
-        Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>
-        {" "}· espera real <span className="font-semibold text-gray-900">{formatWait(it.waitMinutes)}</span>
-        {it.businessMinutes !== null ? ` · ${formatWait(it.businessMinutes)} hábiles` : ""}
+        Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>, el primer mensaje que quedó sin responder
         {it.thanksCandidate ? " · puede ser solo un agradecimiento" : ""}
       </p>
       <p className="text-xs text-gray-600">
@@ -478,7 +782,7 @@ function StaleCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
       </p>
       {classified ? (
         <>
-          <StaleGroup title="Siguen pendientes" count={s.pending!} note="El último mensaje del cliente no es un cierre, o trae una consulta, un pedido o un adjunto." items={pending} nowMs={nowMs} />
+          <StaleGroup title="Posibles pendientes antiguos" count={s.pending!} note="El último mensaje del cliente no es un cierre, o trae una consulta, un pedido o un adjunto. Están también en la lista de casos y en las alertas." items={pending} nowMs={nowMs} />
           <StaleGroup title="Probablemente resueltas" count={s.probableClose!} note="El último mensaje del cliente es un agradecimiento o un cierre: pueden haber quedado abiertas por error." items={closing} nowMs={nowMs} />
         </>
       ) : (
@@ -516,7 +820,7 @@ function StaleGroup({ title, count, note, items, nowMs }: { title: string; count
 function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
   const c = d.closedUnanswered;
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+    <div id="cerradas-sin-responder" className="mt-3 scroll-mt-4 rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-gray-800">Cerradas sin responder</h2>
         <p className="text-2xl font-semibold tabular-nums text-gray-900">{c ? nf.format(c.total) : "No disponible"}</p>
