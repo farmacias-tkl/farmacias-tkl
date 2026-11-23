@@ -12,6 +12,9 @@ import {
   normalizeConversation,
   normalizeMessage,
   normalizeStatusEvent,
+  normalizeUpdateEvent,
+  keyPathsOf,
+  SUPPORTED_EVENTS,
   normalizeClosure,
   normalizeExternalAssigneeId,
   CLOSURE_TYPE_NAME_MAX,
@@ -279,6 +282,54 @@ test("asignado. normalizeConversation lo expone y no cambia el mapeo de estado",
   const sin = normalizeConversation({ id: 602, status: "open", meta: { sender } });
   assert.equal(sin.data?.status, "SIN_ASIGNAR");
   assert.equal(sin.data?.externalAssigneeId, null);
+});
+
+// ── conversation_updated ─────────────────────────────────────────────────────────────
+
+test("updated. está en la lista de eventos y lee SOLO tipo de cierre, asignado y si el evento dice resuelta", () => {
+  assert.ok((SUPPORTED_EVENTS as readonly string[]).includes("conversation_updated"));
+  const r = normalizeUpdateEvent({
+    id: 701, status: "resolved", closure_type_id: 9, closure_type_name: "Tipo inventado C",
+    closure_comment: "COMENTARIO-LIBRE-QUE-NO-DEBE-GUARDARSE", labels: ["etiqueta"],
+    meta: { sender: { phone_number: "+5491100000003", name: "Nombre Ficticio" }, assignee: { id: 12 } },
+  } as never);
+  assert.equal(r.outcome, "processed");
+  assert.deepEqual(r.data, {
+    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", closureTypeId: "9", closureTypeName: "Tipo inventado C",
+  });
+  const json = JSON.stringify(r);
+  assert.ok(!/COMENTARIO|closure_comment|5491100000003|Nombre Ficticio|etiqueta/.test(json), "ni comentario, ni teléfono, ni nombre, ni etiquetas");
+});
+
+test("updated. sin meta.assignee el asignado no se toca; con null queda sin asignado; sin id no se mapea", () => {
+  const sinMeta = normalizeUpdateEvent({ id: 702, status: "open" });
+  assert.deepEqual([sinMeta.data?.assigneePresent, sinMeta.data?.externalAssigneeId, sinMeta.data?.resolved], [false, null, false]);
+  const conNull = normalizeUpdateEvent({ id: 703, status: "open", meta: { assignee: null } });
+  assert.deepEqual([conNull.data?.assigneePresent, conNull.data?.externalAssigneeId], [true, null]);
+  assert.deepEqual([conNull.data?.closureTypeId, conNull.data?.closureTypeName], [null, null]);
+  assert.equal(normalizeUpdateEvent({ status: "resolved" }).outcome, "insufficientData");
+  assert.equal(normalizeUpdateEvent({ id: 704, messages: [{ conversation_id: 705 }] }).outcome, "insufficientData");
+});
+
+test("rutas de claves: solo nombres y tipos, nunca valores", () => {
+  const paths = keyPathsOf({
+    event: "conversation_updated", id: 706, closure_type_name: "VALOR-SECRETO-A",
+    meta: { sender: { phone_number: "+5491100000004", name: "VALOR-SECRETO-B" }, assignee: { id: 5 } },
+    changed_attributes: [{ closure_type_id: { previous_value: null, current_value: 3 } }],
+    custom_attributes: { dni: "VALOR-SECRETO-C", "5491100000005": "x" },
+    "5491100000006": true, "clave con espacios": 1,
+  });
+  assert.ok(paths.includes("closure_type_name:string"));
+  assert.ok(paths.includes("meta.assignee.id:number"));
+  assert.ok(paths.includes("meta.sender.phone_number:string"));
+  assert.ok(paths.includes("changed_attributes[0].closure_type_id.current_value:number"));
+  assert.ok(paths.includes("custom_attributes:object"), "se anota la clave pero no se recorre");
+  assert.ok(!paths.some((p) => p.startsWith("custom_attributes.")));
+  assert.equal(paths.filter((p) => p.startsWith("[clave]:")).length, 2, "una clave que parece un dato no se copia");
+  const dump = JSON.stringify(paths);
+  assert.ok(!/VALOR-SECRETO|54911000000|706/.test(dump), "ningún valor");
+  assert.equal(keyPathsOf({ a: { b: { c: 1 } } }, 2).length, 2, "respeta el tope");
+  assert.deepEqual(keyPathsOf(null), []);
 });
 
 console.log(`\nemozion-mappers: ${passed} ok, ${failures.length} fail`);

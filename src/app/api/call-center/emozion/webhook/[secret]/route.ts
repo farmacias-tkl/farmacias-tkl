@@ -21,6 +21,8 @@ import {
   normalizeConversation,
   normalizeMessage,
   normalizeStatusEvent,
+  normalizeUpdateEvent,
+  keyPathsOf,
   conversationExternalId,
   SUPPORTED_EVENTS,
 } from "@/lib/call-center/emozion-mappers";
@@ -43,6 +45,26 @@ function r2ConfigValid(): boolean {
 export const runtime = "nodejs";
 
 const ACCOUNT_ID = 22;
+
+// ───────────────────────────────────────────────────────────────────────────────────
+// DIAGNÓSTICO TEMPORAL (P4): rutas de claves de los primeros conversation_updated, para
+// confirmar dónde viaja el tipo de cierre. Solo NOMBRES de clave y TIPOS, nunca valores
+// (keyPathsOf). No usa EMOZION_DEBUG_CAPTURE. Quitar cuando se confirme la ruta.
+// ───────────────────────────────────────────────────────────────────────────────────
+const UPDATED_KEY_PATHS_EVENTS = 20;
+let updatedKeyPathsDone = false;
+
+/** ¿Todavía faltan eventos por registrar? Una consulta por evento hasta llegar al tope; después, ninguna. Nunca lanza. */
+async function shouldRecordUpdatedKeyPaths(): Promise<boolean> {
+  if (updatedKeyPathsDone) return false;
+  try {
+    const n = await prisma.webhookEvent.count({ where: { source: "EMOZION", eventType: "conversation_updated", status: "PROCESSED" } });
+    if (n >= UPDATED_KEY_PATHS_EVENTS) updatedKeyPathsDone = true;
+    return n < UPDATED_KEY_PATHS_EVENTS;
+  } catch {
+    return false;
+  }
+}
 
 // ───────────────────────────────────────────────────────────────────────────────────
 // DIAGNÓSTICO: EMOZION_DEBUG_CAPTURE (APAGADO por defecto). Cuando === "true", en vez del
@@ -213,6 +235,13 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
     const r = normalizeStatusEvent(env.conversation);
     if (r.outcome === "processed") payload = { event: eventType, statusEvent: r.data };
     else { status = "ERROR"; error = `status change incompleto: ${r.warnings.join("; ")}`; }
+  } else if (eventType === "conversation_updated") {
+    // Solo tipo de cierre y asignado. Nunca closure_comment ni otro texto.
+    const r = normalizeUpdateEvent(env.conversation);
+    if (r.outcome === "processed") {
+      const keyPaths = (await shouldRecordUpdatedKeyPaths()) ? keyPathsOf(raw) : null;
+      payload = { event: eventType, updateEvent: r.data, ...(keyPaths ? { keyPaths } : {}) };
+    } else { status = "ERROR"; error = `conversation_updated incompleto: ${r.warnings.join("; ")}`; }
   }
 
   // DIAGNÓSTICO (gateado, apagado por defecto): si EMOZION_DEBUG_CAPTURE==="true", guardamos

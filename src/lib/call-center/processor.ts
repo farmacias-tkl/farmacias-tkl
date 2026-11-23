@@ -4,10 +4,11 @@ import {
   upsertConversationFromEmozion,
   upsertMessageFromEmozion,
   applyStatusChangedFromEmozion,
+  applyConversationUpdatedFromEmozion,
 } from "./ingest";
 import { parseTransientSourceUrls } from "./attachment-source";
 import { safeErrorCode } from "./safe-error";
-import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent } from "./emozion-types";
+import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent, NormalizedUpdateEvent } from "./emozion-types";
 
 /**
  * Processor del webhook Emozion (Sprint 4B, commit 4/4). Toma un WebhookEvent (RECEIVED),
@@ -38,6 +39,7 @@ type ProcessErrorCode =
   | "CONVERSATION_PAYLOAD_INVALID"
   | "MESSAGE_PAYLOAD_INVALID"
   | "STATUS_PAYLOAD_INVALID"
+  | "UPDATE_PAYLOAD_INVALID"
   | "MESSAGE_OUT_OF_ORDER"
   | "STATUS_OUT_OF_ORDER"
   | "EVENT_TYPE_UNSUPPORTED";
@@ -108,6 +110,18 @@ function hydrateStatusEvent(s: any): NormalizedStatusEvent {
   return { ...s, closedAt: toDate(s.closedAt) };
 }
 
+function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
+  if (!u || typeof u !== "object" || typeof u.externalConversationId !== "string") throw new ProcessError("error", "UPDATE_PAYLOAD_INVALID");
+  return {
+    externalConversationId: u.externalConversationId,
+    resolved: u.resolved === true,
+    assigneePresent: u.assigneePresent === true,
+    externalAssigneeId: typeof u.externalAssigneeId === "string" ? u.externalAssigneeId : null,
+    closureTypeId: typeof u.closureTypeId === "string" ? u.closureTypeId : null,
+    closureTypeName: typeof u.closureTypeName === "string" ? u.closureTypeName : null,
+  };
+}
+
 export async function processWebhookEvent(webhookEventId: string): Promise<ProcessResult> {
   const ev = await prisma.webhookEvent.findUnique({
     where: { id: webhookEventId },
@@ -166,6 +180,12 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
           if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", "STATUS_OUT_OF_ORDER");
           break;
         }
+        case "conversation_updated": {
+          // Solo tipo de cierre y asignado: sin mensajes, sin cambio de estado, sin filas nuevas.
+          const r = await applyConversationUpdatedFromEmozion(tx, hydrateUpdateEvent(payload.updateEvent));
+          warnings.push(...r.warnings);
+          break;
+        }
         default:
           throw new ProcessError("error", "EVENT_TYPE_UNSUPPORTED");
       }
@@ -198,12 +218,18 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
 
   // ── (2) FUERA de la transacción de dominio: marca (+ SyncLog solo en fallo) ──
   if (domainOk) {
+    // Diagnóstico temporal: si el receptor registró las rutas de claves del evento (solo
+    // nombres y tipos, nunca valores), se conservan en lugar del payload normalizado.
+    const keyPaths = (ev.payload as { keyPaths?: unknown } | null)?.keyPaths;
+    const keptPayload = Array.isArray(keyPaths) && keyPaths.every((k) => typeof k === "string")
+      ? ({ keyPaths } as Prisma.InputJsonValue)
+      : Prisma.JsonNull;
     await prisma.webhookEvent.update({
       where: { id: ev.id },
       data: {
         status: "PROCESSED",
         processedAt: new Date(),
-        payload: Prisma.JsonNull, // minimización: el dato ya vive en el dominio
+        payload: keptPayload, // minimización: el dato ya vive en el dominio
         // B6.3-C2: origen transitorio anulado en el MISMO update. DbNull (SQL NULL), NO JsonNull:
         // los barridos e invariantes usan `IS NULL`.
         transientSourceUrls: Prisma.DbNull,
