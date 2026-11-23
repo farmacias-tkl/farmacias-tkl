@@ -476,6 +476,24 @@ async function main() {
       assert.deepEqual([c!.closureTypeName, c!.externalLabels], ["solo_consulta", ["retiro_en_sucursal"]]);
     });
 
+    await check("5t. etiqueta de cierre por diferencia: vale la que el evento agrega a las guardadas, no una que quedó de una resolución anterior", async () => {
+      // Reapertura: Emozion deja la etiqueta de cierre vieja entre las etiquetas.
+      await run(rawLab("conversation_status_changed", "open", ["retiro_en_sucursal", "solo_consulta"]));
+      assert.equal((await convLab())!.closureTypeName, null);
+      // Se resuelve con otro resultado: la nueva no es la última de la lista.
+      await run(rawLab("conversation_status_changed", "resolved", ["venta_concretada", "retiro_en_sucursal", "solo_consulta"]));
+      let c = await convLab();
+      assert.deepEqual([c!.closureTypeName, c!.stateHistory[c!.stateHistory.length - 1].closureTypeName], ["venta_concretada", "venta_concretada"]);
+      // El evento repetido no agrega nada y hay dos de cierre: no cambia el resultado.
+      await run(rawLab("conversation_updated", "resolved", ["venta_concretada", "retiro_en_sucursal", "solo_consulta"], { updated_at: new Date(Date.now() + 4000).toISOString() }));
+      assert.equal((await convLab())!.closureTypeName, "venta_concretada");
+      // Reabre y resuelve sin agregar ninguna, con dos de cierre: no se puede saber cuál vale, queda sin resultado.
+      await run(rawLab("conversation_status_changed", "open", ["venta_concretada", "retiro_en_sucursal", "solo_consulta"]));
+      await run(rawLab("conversation_status_changed", "resolved", ["venta_concretada", "retiro_en_sucursal", "solo_consulta"]));
+      c = await convLab();
+      assert.deepEqual([c!.status, c!.closureTypeName], ["RESUELTA", null]);
+    });
+
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)
     await check("6. fallo de dominio → ERROR persiste; dominio rolled back", async () => {
       // status inválido (no producible por el mapper) → fuerza error de Prisma DENTRO de la tx.

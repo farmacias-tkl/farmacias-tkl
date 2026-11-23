@@ -97,7 +97,7 @@ export function planLabelsImport(
     const c = byId.get(r.externalConversationId);
     if (!c) { notFound++; continue; }
     const labels = sameList(r.labels, c.externalLabels) ? null : r.labels;
-    const closureLabel = c.resolved && c.closureTypeName === null ? closureLabelOf(r.labels, closureLabels) : null;
+    const closureLabel = c.resolved && c.closureTypeName === null ? closureLabelOf(r.labels, closureLabels, c.externalLabels) : null;
     if (labels === null && closureLabel === null) { unchanged++; continue; }
     changes.push({ externalConversationId: r.externalConversationId, labels, closureLabel });
   }

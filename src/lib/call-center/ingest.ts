@@ -187,13 +187,29 @@ const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.
 /**
  * Etiqueta de cierre entre las etiquetas de una conversación: la que el operador elige al
  * resolver, que una automatización de Emozion agrega como etiqueta. Cuáles son de cierre lo
- * dice la configuración de métricas, no el código. Si hay más de una, la última de la lista.
- * PURO.
+ * dice la configuración de métricas, no el código.
+ *
+ * Se decide POR DIFERENCIA contra las etiquetas que ya estaban guardadas (`stored`): la de
+ * cierre es la que el evento AGREGA. Una etiqueta de cierre que ya estaba es de una
+ * resolución anterior (Emozion no la quita al reabrir) y el orden de la lista no dice cuál
+ * es la más nueva.
+ *  - Agrega una o más de cierre: la última de las agregadas.
+ *  - No agrega ninguna y la lista tiene UNA sola de cierre: esa (no hay ambigüedad; es el
+ *    caso del evento repetido y el de resolver otra vez con el mismo resultado).
+ *  - No agrega ninguna y la lista tiene varias de cierre: null, no se puede saber cuál vale.
+ * Sin `stored` todas cuentan como agregadas. PURO.
  */
-export function closureLabelOf(labels: readonly string[] | null | undefined, closureLabels: ReadonlySet<string>): string | null {
+export function closureLabelOf(
+  labels: readonly string[] | null | undefined,
+  closureLabels: ReadonlySet<string>,
+  stored: readonly string[] = [],
+): string | null {
   if (!labels) return null;
-  for (let i = labels.length - 1; i >= 0; i--) if (closureLabels.has(labels[i])) return labels[i];
-  return null;
+  const candidates = labels.filter((l) => closureLabels.has(l));
+  if (candidates.length === 0) return null;
+  const added = candidates.filter((l) => !stored.includes(l));
+  if (added.length > 0) return added[added.length - 1];
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 /**
@@ -215,7 +231,7 @@ export async function applyStatusChangedFromEmozion(
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true },
+    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true },
   });
   if (!conv) {
     return {
@@ -242,10 +258,11 @@ export async function applyStatusChangedFromEmozion(
   // `?? null`: los eventos guardados antes de estos campos no los traen.
   const externalAssigneeId = n.externalAssigneeId ?? null;
   const resolved = n.status === "RESUELTA";
-  //  - etiqueta de cierre: si el evento trae las etiquetas y una es de cierre, ese es el
-  //    resultado de la resolución y se guarda como nombre del tipo de cierre (sin código).
+  //  - etiqueta de cierre: si el evento trae las etiquetas y agrega una de cierre a las
+  //    guardadas (closureLabelOf), ese es el resultado de la resolución y se guarda como
+  //    nombre del tipo de cierre (sin código).
   const eventHasClosure = n.closureTypeId != null || n.closureTypeName != null;
-  const label = resolved ? closureLabelOf(n.labels, closureLabels) : null;
+  const label = resolved ? closureLabelOf(n.labels, closureLabels, conv.externalLabels) : null;
   const closureTypeId = !resolved || label ? null : eventHasClosure ? n.closureTypeId ?? null : conv.closureTypeId;
   const closureTypeName = !resolved ? null : label ?? (eventHasClosure ? n.closureTypeName ?? null : conv.closureTypeName);
 
@@ -290,9 +307,9 @@ export async function applyStatusChangedFromEmozion(
  *    hora del historial es la de procesamiento, y el evento que acompaña a una resolución
  *    puede traer una hora unos segundos anterior a la fila de esa misma resolución.
  *  - Asignado: solo si el evento trae la clave meta.assignee; con null queda sin asignado.
- *  - Etiquetas: si el evento trae la clave `labels`, reemplazan a las guardadas. Si una es de
- *    cierre (según la configuración), es el resultado de la resolución y se guarda como
- *    nombre del tipo de cierre, con las mismas reglas.
+ *  - Etiquetas: si el evento trae la clave `labels`, reemplazan a las guardadas. Si agrega
+ *    una de cierre a las guardadas (closureLabelOf), es el resultado de la resolución y se
+ *    guarda como nombre del tipo de cierre, con las mismas reglas.
  *
  * Conversación inexistente → "ignored" (sin reintento: el evento no trae con qué crearla).
  */
@@ -315,7 +332,7 @@ export async function applyConversationUpdatedFromEmozion(
   if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
 
   // El resultado del cierre: la etiqueta de cierre si la hay; si no, el tipo de cierre del evento.
-  const label = closureLabelOf(n.labels, closureLabels);
+  const label = closureLabelOf(n.labels, closureLabels, conv.externalLabels);
   const closureId = label ? null : n.closureTypeId;
   const closureName = label ?? n.closureTypeName;
   let eventHasClosure = closureId != null || closureName != null;

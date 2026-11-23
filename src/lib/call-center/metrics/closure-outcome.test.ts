@@ -41,6 +41,18 @@ test("ingesta: la etiqueta de cierre es la última de la lista que la configurac
   assert.equal(closureLabelOf(["solo_consulta"], new Set()), null);
 });
 
+test("ingesta: la etiqueta de cierre se decide por diferencia contra las etiquetas guardadas", () => {
+  const set = new Set(["venta_concretada", "solo_consulta"]);
+  // La que el evento agrega, aunque no sea la última de la lista.
+  assert.equal(closureLabelOf(["venta_concretada", "a_mi_domicilio", "solo_consulta"], set, ["a_mi_domicilio", "solo_consulta"]), "venta_concretada");
+  // No agrega ninguna de cierre y hay una sola: esa (evento repetido, o misma resolución otra vez).
+  assert.equal(closureLabelOf(["a_mi_domicilio", "solo_consulta"], set, ["a_mi_domicilio", "solo_consulta"]), "solo_consulta");
+  // No agrega ninguna de cierre y hay varias: no se puede saber cuál vale.
+  assert.equal(closureLabelOf(["solo_consulta", "venta_concretada"], set, ["venta_concretada", "solo_consulta"]), null);
+  // Agrega una etiqueta que no es de cierre: no cambia nada de lo anterior.
+  assert.equal(closureLabelOf(["solo_consulta", "venta_concretada", "dr_app"], set, ["solo_consulta", "venta_concretada"]), null);
+});
+
 test("Operadores: resultados de cierre de las conversaciones en las que escribió cada cuenta", () => {
   const at = (s: string) => new Date(`${s}:00.000-03:00`);
   const msg = (account: string, conversationId: string): OperatorMessageRow => ({ account, conversationId, sentAt: at("2026-03-03T11:00"), isPrivate: false });
