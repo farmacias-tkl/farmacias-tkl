@@ -85,3 +85,17 @@ export const ORDER_REQUEST_REGEX = "quiero realizar un pedido";
  */
 export const CLOSING_MESSAGE_REGEX =
   "\\m(gracias+|grax|gcs|genial|perfecto|listo|dale|oka?y?|okey|buen[ií]simo|b[aá]rbaro|igualmente|saludos|de acuerdo|excelente|muy amable|a vos|a ustedes|a uds)\\M|👍|🙏|🙌";
+
+// ── Alerta "Cliente urgente o insistiendo" de "Ahora" ────────────────────────────────
+
+/**
+ * El cliente pide urgencia o avisa que se va, en un mensaje todavía sin respuesta de un
+ * operador. Nivel DETECTADO: son palabras.
+ */
+export const URGENT_CUSTOMER_REGEX = "urgente|si no (me )?llaman|a otro lado|otra farmacia|puede alguien|hay alguien|nadie responde";
+
+/**
+ * Insistencia: después de completar el recorrido del bot, el cliente escribió 2 mensajes o
+ * más, separados por más de 10 minutos, y sigue sin respuesta de un operador.
+ */
+export const INSISTING = { minMessages: 2, minMinutesApart: 10 } as const;

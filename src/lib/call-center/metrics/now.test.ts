@@ -21,7 +21,7 @@ const SINCE = hoursAgo(24 * 30);
 const row = (id: string, over: Partial<WaitingRow> = {}): WaitingRow => ({
   conversationId: id, open: false, status: "RESUELTA", externalAssigneeId: null, createdAt: hoursAgo(5), waitStart: hoursAgo(5), lastCustomerAt: hoursAgo(5), hasHumanResponse: false,
   botExitAt: hoursAgo(4.9), botOrderComplete: false, customerChars: 200, customerSentMedia: false,
-  customerSentLink: false, previousResolvedRecently: false, ...over,
+  customerSentLink: false, previousResolvedRecently: false, urgent: false, insisting: false, ...over,
 });
 const open = (id: string, over: Partial<WaitingRow> = {}) => row(id, { open: true, status: "SIN_ASIGNAR", ...over });
 const FRESH = { lastWebhookAt: hoursAgo(0.01), lastMessageAt: hoursAgo(0.05) };
@@ -37,7 +37,7 @@ test("clientes esperando: solo abiertas con hasta 72 horas de espera; las más v
     open("mas-vieja", { waitStart: hoursAgo(24 * 90) }),
     row("cerrada", { waitStart: hoursAgo(10) }),
   ]);
-  assert.deepEqual(p.waiting, { total: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString() });
+  assert.deepEqual(p.waiting, { total: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0 });
   assert.deepEqual(p.list.map((i) => i.conversationId), ["otra", "reciente"]);
   assert.equal(p.listTotal, 2);
   assert.equal(p.stale.total, 2);
@@ -56,7 +56,7 @@ test("los conteos completos de la cola no cambian: quedan en calidad de datos", 
 
 test("sin nadie esperando: cero y sin espera más larga", () => {
   const p = payload([row("cerrada")]);
-  assert.deepEqual(p.waiting, { total: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null });
+  assert.deepEqual(p.waiting, { total: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0 });
   assert.deepEqual([p.list.length, p.stale.total, p.stale.oldestWaitStart], [0, 0, null]);
 });
 
@@ -173,6 +173,17 @@ test("la respuesta no lleva teléfono, nombre ni texto, y se puede serializar", 
   const json = JSON.stringify(p);
   assert.ok(!/phone|displayName|body|customerChars/i.test(json));
   assert.deepEqual(JSON.parse(json), p);
+});
+
+test("cliente urgente o insistiendo: dos niveles; si es las dos cosas cuenta como urgente", () => {
+  const p = payload([
+    open("urgente", { urgent: true }), open("las-dos", { urgent: true, insisting: true }), open("insiste", { insisting: true }), open("normal"),
+    // Las antiguas y las cerradas no entran en la alerta.
+    open("vieja", { waitStart: hoursAgo(200), urgent: true }), row("cerrada", { urgent: true }),
+  ]);
+  const by = Object.fromEntries(p.list.map((i) => [i.conversationId, i.alert]));
+  assert.deepEqual(by, { urgente: "URGENTE", "las-dos": "URGENTE", insiste: "INSISTIENDO", normal: null });
+  assert.deepEqual([p.waiting.urgent, p.waiting.insisting], [2, 1]);
 });
 
 console.log(`\nmetrics/now: ${passed} ok, ${failures.length} fail`);

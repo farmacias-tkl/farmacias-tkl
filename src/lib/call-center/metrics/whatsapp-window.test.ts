@@ -72,7 +72,7 @@ const SINCE = hoursAgo(24 * 30);
 const open = (id: string, over: Partial<WaitingRow> = {}): WaitingRow => ({
   conversationId: id, open: true, status: "SIN_ASIGNAR", externalAssigneeId: null, createdAt: hoursAgo(5), waitStart: hoursAgo(5), lastCustomerAt: hoursAgo(5),
   hasHumanResponse: false, botExitAt: hoursAgo(4.9), botOrderComplete: false, customerChars: 200, customerSentMedia: false, customerSentLink: false,
-  previousResolvedRecently: false, ...over,
+  previousResolvedRecently: false, urgent: false, insisting: false, ...over,
 });
 const NONE: NowExtras = { history: null, today: null, closed: null, wait: null, accounts: [], openBlocks: null, progress: null, checks: null };
 const payload = (rows: WaitingRow[], extras: NowExtras = NONE) =>

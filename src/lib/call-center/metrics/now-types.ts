@@ -40,6 +40,12 @@ export interface NowListItem {
   lastCustomerAt: string;
   /** Ventana de 24 horas de WhatsApp, en tiempo real. Independiente del semáforo. */
   window: WindowState;
+  /**
+   * Alerta por lo que escribió el cliente y sigue sin respuesta de un operador: URGENTE por
+   * palabras (pide urgencia o avisa que se va); INSISTIENDO por 2 mensajes o más separados por
+   * más de 10 minutos después del bot. Si son las dos, URGENTE. null si ninguna.
+   */
+  alert: "URGENTE" | "INSISTIENDO" | null;
   /** null si no hay configuración vigente: sin horario no hay semáforo. */
   level: WaitLevel | null;
   /** Minutos hábiles de espera; null sin configuración. */
@@ -165,6 +171,9 @@ export interface NowPayload {
     /** En demora crítica según el semáforo. null sin configuración vigente. */
     critical: number | null;
     oldestWaitStart: string | null;
+    /** Clientes urgentes (por palabras) e insistiendo (sin contar los urgentes), sin respuesta de un operador. */
+    urgent: number;
+    insisting: number;
   };
   /**
    * Hoy, día de Buenos Aires. null si no se pudo calcular. Son dos poblaciones:

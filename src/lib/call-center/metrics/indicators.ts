@@ -204,6 +204,25 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
     needsConfig: false,
   },
   {
+    key: "queue.urgent_or_insisting",
+    block: "AHORA",
+    label: "Cliente urgente o insistiendo",
+    definition:
+      "Casos esperando en los que el cliente, en mensajes todavía sin respuesta de un operador, pide urgencia o " +
+      "avisa que se va (\"urgente\", \"si no me llaman\", \"otra farmacia\", \"hay alguien\", \"nadie responde\"): " +
+      "Urgente. O escribió 2 mensajes o más separados por más de 10 minutos después de completar el bot: " +
+      "Insistiendo. Dejan de mostrarse cuando un operador responde.",
+    source: "ConversationMessage (texto y hora)",
+    population: "AHORA",
+    denominator: null,
+    evidence: "DETECTADO",
+    limitations: [
+      "Urgente depende de palabras: puede marcar un mensaje que no es urgente y no ver uno escrito de otra forma.",
+      "Insistiendo solo mira los mensajes posteriores al recorrido completo del bot.",
+    ],
+    needsConfig: false,
+  },
+  {
     key: "queue.whatsapp_window",
     block: "AHORA",
     label: "Ventana de WhatsApp",

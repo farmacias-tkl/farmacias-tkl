@@ -45,7 +45,7 @@ const REASON_LABELS: Record<ClosedReason, string> = {
   ATTACHMENT: "Mandó una receta o un comprobante",
 };
 
-type CaseFilter = "all" | "closing" | "closed" | "critical" | "orders" | "longest";
+type CaseFilter = "all" | "urgent" | "insisting" | "closing" | "closed" | "critical" | "orders" | "longest";
 
 /** "3 h 20 min" o "45 min" que faltan para que se cierre la ventana de WhatsApp. */
 function windowLeftLabel(lastCustomerAt: string, nowMs: number, hours: number): string {
@@ -55,6 +55,8 @@ function windowLeftLabel(lastCustomerAt: string, nowMs: number, hours: number): 
 }
 
 const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
+  urgent: "clientes urgentes",
+  insisting: "clientes insistiendo",
   closing: "con la ventana de WhatsApp por vencer, de la que vence antes a la que vence después",
   closed: "con la ventana de WhatsApp cerrada",
   critical: "en demora crítica",
@@ -81,7 +83,9 @@ export default function NowPanel() {
   const w = d.waiting;
   const toggle = (f: CaseFilter) => setFilter((cur) => (cur === f ? "all" : f));
   const shown =
-    filter === "closing" ? d.list.filter((it) => it.window === "POR_VENCER").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : 1))
+    filter === "urgent" ? d.list.filter((it) => it.alert === "URGENTE")
+    : filter === "insisting" ? d.list.filter((it) => it.alert === "INSISTIENDO")
+    : filter === "closing" ? d.list.filter((it) => it.window === "POR_VENCER").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : 1))
     : filter === "closed" ? d.list.filter((it) => it.window === "CERRADA")
     : filter === "critical" ? d.list.filter((it) => it.level === "CRITICO")
     : filter === "orders" ? d.list.filter((it) => it.botOrderComplete && !it.hasHumanResponse)
@@ -96,6 +100,12 @@ export default function NowPanel() {
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
         <h2 className="text-sm font-semibold text-gray-800">Requiere acción</h2>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <ActionButton label="Cliente urgente" value={nf.format(w.urgent)} tone={w.urgent ? "critical" : "plain"}
+            active={filter === "urgent"} onClick={() => toggle("urgent")} />
+          <ActionButton label="Cliente insistiendo" value={nf.format(w.insisting)} tone={w.insisting ? "warning" : "plain"}
+            active={filter === "insisting"} onClick={() => toggle("insisting")} />
+        </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <ActionButton label={`Ventana de WhatsApp por vencer (menos de ${d.window.warningHours} h)`} value={nf.format(d.window.closing)} tone={d.window.closing ? "warning" : "plain"}
             active={filter === "closing"} onClick={() => toggle("closing")} />
@@ -115,7 +125,9 @@ export default function NowPanel() {
           {w.critical === null ? " Sin configuración cargada no se puede marcar la demora crítica." : ""}
         </p>
         <More>
-          Ventana de WhatsApp: desde el último mensaje del cliente hay {d.window.hours} horas de reloj para responder libremente, también de noche, los fines de semana y
+          Cliente urgente: en mensajes que todavía no tuvieron respuesta de un operador, pide urgencia o avisa que se va a otro lado. Cliente insistiendo: después de
+          completar el bot escribió 2 mensajes o más, separados por más de 10 minutos, y sigue sin respuesta. Los dos dejan de mostrarse cuando un operador responde.
+          {" "}Ventana de WhatsApp: desde el último mensaje del cliente hay {d.window.hours} horas de reloj para responder libremente, también de noche, los fines de semana y
           los feriados. Pasado ese plazo la conversación solo se reabre con una plantilla aprobada. &quot;Por vencer&quot; son las que todavía se pueden responder y les
           quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
           {" "}Los grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
@@ -403,6 +415,12 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
         {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
       </p>
+      {it.alert === "URGENTE" && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-900">Urgente · el cliente pide urgencia o avisa que se va</span></p>
+      )}
+      {it.alert === "INSISTIENDO" && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-900">Insistiendo · volvió a escribir sin respuesta</span></p>
+      )}
       {it.window === "CERRADA" && (
         <p className="mt-1"><span className="inline-block rounded-md border border-gray-400 bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana de WhatsApp cerrada · requiere plantilla</span></p>
       )}
