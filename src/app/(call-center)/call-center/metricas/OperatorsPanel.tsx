@@ -21,9 +21,9 @@ type State =
 
 const STATUS_LABELS: Record<Account["status"], string> = { ACTIVA: "Activa", HISTORICA: "Histórica", SIN_CONFIGURAR: "Sin configurar" };
 
-const CLOSURE_ORDER = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_SE_PUDO_VENDER", "SOLO_BOT", "OTRO"] as const;
+const CLOSURE_ORDER = ["VENTA", "CONSULTA", "PEDIDO_NO_CONCRETADO", "NO_LO_TRABAJAMOS", "SIN_STOCK", "SOLO_BOT", "OTRO"] as const;
 const CLOSURE_LABELS: Record<(typeof CLOSURE_ORDER)[number], string> = {
-  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_SE_PUDO_VENDER: "No se pudo vender", SOLO_BOT: "Solo bot", OTRO: "Otro",
+  VENTA: "Venta", CONSULTA: "Consulta resuelta", PEDIDO_NO_CONCRETADO: "Pedido no concretado", NO_LO_TRABAJAMOS: "No se pudo vender · no lo trabajamos", SIN_STOCK: "No se pudo vender · sin stock o discontinuado", SOLO_BOT: "Solo bot", OTRO: "Otro",
 };
 
 const accountName = (a: { account: string | null; alias: string | null }) =>
