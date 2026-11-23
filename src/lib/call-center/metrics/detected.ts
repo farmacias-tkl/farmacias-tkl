@@ -25,6 +25,7 @@ import {
 } from "./detected-patterns";
 import type { DetectedCase, DetectedPayload, DetectedSection, SaleKind } from "./detected-types";
 import { SALE_KINDS } from "./detected-types";
+import { getDerivations } from "./derivation";
 
 export const DETECTED_MAX_ROWS = 200;
 const MS_DAY = 86_400_000;
@@ -53,7 +54,10 @@ export function claimsOf(r: Pick<DetectedRow, "claims">): ClaimMotive[] {
   return CLAIM_MOTIVES.filter((m) => r.claims[m]);
 }
 
-function section<M extends string>(motives: readonly M[], entries: Array<{ row: DetectedRow; motive: M }>, maxRows: number): DetectedSection<M> {
+/** Lo mínimo de una conversación para listarla como caso. */
+export type CaseRow = Pick<DetectedRow, "conversationId" | "createdAt" | "open">;
+
+function section<M extends string>(motives: readonly M[], entries: Array<{ row: CaseRow; motive: M }>, maxRows: number): DetectedSection<M> {
   const cases: DetectedCase<M>[] = entries
     .map(({ row, motive }) => ({ conversationId: row.conversationId, createdAt: row.createdAt.toISOString(), motive, open: row.open }))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
@@ -68,10 +72,12 @@ function section<M extends string>(motives: readonly M[], entries: Array<{ row: 
 /** Informe del período. PURO. */
 export function buildDetectedReport(
   rows: readonly DetectedRow[],
-  opts: { now: Date; from: string; to: string; conversations: number; maxRows?: number },
+  opts: { now: Date; from: string; to: string; conversations: number; maxRows?: number; derivedInHours?: readonly CaseRow[] },
 ): DetectedPayload {
   const maxRows = opts.maxRows ?? DETECTED_MAX_ROWS;
-  const sales: Array<{ row: DetectedRow; motive: SaleKind }> = [];
+  const sales: Array<{ row: CaseRow; motive: SaleKind }> = [];
+  // Derivados a compra presencial dentro del horario de pedidos de la sucursal, sin evidencia de venta.
+  for (const row of opts.derivedInHours ?? []) sales.push({ row, motive: "DERIVED_IN_HOURS" });
   const claims: Record<ClaimGroup, Array<{ row: DetectedRow; motive: ClaimMotive }>> = { CALL_CENTER: [], ENVIOS: [], TIENDA_ONLINE: [] };
   for (const row of rows) {
     const sale = classifySale(row);
@@ -172,8 +178,9 @@ export async function getDetectedPayload(from: string, to: string, now: Date = n
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.payload;
 
-  const { rows, conversations } = await loadDetectedRows(from, to);
-  const payload = buildDetectedReport(rows, { now, from, to, conversations });
+  const [{ rows, conversations }, derivations] = await Promise.all([loadDetectedRows(from, to), getDerivations(from, to)]);
+  const derivedInHours = derivations.filter((d) => d.timing === "EN_HORARIO" && !d.sold);
+  const payload = buildDetectedReport(rows, { now, from, to, conversations, derivedInHours });
 
   if (cache.size >= CACHE_MAX_ENTRIES) {
     for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);

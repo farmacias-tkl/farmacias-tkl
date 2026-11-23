@@ -37,11 +37,11 @@ export const LOST_KINDS: readonly LostKind[] = ["OTRO_LADO", "PROBABLE", "NO_DIC
 
 export type OrderKind = "DOMICILIO" | "RETIRO" | "RECETA" | "SIN_MODALIDAD";
 /** Por qué no se pudo tomar el pedido. */
-export type NoTakeKind = "SIN_STOCK" | "DERIVADO_PRESENCIAL" | "DERIVADO_MEDICAMENTO";
+export type NoTakeKind = "SIN_STOCK" | "DERIVADO_PRESENCIAL" | "DERIVADO_EN_HORARIO" | "DERIVADO_MEDICAMENTO";
 export type ConsultKind = "SERVICIOS" | "PRECIO" | "STOCK" | "HORARIOS" | "COBERTURA" | "PAGO" | "TIENDA_ONLINE" | "OTRAS";
 
 export const ORDER_KINDS: readonly OrderKind[] = ["DOMICILIO", "RETIRO", "RECETA", "SIN_MODALIDAD"];
-export const NO_TAKE_KINDS: readonly NoTakeKind[] = ["SIN_STOCK", "DERIVADO_PRESENCIAL", "DERIVADO_MEDICAMENTO"];
+export const NO_TAKE_KINDS: readonly NoTakeKind[] = ["SIN_STOCK", "DERIVADO_PRESENCIAL", "DERIVADO_EN_HORARIO", "DERIVADO_MEDICAMENTO"];
 export const CONSULT_KINDS: readonly ConsultKind[] = ["PRECIO", "STOCK", "HORARIOS", "COBERTURA", "PAGO", "TIENDA_ONLINE", "SERVICIOS", "OTRAS"];
 
 export interface ConversationKind {
@@ -64,6 +64,8 @@ export interface KindsPayload {
   orders: Record<OrderKind, number>;
   lost: Record<LostKind, number>;
   noTake: Record<NoTakeKind, number>;
+  /** De los derivados a compra presencial, cuántos no tienen la sucursal identificada: no se sabe si fue dentro o fuera del horario. */
+  derivedWithoutBranch: number;
   consults: Record<ConsultKind, number>;
   /** Consultas con al menos una respuesta pública de un operador. */
   consultsAnswered: number;

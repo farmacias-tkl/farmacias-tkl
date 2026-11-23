@@ -77,5 +77,23 @@ test("sin comprobantes: totales en cero, sin relación y sin último día cargad
   assert.equal(p.generatedAt, NOW.toISOString());
 });
 
+test("por operador: conversaciones atendidas de la cuenta en el mismo período; sin cuenta o sin dato queda null", () => {
+  const vs: ConfigVersion[] = [{
+    id: "vo", validFrom: "2026-03-01", createdAt: new Date("2026-02-28T00:00:00Z"),
+    data: {
+      schemaVersion: 1, publicHours: {} as never, operatorHours: {} as never, firstResponseGoalMinutes: 15,
+      accounts: [{ externalId: "9001", alias: "Alias inventado", active: true, borrowed: false, historical: false }, { externalId: "9002", alias: null, active: true, borrowed: false, historical: false }],
+      callCenterVendors: [{ branchId: "b1", code: "V01", accountId: "9001" }, { branchId: "b1", code: "V02", accountId: "9002" }, { branchId: "b1", code: "V03" }],
+    },
+  }];
+  const report = buildSalesReport([sale("2026-03-10", 100, 2, "V01"), sale("2026-03-10", 50, 1, "V02"), sale("2026-03-10", 20, 1, "V03")], { from: "2026-03-09", to: "2026-03-11", versions: vs });
+  const con = toSalesPayload(report, new Map(), { now: NOW, hasConfig: true, siafLastDay: "2026-03-11", attendedByAccount: new Map([["9001", 37]]) });
+  // 9002 no escribió en el período: cero conversaciones. El código sin cuenta: null.
+  assert.deepEqual(con.byOperator.map((o) => [o.account, o.conversations]), [["9001", 37], ["9002", 0], [null, null]]);
+  // Si el informe de Operadores no se pudo calcular: null, no cero.
+  const sin = toSalesPayload(report, new Map(), { now: NOW, hasConfig: true, siafLastDay: "2026-03-11", attendedByAccount: null });
+  assert.deepEqual(sin.byOperator.map((o) => o.conversations), [null, null, null]);
+});
+
 console.log(`\nmetrics/sales-service: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

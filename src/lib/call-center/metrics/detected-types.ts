@@ -13,11 +13,13 @@ export const DETECTED_CACHE_SECONDS = 60;
  * Qué dijo el cliente sobre la compra. Son tres cosas distintas y no se suman:
  *  - ELSEWHERE: pérdida confirmada (otra farmacia, otro lado, cancela);
  *  - UNKNOWN_PLACE: compró por su cuenta y no dice dónde;
- *  - AT_TKL: compró en una sucursal de TKL o ya retiró el pedido. No es una pérdida.
+ *  - AT_TKL: compró en una sucursal de TKL o ya retiró el pedido. No es una pérdida;
+ *  - DERIVED_IN_HOURS: el operador lo derivó a comprar en la sucursal dentro del horario de
+ *    pedidos de esa sucursal, y la conversación no tiene evidencia de venta. Posible pérdida.
  */
-export type SaleKind = "ELSEWHERE" | "UNKNOWN_PLACE" | "AT_TKL";
+export type SaleKind = "ELSEWHERE" | "UNKNOWN_PLACE" | "AT_TKL" | "DERIVED_IN_HOURS";
 
-export const SALE_KINDS: readonly SaleKind[] = ["ELSEWHERE", "UNKNOWN_PLACE", "AT_TKL"];
+export const SALE_KINDS: readonly SaleKind[] = ["ELSEWHERE", "UNKNOWN_PLACE", "AT_TKL", "DERIVED_IN_HOURS"];
 
 /** Un caso de la lista: id interno (para el enlace), fecha, motivo y estado. Sin texto del cliente. */
 export interface DetectedCase<M extends string = string> {

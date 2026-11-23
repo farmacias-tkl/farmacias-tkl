@@ -151,10 +151,24 @@ function Report({ data }: { data: SalesPayload }) {
             {data.byBranch.map((b) => <Card key={b.branchId} title={b.branchName} t={b} />)}
           </Group>
 
-          <Group title="Por vendedor" note="ordenados por sucursal y código, no por importe">
-            {data.byVendor.map((v) => (
-              <Card key={`${v.branchId}|${v.code}`} title={`${v.name} · ${v.code}`} subtitle={v.branchName} t={v}>
-                <Line label="Días con comprobantes" value={`${nf.format(v.days)} (${formatShortDay(v.firstDay)} a ${formatShortDay(v.lastDay)})`} />
+          <Group title="Por operador" note="ordenados por alias, no por importe">
+            {data.byOperator.map((o) => (
+              <Card key={o.account !== null ? `a|${o.account}` : `v|${o.branches[0]?.branchId}|${o.branches[0]?.code}`}
+                title={o.account !== null ? o.alias ?? `Cuenta ${o.account}` : o.name}
+                subtitle={o.account !== null ? (o.alias ? `cuenta ${o.account}` : undefined) : "sin cuenta asociada"} t={o}>
+                <Line label="Días con comprobantes" value={nf.format(o.days)} />
+                {o.conversations !== null && <Line label="Conversaciones atendidas" value={nf.format(o.conversations)} />}
+                <div className="mt-2 border-t border-gray-100 pt-2">
+                  <p className="text-xs font-medium text-gray-600">Por sucursal</p>
+                  <ul className="mt-1 space-y-1">
+                    {o.branches.map((b) => (
+                      <li key={`${b.branchId}|${b.code}`} className="flex items-baseline justify-between gap-3 text-xs text-gray-700">
+                        <span className="min-w-0 truncate">{b.branchName} <span className="text-gray-500">· código {b.code}</span></span>
+                        <span className="shrink-0 tabular-nums text-gray-900">{nf.format(b.receipts)} comp. · {money.format(b.gross)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </Card>
             ))}
           </Group>
@@ -162,7 +176,8 @@ function Report({ data }: { data: SalesPayload }) {
       )}
 
       <p className="mt-4 text-xs text-gray-600">
-        Qué vendedor es del Call Center se decide día por día con la configuración que regía ese día. Los coseguros no se suman.
+        Qué vendedor es del Call Center, y a qué operador pertenece cada código, se decide día por día con la configuración que regía ese día.
+        Las conversaciones atendidas salen de la pestaña Operadores, para el mismo período. Los coseguros no se suman.
       </p>
     </>
   );

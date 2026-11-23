@@ -53,6 +53,14 @@ function windowLeftLabel(lastCustomerAt: string, nowMs: number, hours: number): 
   return h > 0 ? `${h} h ${left % 60} min` : `${left} min`;
 }
 
+/** "3 h 20 min" o "2 días 4 h" desde que se cerró la ventana de WhatsApp. */
+function windowClosedAgoLabel(lastCustomerAt: string, nowMs: number, hours: number): string {
+  const ago = Math.max(0, Math.floor((nowMs - new Date(lastCustomerAt).getTime() - hours * 3_600_000) / 60_000));
+  const h = Math.floor(ago / 60);
+  if (h >= 48) return `${Math.floor(h / 24)} días ${h % 24} h`;
+  return h > 0 ? `${h} h ${ago % 60} min` : `${ago} min`;
+}
+
 const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
   urgent: "clientes urgentes",
   insisting: "clientes insistiendo",
@@ -408,6 +416,8 @@ function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["sc
 
 /** Tarjeta compacta: semáforo y tiempo, las dos etiquetas, desde cuándo espera y el enlace. */
 function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs: number; schedule: NowPayload["schedule"]; windowHours: number }) {
+  // El cliente escribió de nuevo después del primer mensaje sin responder: espera y ventana cuentan desde momentos distintos.
+  const insisted = new Date(it.lastCustomerAt).getTime() - new Date(it.waitStart).getTime() >= 60_000;
   return (
     <li className="rounded-lg border border-gray-200 bg-white px-3 py-2">
       <div className="flex items-start justify-between gap-2">
@@ -426,10 +436,14 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <p className="mt-1"><span className="inline-block rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-900">Insistiendo · volvió a escribir sin respuesta</span></p>
       )}
       {it.window === "CERRADA" && (
-        <p className="mt-1"><span className="inline-block rounded-md border border-gray-400 bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana de WhatsApp cerrada · requiere plantilla</span></p>
+        <p className="mt-1"><span className="inline-block rounded-md border border-gray-400 bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana cerrada hace {windowClosedAgoLabel(it.lastCustomerAt, nowMs, windowHours)} · requiere plantilla</span></p>
       )}
       {it.window === "POR_VENCER" && (
         <p className="mt-1"><span className="inline-block rounded-md border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-900">Ventana vence en {windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}</span></p>
+      )}
+      {/* La espera cuenta desde el primer mensaje sin responder y la ventana desde el último: si el cliente volvió a escribir, difieren. */}
+      {it.window === "ABIERTA" && insisted && (
+        <p className="mt-1"><span className="inline-block rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-semibold text-gray-900">Ventana vence en {windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}</span></p>
       )}
       <p className="mt-1 text-xs text-gray-700">
         Espera respuesta desde <span className="font-semibold text-gray-900">{whenLabel(it.waitStart, nowMs)}</span>
@@ -438,8 +452,8 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         {it.thanksCandidate ? " · puede ser solo un agradecimiento" : ""}
       </p>
       <p className="text-xs text-gray-600">
-        Último mensaje del cliente {whenLabel(it.lastCustomerAt, nowMs)}
-        {it.window === "ABIERTA" ? ` · ventana de WhatsApp abierta, quedan ${windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}` : ""}
+        {insisted ? "El cliente volvió a escribir: la ventana de WhatsApp cuenta desde su último mensaje, " : "Último mensaje del cliente "}{whenLabel(it.lastCustomerAt, nowMs)}
+        {it.window === "ABIERTA" && !insisted ? ` · ventana de WhatsApp abierta, quedan ${windowLeftLabel(it.lastCustomerAt, nowMs, windowHours)}` : ""}
         {" "}· la conversación entró {whenLabel(it.createdAt, nowMs)}
       </p>
     </li>

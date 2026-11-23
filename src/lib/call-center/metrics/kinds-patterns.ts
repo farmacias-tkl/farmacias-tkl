@@ -117,6 +117,16 @@ export const OPERATOR_DERIVED =
   "no cuenta con personal|no hay personal|no ofrece servicio de env[ií]o|no (se )?(hacen|realizan|realiza|hacemos|realizamos) (env[ií]os|retiros|pedidos)" +
   "|compra de forma presencial|no podemos tomar el pedido|acercarte a comprar|dirigirse a la farmacia";
 
+/** El aviso de derivación habla de envíos: se compara con el horario de envíos de la sucursal. */
+export const OPERATOR_DERIVED_DELIVERY = "env[ií]o";
+
+/**
+ * No es una derivación: no se hacen envíos a esa dirección o a esa zona y, en el mismo
+ * mensaje, se ofrece el retiro. Es una zona sin cobertura, no una sucursal que no toma pedidos.
+ */
+export const OPERATOR_NO_COVERAGE = "a (la|esa|esta|su|tu|dicha) (direcci[oó]n|zona)";
+export const OPERATOR_OFFERS_PICKUP = "retir";
+
 // ── Subtipos de consulta, sobre el texto libre del cliente ───────────────────────────
 export const CONSULT_PRICE = "precio|cu[aá]nto (sale|cuesta|est[aá]|vale)|\\mvalor\\M|\\mcosto\\M";
 export const CONSULT_STOCK = "tienen|ten[eé]s|tendr[aá]n|\\mhay\\M|stock|disponib|consigu";

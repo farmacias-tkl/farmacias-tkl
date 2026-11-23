@@ -15,7 +15,8 @@ const timeFmt = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-d
 
 const ORDER_LABELS: Record<OrderKind, string> = { DOMICILIO: "A domicilio", RETIRO: "Retiro en sucursal", RECETA: "Receta digital", SIN_MODALIDAD: "Sin modalidad" };
 const NO_TAKE_LABELS: Record<NoTakeKind, string> = {
-  SIN_STOCK: "Sin stock o falta del laboratorio", DERIVADO_PRESENCIAL: "Derivado a compra presencial", DERIVADO_MEDICAMENTO: "Derivado a compra presencial por tipo de medicamento",
+  SIN_STOCK: "Sin stock o falta del laboratorio", DERIVADO_PRESENCIAL: "Derivado a compra presencial", DERIVADO_EN_HORARIO: "Derivado dentro del horario",
+  DERIVADO_MEDICAMENTO: "Derivado a compra presencial por tipo de medicamento",
 };
 const LOST_LABELS: Record<LostKind, string> = { OTRO_LADO: "Compró en otro lado o canceló", PROBABLE: "Probable: va a buscar en otra farmacia", NO_DICE_DONDE: "No dice dónde compró" };
 const CONSULT_LABELS: Record<ConsultKind, string> = {
@@ -116,7 +117,8 @@ function Report({ data }: { data: KindsPayload }) {
         <Line label="No se pudo tomar" value={`${nf.format(t.NO_SE_PUDO_TOMAR)} · ${pct(t.NO_SE_PUDO_TOMAR, base)}`} />
         {NO_TAKE_KINDS.map((k) => (
           <Line key={k} label={`· ${NO_TAKE_LABELS[k]}`} value={nf.format(data.noTake[k])}
-            note={k === "DERIVADO_PRESENCIAL" ? "El operador avisa que no hay personal de pedidos, o que desde esa sucursal no se hacen envíos ni retiros."
+            note={k === "DERIVADO_PRESENCIAL" ? `El operador avisa que no hay personal de pedidos, o que desde esa sucursal no se hacen envíos ni retiros. Fuera del horario de pedidos de la sucursal es lo correcto.${data.derivedWithoutBranch > 0 ? ` En ${nf.format(data.derivedWithoutBranch)} no se pudo identificar la sucursal.` : ""}`
+              : k === "DERIVADO_EN_HORARIO" ? "El aviso se mandó dentro del horario de pedidos cargado para esa sucursal: posible venta perdida."
               : k === "DERIVADO_MEDICAMENTO" ? "El medicamento solo se vende en forma presencial en una sucursal." : undefined} />
         ))}
         <Line label="El cliente no respondió o quedó en volver" value={`${nf.format(t.PEDIDO_SIN_CONFIRMAR)} · ${pct(t.PEDIDO_SIN_CONFIRMAR, base)}`}

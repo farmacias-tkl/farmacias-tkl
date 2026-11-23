@@ -16,12 +16,14 @@ const SALE_LABELS: Record<SaleKind, string> = {
   ELSEWHERE: "Pérdida confirmada",
   UNKNOWN_PLACE: "Compró por su cuenta, no dice dónde",
   AT_TKL: "Compró en TKL",
+  DERIVED_IN_HOURS: "Derivado dentro del horario de pedidos",
 };
 
 const SALE_NOTES: Record<SaleKind, string> = {
   ELSEWHERE: "Dice que compró en otra farmacia o en otro lado, o cancela el pedido.",
   UNKNOWN_PLACE: "Dice que ya compró o ya fue, sin decir dónde. No se cuenta como pérdida.",
   AT_TKL: "Menciona TKL o una sucursal, o ya retiró el pedido. No es una pérdida.",
+  DERIVED_IN_HOURS: "El operador lo mandó a comprar a la sucursal dentro del horario de pedidos cargado para esa sucursal, y no hay evidencia de venta. Posible venta perdida.",
 };
 
 const CLAIM_LABELS: Record<ClaimMotive, string> = {

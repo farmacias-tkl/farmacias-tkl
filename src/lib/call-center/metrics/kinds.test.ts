@@ -17,7 +17,7 @@ let n = 0;
 const row = (over: Partial<KindRow> = {}): KindRow => ({
   conversationId: `k${++n}`, createdAt: at("2026-03-03T10:00"), claim: false, prescription: false, homeDelivery: false, pickup: false,
   botOrderComplete: false, confirmed: false, saleLost: false, saleElsewhere: false, postponed: false, saleProbable: false, notALoss: false, boughtAtTkl: false, declined: false, followUp: false, hasHumanResponse: false,
-  operatorInPersonOnly: false, operatorNoStock: false, operatorDerived: false, customerMedia: false, hasFreeText: true, onlyEmptyText: false,
+  operatorInPersonOnly: false, operatorNoStock: false, operatorDerived: false, derivation: null, customerMedia: false, hasFreeText: true, onlyEmptyText: false,
   hasQuestionMark: false, services: false, price: false, stock: false, hours: false, coverage: false, paymentMethod: false, onlineStore: false, ...over,
 });
 const kind = (over: Partial<KindRow>) => classifyKind(row(over));
@@ -57,6 +57,12 @@ test("el cliente dice que ya compró: en TKL es una venta presencial; si no, ven
 test("no se pudo tomar: sin stock, derivado a compra presencial, o por tipo de medicamento", () => {
   assert.deepEqual(kind({ botOrderComplete: true, operatorNoStock: true }), { main: "NO_SE_PUDO_TOMAR", sub: "SIN_STOCK" });
   assert.deepEqual(kind({ botOrderComplete: true, operatorDerived: true, operatorNoStock: true }), { main: "NO_SE_PUDO_TOMAR", sub: "DERIVADO_PRESENCIAL" });
+  // Dentro del horario de pedidos de la sucursal es otra cosa: una posible venta perdida.
+  assert.deepEqual(kind({ botOrderComplete: true, operatorDerived: true, derivation: "EN_HORARIO" }), { main: "NO_SE_PUDO_TOMAR", sub: "DERIVADO_EN_HORARIO" });
+  for (const d of ["FUERA_HORARIO", "SIN_SUCURSAL", "SIN_HORARIO"] as const) {
+    assert.equal(kind({ botOrderComplete: true, operatorDerived: true, derivation: d }).sub, "DERIVADO_PRESENCIAL");
+  }
+  assert.equal(kind({ confirmed: true, botOrderComplete: true, operatorDerived: true, derivation: "EN_HORARIO" }).main, "PEDIDO", "si después se concretó, es una venta");
   assert.deepEqual(kind({ botOrderComplete: true, operatorInPersonOnly: true, operatorNoStock: true }), { main: "NO_SE_PUDO_TOMAR", sub: "DERIVADO_MEDICAMENTO" });
   assert.deepEqual(kind({ prescription: true, operatorNoStock: true }), { main: "NO_SE_PUDO_TOMAR", sub: "SIN_STOCK" });
   // Sin intención de pedido, un aviso de falta es la respuesta a una consulta de stock.
@@ -115,7 +121,7 @@ test("informe: totales, subtipos, por día y por hora de Buenos Aires", () => {
     row({ claim: true, createdAt: at("2026-03-04T10:00") }),
     row({ onlyEmptyText: true, createdAt: at("2026-03-04T10:00") }),
     row({ botOrderComplete: true, createdAt: at("2026-03-04T11:00") }),
-    row({ botOrderComplete: true, operatorDerived: true, createdAt: at("2026-03-04T11:00") }),
+    row({ botOrderComplete: true, operatorDerived: true, derivation: "SIN_SUCURSAL", createdAt: at("2026-03-04T11:00") }),
     row({ saleLost: true, createdAt: at("2026-03-04T11:30") }),
     row({ saleLost: true, boughtAtTkl: true, createdAt: at("2026-03-04T11:40") }),
     row({ followUp: true, createdAt: at("2026-03-04T11:50") }),
@@ -124,7 +130,8 @@ test("informe: totales, subtipos, por día y por hora de Buenos Aires", () => {
   assert.deepEqual(r.total, { RECLAMO: 1, PEDIDO: 2, COMPRO_TKL: 1, VENTA_PERDIDA: 1, NO_SE_PUDO_TOMAR: 1, PEDIDO_SIN_CONFIRMAR: 1, CONSULTA: 2, SEGUIMIENTO: 1, SALUDO: 1, SIN_MOTIVO: 1 });
   assert.deepEqual([r.conversations, r.source], [12, "DETECTADO"]);
   assert.deepEqual([r.orders.RETIRO, r.orders.RECETA, r.orders.DOMICILIO, r.consults.PRECIO, r.consultsAnswered], [1, 1, 0, 1, 1]);
-  assert.deepEqual(r.noTake, { SIN_STOCK: 0, DERIVADO_PRESENCIAL: 1, DERIVADO_MEDICAMENTO: 0 });
+  assert.deepEqual(r.noTake, { SIN_STOCK: 0, DERIVADO_PRESENCIAL: 1, DERIVADO_EN_HORARIO: 0, DERIVADO_MEDICAMENTO: 0 });
+  assert.equal(r.derivedWithoutBranch, 1);
   assert.deepEqual(r.lost, { OTRO_LADO: 0, PROBABLE: 0, NO_DICE_DONDE: 1 });
   assert.deepEqual(r.byDay.map((d) => [d.day, d.PEDIDO, d.CONSULTA, d.RECLAMO]), [["2026-03-03", 2, 1, 0], ["2026-03-04", 0, 1, 1]]);
   assert.deepEqual([r.byHour.length, r.byHour[9].PEDIDO, r.byHour[15].PEDIDO, r.byHour[23].CONSULTA, r.byHour[10].RECLAMO], [24, 1, 1, 1, 1]);

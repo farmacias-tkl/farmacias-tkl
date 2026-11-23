@@ -200,5 +200,26 @@ test("períodos: sin versiones no hay nada; con una sola, rige sin fecha de fin"
   assert.deepEqual(versionPeriods([versions[0]]).get("a"), { superseded: false, from: "2026-01-01", to: null });
 });
 
+test("vendedor asociado a una cuenta: opcional; la cuenta tiene que estar en la lista", () => {
+  const cfg = base();
+  cfg.callCenterVendors[0] = { branchId: "branch-inventada-a", code: "V01", accountId: "9001" } as never;
+  assert.equal(parseConfigData(cfg).ok, true);
+  // Sin el campo sigue siendo válida (versiones guardadas antes).
+  assert.equal(parseConfigData(base()).ok, true);
+  cfg.callCenterVendors[1] = { branchId: "branch-inventada-b", code: "V01", accountId: "no-existe" } as never;
+  assert.ok(errorsOf(cfg).some((e) => e.startsWith("callCenterVendors") && /cuenta/.test(e)));
+});
+
+test("horario de pedidos por sucursal: opcional, con retiro y envíos por separado; una sucursal no se repite", () => {
+  const wk = [{ from: "09:30", to: "18:00" }];
+  const hours = { "1": wk, "2": wk, "3": wk, "4": wk, "5": wk, "6": [{ from: "09:30", to: "13:00" }], "7": [] };
+  const cfg = { ...base(), branchOrderHours: [{ branchId: "branch-inventada-a", pickup: hours, delivery: hours }] };
+  assert.equal(parseConfigData(cfg).ok, true);
+  assert.equal(parseConfigData(base()).ok, true, "sin el campo sigue siendo válida");
+  cfg.branchOrderHours.push({ branchId: "branch-inventada-a", pickup: hours, delivery: hours });
+  assert.ok(errorsOf(cfg).some((e) => e.startsWith("branchOrderHours")));
+  assert.ok(errorsOf({ ...base(), branchOrderHours: [{ branchId: "branch-inventada-a", pickup: hours }] }).length > 0, "faltan los envíos");
+});
+
 console.log(`\nmetrics/config: ${passed} ok, ${failures.length} fail`);
 if (failures.length) process.exit(1);

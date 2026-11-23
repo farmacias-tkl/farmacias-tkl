@@ -15,6 +15,7 @@ import { configForDay, loadConfigVersions } from "./config";
 import { classifyManagementType } from "./management-type";
 import { buildSalesReport, loadLastSalesDay, loadVendorSalesRows, receiptsPer100Orders, type SalesReport } from "./sales";
 import { addDaysISO } from "./period";
+import { getAccountsPayload } from "./accounts-service";
 import { SALES_CACHE_SECONDS, type SalesPayload } from "./sales-types";
 
 /** Pedidos por día de Buenos Aires: pedido en el bot o receta de Meducar. PURO. */
@@ -32,7 +33,7 @@ export function ordersByDay(rows: readonly Pick<EntryRow, "createdAt" | "orderFl
 export function toSalesPayload(
   report: SalesReport,
   orders: ReadonlyMap<string, number>,
-  opts: { now: Date; hasConfig: boolean; siafLastDay: string | null },
+  opts: { now: Date; hasConfig: boolean; siafLastDay: string | null; attendedByAccount?: ReadonlyMap<string, number> | null },
 ): SalesPayload {
   const byDay = report.byDay.map((d) => {
     const n = orders.get(d.day) ?? 0;
@@ -55,6 +56,11 @@ export function toSalesPayload(
     ...report,
     generatedAt: opts.now.toISOString(),
     byDay,
+    byOperator: report.byOperator.map((o) => ({
+      ...o,
+      // Una cuenta sin mensajes en el período no figura en Operadores: son cero conversaciones.
+      conversations: o.account !== null && opts.attendedByAccount ? opts.attendedByAccount.get(o.account) ?? 0 : null,
+    })),
     orders: totalOrders,
     relationDays: relationDays.length,
     receiptsPer100Orders: receiptsPer100Orders(report.total.receipts, totalOrders),
@@ -76,11 +82,16 @@ export async function getSalesPayload(from: string, to: string, now: Date = new 
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < ttl) return hit.payload;
 
-  const [{ versions }, sales, entries, siafLastDay] = await Promise.all([
+  const [{ versions }, sales, entries, siafLastDay, accounts] = await Promise.all([
     loadConfigVersions(), loadVendorSalesRows(from, to), loadEntryRows(from, to), loadLastSalesDay(),
+    // Conversaciones atendidas por cuenta, del informe de Operadores. Si falla, las ventas se muestran igual.
+    getAccountsPayload(from, to, now).catch(() => null),
   ]);
+  const attendedByAccount = accounts
+    ? new Map(accounts.accounts.flatMap((a) => (a.account !== null ? [[a.account, a.conversations] as [string, number]] : [])))
+    : null;
   const payload = toSalesPayload(buildSalesReport(sales, { from, to, versions }), ordersByDay(entries), {
-    now, siafLastDay, hasConfig: configForDay(versions, arDayISO(now)) !== null,
+    now, siafLastDay, hasConfig: configForDay(versions, arDayISO(now)) !== null, attendedByAccount,
   });
 
   if (cache.size >= CACHE_MAX_ENTRIES) {
