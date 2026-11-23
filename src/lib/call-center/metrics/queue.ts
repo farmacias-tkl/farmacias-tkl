@@ -23,6 +23,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { utcTimestampParam } from "./business-time";
 import type { AgeBucket, QueueGroupCounts } from "./queue-types";
+import { BOT_ACCOUNT_PREFIX } from "./account-label";
 import { BOT_ORDER_COMPLETE_LIKE, INSISTING, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, URGENT_CUSTOMER_REGEX, isThanksCandidate } from "./patterns";
 
 const MS_HOUR = 3_600_000;
@@ -157,7 +158,9 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
   const prevHours = `${THANKS_CANDIDATE.previousResolvedWithinHours} hours`;
   const rows = await prisma.$queryRaw<RawWaitingRow[]>(Prisma.sql`
     WITH scope AS (
-      SELECT c.id, c.status, c."customerId", c."createdAt", c."externalAssigneeId"
+      SELECT c.id, c.status, c."customerId", c."createdAt",
+        -- Clave de cuenta del asignado: un bot lleva prefijo (assigneeAccount).
+        CASE WHEN c."externalAssigneeType" = 'AGENT_BOT' THEN ${BOT_ACCOUNT_PREFIX} || c."externalAssigneeId" ELSE c."externalAssigneeId" END AS "externalAssigneeId"
       FROM "Conversation" c
       WHERE c.status <> 'RESUELTA' OR c."createdAt" >= ${utcTimestampParam(closedSince)}::timestamp
     ), agg AS (

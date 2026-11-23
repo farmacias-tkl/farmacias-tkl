@@ -177,6 +177,16 @@ async function main() {
       assert.equal((await loadQualityChecks(NOW, null)).unknownAccounts, null, "sin configuración no se sabe qué falta");
       assert.deepEqual(unknownAccountsOf(["10", "9", "9", "2"], [{ ...acc, externalId: "9" }]), ["2", "10"]);
     });
+    await check("asignado que es un bot: la fila trae la clave con prefijo; una persona con el mismo número, el id solo", async () => {
+      await prisma.conversation.update({ where: { id: ids.abiertaPedido }, data: { externalAssigneeId: "9001", externalAssigneeType: "AGENT_BOT" } });
+      await prisma.conversation.update({ where: { id: ids.abiertaSiguiente }, data: { externalAssigneeId: "9001", externalAssigneeType: "USER" } });
+      await prisma.conversation.update({ where: { id: ids.abiertaVieja }, data: { externalAssigneeId: "9001", externalAssigneeType: null } });
+      const again = new Map((await loadWaitingRows(since)).map((r) => [r.conversationId, r.externalAssigneeId]));
+      assert.deepEqual([again.get(ids.abiertaPedido), again.get(ids.abiertaSiguiente), again.get(ids.abiertaVieja)], ["bot:9001", "9001", "9001"]);
+      const { loadOpenOwnerRows } = await import("./owners");
+      const owners = new Map((await loadOpenOwnerRows()).map((r) => [r.conversationId, r.externalAssigneeId]));
+      assert.deepEqual([owners.get(ids.abiertaPedido), owners.get(ids.abiertaSiguiente), owners.get(ids.soloBot)], ["bot:9001", "9001", null]);
+    });
     await check("las filas no traen teléfono ni texto", () => {
       const dump = JSON.stringify(rows);
       assert.ok(!dump.includes("+549"));

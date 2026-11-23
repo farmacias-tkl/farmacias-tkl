@@ -1,7 +1,8 @@
 /**
  * "Quién tiene cada caso": las conversaciones abiertas, por cuenta de Emozion asignada.
  *
- * El asignado es el dato MEDIDO (externalAssigneeId del último evento recibido). Cuando falta,
+ * El asignado es el dato MEDIDO (externalAssigneeId del último evento recibido; si es un bot,
+ * con el prefijo de assigneeAccount: cuenta como "Sin tomar"). Cuando falta,
  * se informa aparte y como dato DETECTADO la cuenta del último mensaje público de un operador:
  * nunca se mezcla con el asignado ni cambia en qué fila cae la conversación.
  *
@@ -9,7 +10,7 @@
  * números de cuenta y horas.
  */
 import { prisma } from "@/lib/prisma";
-import { accountDisplay, accountRef, ownerKeyOf, OWNER_KEY_NONE, OWNER_KEY_SYSTEM, OWNER_TEXT, type LabelAccount } from "./account-label";
+import { accountDisplay, accountRef, ownerKeyOf, BOT_ACCOUNT_PREFIX, OWNER_KEY_NONE, OWNER_KEY_SYSTEM, OWNER_TEXT, type LabelAccount } from "./account-label";
 import type { NowOwnerRow, NowOwners } from "./now-types";
 import type { WindowState } from "./whatsapp-window";
 
@@ -94,7 +95,9 @@ export function buildOwners(open: readonly OpenOwnerRow[], waiting: readonly Wai
 /** Todas las conversaciones abiertas con su asignado y la cuenta del último operador que respondió. Solo lectura. */
 export async function loadOpenOwnerRows(): Promise<OpenOwnerRow[]> {
   return prisma.$queryRaw<OpenOwnerRow[]>`
-    SELECT c.id AS "conversationId", c."externalAssigneeId", lo."externalSenderId" AS "lastOperatorAccount"
+    SELECT c.id AS "conversationId",
+      CASE WHEN c."externalAssigneeType" = 'AGENT_BOT' THEN ${BOT_ACCOUNT_PREFIX} || c."externalAssigneeId" ELSE c."externalAssigneeId" END AS "externalAssigneeId",
+      lo."externalSenderId" AS "lastOperatorAccount"
     FROM "Conversation" c
     LEFT JOIN LATERAL (
       SELECT m."externalSenderId"

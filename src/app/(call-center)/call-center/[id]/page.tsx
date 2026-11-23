@@ -9,7 +9,7 @@ import { loadAttachmentsForDetail } from "@/lib/call-center/attachment-detail-re
 import ConversationActions from "./ConversationActions";
 import { loadOperatorDirectory } from "@/lib/call-center/operator-directory";
 import { agoLabel, operatorInfo, shortHistory } from "@/lib/call-center/operator-display";
-import { accountDisplay, accountRef } from "@/lib/call-center/metrics/account-label";
+import { accountDisplay, accountRef, assigneeAccount } from "@/lib/call-center/metrics/account-label";
 
 export const metadata = { title: "Call Center — Conversación" };
 
@@ -59,12 +59,16 @@ export default async function ConversationDetailPage({
   const { accounts, closureMap } = await loadOperatorDirectory();
   const now = new Date();
   const lastOperatorMsg = [...conv.messages].reverse().find((x) => x.author === "OPERATOR" && !x.isPrivate) ?? null;
-  const op = operatorInfo(conv.externalAssigneeId, lastOperatorMsg?.externalSenderId ?? null, accounts);
+  const assignee = assigneeAccount(conv.externalAssigneeId, conv.externalAssigneeType);
+  const op = operatorInfo(assignee, lastOperatorMsg?.externalSenderId ?? null, accounts);
   // Sin cuenta en el mensaje no se sabe quién respondió, pero sí cuándo.
-  const lastResponderText = !lastOperatorMsg || (op.hasAssignee && lastOperatorMsg.externalSenderId === conv.externalAssigneeId)
+  const lastResponderText = !lastOperatorMsg || (op.hasAssignee && lastOperatorMsg.externalSenderId === assignee)
     ? null
     : `${op.lastResponder ?? "cuenta no registrada"} · ${agoLabel(lastOperatorMsg.sentAt, now)}`;
-  const history = shortHistory(conv.stateHistory, accounts, closureMap);
+  const history = shortHistory(
+    conv.stateHistory.map((h) => ({ ...h, externalAssigneeId: assigneeAccount(h.externalAssigneeId, h.externalAssigneeType) })),
+    accounts, closureMap,
+  );
 
   // B5: anclar cada adjunto a su mensaje vía messageId; los huérfanos van a un bloque al pie.
   const messageIds = new Set(conv.messages.map((msg) => msg.id));

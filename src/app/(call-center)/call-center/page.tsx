@@ -8,6 +8,7 @@ import { formatDateTimeAR } from "@/lib/dates/format";
 import { INBOX_PAGE_SIZE, inboxHref, inboxPageInfo, parsePage } from "@/lib/call-center/inbox-pagination";
 import { loadLastResponders, loadOperatorDirectory } from "@/lib/call-center/operator-directory";
 import { operatorFilterValue, operatorInfo, operatorOptions, operatorWhere, parseOperatorFilter } from "@/lib/call-center/operator-display";
+import { assigneeAccount } from "@/lib/call-center/metrics/account-label";
 
 export const metadata = { title: "Call Center — Conversaciones" };
 
@@ -55,6 +56,7 @@ export default async function CallCenterPage({
       customer: { select: { displayName: true, phone: true } },
       assignedTo: { select: { name: true } },
       externalAssigneeId: true,
+      externalAssigneeType: true,
       _count: { select: { messages: true } },
     },
     // id como desempate: sin él, dos conversaciones con el mismo updatedAt podrían repetirse
@@ -119,7 +121,7 @@ export default async function CallCenterPage({
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
           {conversations.map((c, i) => {
             const last = lastResponders.get(c.id);
-            const op = operatorInfo(c.externalAssigneeId, last?.account ?? null, accounts);
+            const op = operatorInfo(assigneeAccount(c.externalAssigneeId, c.externalAssigneeType), last?.account ?? null, accounts);
             return (
             <Link
               key={c.id}

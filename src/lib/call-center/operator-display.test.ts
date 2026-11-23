@@ -9,6 +9,7 @@ import {
 } from "./operator-display";
 import { inboxHref } from "./inbox-pagination";
 import { closureMapOf } from "./metrics/closure-outcome";
+import { accountRef, assigneeAccount, ownerKeyOf } from "./metrics/account-label";
 
 let passed = 0;
 const failures: string[] = [];
@@ -41,11 +42,26 @@ test("filtro por operador: cuenta, sin tomar o sin dato; lo raro no filtra", () 
   assert.deepEqual(parseOperatorFilter("none"), { kind: "NONE" });
   for (const raro of [undefined, "", "9001; DROP", "a b", "x".repeat(65)]) assert.equal(parseOperatorFilter(raro), null);
   assert.deepEqual(operatorWhere(null, accounts), {});
-  assert.deepEqual(operatorWhere({ kind: "ACCOUNT", account: "9001" }, accounts), { externalAssigneeId: "9001" });
+  const noBot = [{ externalAssigneeType: null }, { externalAssigneeType: { not: "AGENT_BOT" } }];
+  assert.deepEqual(operatorWhere({ kind: "ACCOUNT", account: "9001" }, accounts), { externalAssigneeId: "9001", OR: noBot });
   assert.deepEqual(operatorWhere({ kind: "NONE" }, accounts), { externalAssigneeId: null });
-  assert.deepEqual(operatorWhere({ kind: "SYSTEM" }, accounts), { externalAssigneeId: { in: ["9000", "9008"] } });
-  assert.deepEqual(operatorWhere({ kind: "SYSTEM" }, []), { externalAssigneeId: { in: [] } });
+  assert.deepEqual(operatorWhere({ kind: "SYSTEM" }, accounts), { OR: [{ externalAssigneeId: { in: ["9000", "9008"] } }, { externalAssigneeType: "AGENT_BOT" }] });
+  assert.deepEqual(operatorWhere({ kind: "SYSTEM" }, []), { OR: [{ externalAssigneeId: { in: [] } }, { externalAssigneeType: "AGENT_BOT" }] });
   assert.deepEqual([operatorFilterValue(null), operatorFilterValue({ kind: "SYSTEM" }), operatorFilterValue({ kind: "ACCOUNT", account: "9002" })], [null, "system", "9002"]);
+});
+
+test("un bot asignado no es una cuenta de persona: cuenta como 'Sin tomar' aunque su número coincida con el de una cuenta", () => {
+  // 9001 es una cuenta de operador con alias; el bot 9001 es otra cosa.
+  assert.equal(assigneeAccount("9001", "AGENT_BOT"), "bot:9001");
+  assert.equal(assigneeAccount("9001", "USER"), "9001");
+  assert.equal(assigneeAccount("9001", null), "9001", "sin tipo vale el id, como antes");
+  assert.equal(assigneeAccount(null, "AGENT_BOT"), null);
+  assert.deepEqual(accountRef("bot:9001", accounts), { account: "bot:9001", label: "Bot 9001", role: "SISTEMA" });
+  assert.equal(ownerKeyOf("bot:9001", accounts), "system");
+  assert.equal(operatorInfo(assigneeAccount("9001", "AGENT_BOT"), null, accounts).attendedBy, "Sin tomar");
+  assert.equal(operatorInfo(assigneeAccount("9001", "USER"), null, accounts).attendedBy, "Alias inventado");
+  // El último operador que respondió es la cuenta 9001 (una persona): se informa, porque no es el bot asignado.
+  assert.equal(operatorInfo("bot:9001", "9001", accounts).lastResponder, "Alias inventado");
 });
 
 test("opciones del selector: cuentas que no son de sistema por número, y las dos filas especiales", () => {

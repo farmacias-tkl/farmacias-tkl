@@ -3,7 +3,8 @@
  *
  * "Operador" es la cuenta de Emozion: la asignada (externalAssigneeId, dato medido) y, cuando
  * falta o difiere, la del último mensaje público de un operador (dato detectado). Los nombres
- * salen solo de la configuración de métricas vigente (alias, o "Cuenta N").
+ * salen solo de la configuración de métricas vigente (alias, o "Cuenta N"). El asignado llega
+ * acá como clave de cuenta (assigneeAccount): un bot asignado cuenta como "Sin tomar".
  */
 import {
   accountDisplay, accountRef, ownerDisplay, OWNER_KEY_NONE, OWNER_KEY_SYSTEM, OWNER_TEXT, type LabelAccount,
@@ -27,14 +28,27 @@ export function operatorFilterValue(f: OperatorFilter | null): string | null {
   return !f ? null : f.kind === "SYSTEM" ? OWNER_KEY_SYSTEM : f.kind === "NONE" ? OWNER_KEY_NONE : f.account;
 }
 
-/** Condición sobre externalAssigneeId. Con "Sin tomar" y ninguna cuenta de sistema configurada no coincide nada. */
-export function operatorWhere(f: OperatorFilter | null, accounts: readonly LabelAccount[]): { externalAssigneeId?: string | null | { in: string[] } } {
+/** Condición de la bandeja sobre el asignado (forma de un `where` de Prisma). */
+export type OperatorWhere =
+  | Record<string, never>
+  | { externalAssigneeId: null }
+  | { OR: [{ externalAssigneeId: { in: string[] } }, { externalAssigneeType: "AGENT_BOT" }] }
+  | { externalAssigneeId: string; OR: [{ externalAssigneeType: null }, { externalAssigneeType: { not: "AGENT_BOT" } }] };
+
+/**
+ * Condición sobre el asignado. "Sin tomar" son las cuentas de sistema de la configuración y
+ * cualquier asignado que sea un bot. Una cuenta es ese id cuando NO es un bot: un bot y una
+ * persona pueden tener el mismo número.
+ */
+export function operatorWhere(f: OperatorFilter | null, accounts: readonly LabelAccount[]): OperatorWhere {
   if (!f) return {};
   if (f.kind === "NONE") return { externalAssigneeId: null };
   if (f.kind === "SYSTEM") {
-    return { externalAssigneeId: { in: accounts.filter((a) => accountRef(a.externalId, accounts).role === "SISTEMA").map((a) => a.externalId) } };
+    const system = accounts.filter((a) => accountRef(a.externalId, accounts).role === "SISTEMA").map((a) => a.externalId);
+    return { OR: [{ externalAssigneeId: { in: system } }, { externalAssigneeType: "AGENT_BOT" }] };
   }
-  return { externalAssigneeId: f.account };
+  // `not` solo no alcanza: en SQL deja afuera las filas sin tipo, que son las anteriores a este dato.
+  return { externalAssigneeId: f.account, OR: [{ externalAssigneeType: null }, { externalAssigneeType: { not: "AGENT_BOT" } }] };
 }
 
 /** Opciones del selector: las cuentas configuradas que no son de sistema, por número, y las dos filas especiales. */
