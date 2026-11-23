@@ -105,7 +105,10 @@ export function toNowPayload(
   const probableClose = blockById ? staleItems.filter((i) => i.kind === "PROBABLE_CLOSE").length : null;
   const closedItems = closed ? closed.items.map((it) => ({ ...it, windowClosed: windowOf(new Date(it.lastCustomerAt)) === "CERRADA" })) : null;
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
-  const items = waiting.map((it) => ({
+  const items = waiting.map((it) => {
+    const window = windowOf(it.lastCustomerAt);
+    const byClock = wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null };
+    return {
     conversationId: it.conversationId,
     status: it.status,
     owner: ownerOf(it.externalAssigneeId, accounts),
@@ -113,13 +116,21 @@ export function toNowPayload(
     waitStart: it.waitStart.toISOString(),
     waitMinutes: Math.round(it.waitHours * 60),
     lastCustomerAt: it.lastCustomerAt.toISOString(),
-    window: windowOf(it.lastCustomerAt),
+    window,
     alert: it.urgent ? ("URGENTE" as const) : it.insisting ? ("INSISTIENDO" as const) : null,
-    ...(wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null }),
+    // Con la ventana de WhatsApp cerrada el caso es crítico, sume lo que sume el reloj hábil.
+    level: window === "CERRADA" ? ("CRITICO" as const) : byClock.level,
+    businessMinutes: byClock.businessMinutes,
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
     thanksCandidate: it.thanksCandidate,
-  }));
+    };
+  });
+  // Primero los críticos por ventana cerrada, del que más espera real al que menos; después el resto, como venía.
+  const closedFirst = [
+    ...items.filter((it) => it.window === "CERRADA").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : a.lastCustomerAt > b.lastCustomerAt ? 1 : 0)),
+    ...items.filter((it) => it.window !== "CERRADA"),
+  ];
 
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
@@ -130,13 +141,14 @@ export function toNowPayload(
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
       completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
-      critical: wait ? items.filter((it) => it.level === "CRITICO").length : null,
+      // Sin configuración solo se pueden contar los críticos por ventana cerrada: si no hay ninguno, queda sin dato.
+      critical: wait || items.some((it) => it.level === "CRITICO") ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
       urgent: items.filter((it) => it.alert === "URGENTE").length,
       insisting: items.filter((it) => it.alert === "INSISTIENDO").length,
     },
     today,
-    list: items.slice(0, maxRows),
+    list: closedFirst.slice(0, maxRows),
     listTotal: waiting.length,
     stale: {
       total: stale.length,
