@@ -97,6 +97,11 @@ export interface NowListItem {
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
   thanksCandidate: boolean;
+  /**
+   * Posible pendiente antiguo: espera hace más de `windowHours` y su último mensaje no parece
+   * un cierre. Es una detección por palabras, por eso "posible".
+   */
+  oldPending: boolean;
 }
 
 /**
@@ -203,9 +208,15 @@ export interface NowPayload {
     goalMinutes: number;
     criticalMinutes: number;
   } | null;
-  /** Abiertas con hasta `windowHours` de espera. */
+  /**
+   * Abiertas esperando. `total`, `neverHuman`, `awaitingNext` y `oldestWaitStart` son de las
+   * recientes (hasta `windowHours` de espera). Las alertas (`critical`, `urgent`, `insisting`,
+   * `completedOrders`) cuentan también los posibles pendientes antiguos.
+   */
   waiting: {
     total: number;
+    /** Posibles pendientes antiguos: más de `windowHours` de espera y sin señal de cierre. Se suman al total de pendientes. */
+    oldPending: number;
     /** Esperan la primera respuesta de una persona. */
     neverHuman: number;
     /** Ya les respondieron y volvieron a escribir. */
@@ -226,11 +237,11 @@ export interface NowPayload {
    *    hayan creado cuando se hayan creado (incluye el atraso de días anteriores).
    */
   today: { entered: number; answered: number; attended: number } | null;
-  /** Las de `waiting`, de la espera más vieja a la más nueva. */
+  /** Las recientes y los posibles pendientes antiguos: primero las de ventana cerrada, después de la espera más vieja a la más nueva. */
   list: NowListItem[];
   /** Filas de la lista antes del tope. */
   listTotal: number;
-  /** Abiertas con más de `windowHours` de espera: no cuentan como clientes esperando. */
+  /** Abiertas con más de `windowHours` de espera. Las que siguen pendientes están además en `list`. */
   stale: {
     total: number;
     /** null si no se pudieron clasificar. Las dos suman `total`: ninguna desaparece. */
@@ -249,7 +260,7 @@ export interface NowPayload {
     hours: number;
     /** Aviso de "por vencer", de la configuración vigente o el valor por defecto. */
     warningHours: number;
-    /** Entre los que esperan (`waiting`): cerrada, y por vencer. */
+    /** Entre los casos de la lista (recientes y posibles pendientes antiguos): cerrada, y por vencer. */
     closed: number;
     closing: number;
     /** Entre los antiguos (`stale`). */

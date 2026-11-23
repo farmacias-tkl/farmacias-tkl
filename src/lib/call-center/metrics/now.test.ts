@@ -29,7 +29,7 @@ const NONE: NowExtras = { history: null, today: null, closed: null, wait: null, 
 const payload = (rows: WaitingRow[], extras: NowExtras = NONE, maxRows?: number) =>
   toNowPayload(buildQueueSnapshot(rows, NOW, SINCE), extras, FRESH, 72, maxRows);
 
-test("clientes esperando: solo abiertas con hasta 72 horas de espera; las más viejas y las cerradas van aparte", () => {
+test("clientes esperando: recientes hasta 72 horas; las más viejas son posibles pendientes antiguos y las cerradas van aparte", () => {
   const p = payload([
     open("reciente", { waitStart: hoursAgo(2) }),
     open("otra", { waitStart: hoursAgo(50), hasHumanResponse: true }),
@@ -37,9 +37,10 @@ test("clientes esperando: solo abiertas con hasta 72 horas de espera; las más v
     open("mas-vieja", { waitStart: hoursAgo(24 * 90) }),
     row("cerrada", { waitStart: hoursAgo(10) }),
   ]);
-  assert.deepEqual(p.waiting, { total: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0 });
-  assert.deepEqual(p.list.map((i) => i.conversationId), ["otra", "reciente"]);
-  assert.equal(p.listTotal, 2);
+  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0 });
+  // Las antiguas sin señal de cierre entran en la lista, marcadas, antes que las recientes.
+  assert.deepEqual(p.list.map((i) => [i.conversationId, i.oldPending]), [["mas-vieja", true], ["vieja", true], ["otra", false], ["reciente", false]]);
+  assert.equal(p.listTotal, 4);
   assert.equal(p.stale.total, 2);
   assert.equal(p.stale.oldestWaitStart, hoursAgo(24 * 90).toISOString());
   assert.deepEqual(p.stale.items.map((i) => i.conversationId), ["mas-vieja", "vieja"]);
@@ -56,7 +57,7 @@ test("los conteos completos de la cola no cambian: quedan en calidad de datos", 
 
 test("sin nadie esperando: cero y sin espera más larga", () => {
   const p = payload([row("cerrada")]);
-  assert.deepEqual(p.waiting, { total: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0 });
+  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0 });
   assert.deepEqual([p.list.length, p.stale.total, p.stale.oldestWaitStart], [0, 0, null]);
 });
 
@@ -104,6 +105,12 @@ test("casos antiguos: probable cierre o pendiente; ninguno desaparece del total"
   assert.deepEqual([p.stale.total, p.stale.probableClose, p.stale.pending], [4, 1, 3]);
   assert.deepEqual(p.stale.items.map((i) => [i.conversationId, i.kind]), [["sin-marcas", "PENDING"], ["pregunta", "PENDING"], ["gracias-foto", "PENDING"], ["gracias", "PROBABLE_CLOSE"]]);
   assert.equal(p.waiting.total, 1, "la reciente sigue en la cola aunque su último mensaje sea un cierre");
+  // Total de pendientes: la reciente más los tres posibles pendientes antiguos. La probablemente resuelta no suma ni entra en la lista.
+  assert.deepEqual([p.waiting.oldPending, p.listTotal], [3, 4]);
+  assert.deepEqual(p.list.map((i) => i.conversationId).sort(), ["gracias-foto", "pregunta", "reciente", "sin-marcas"]);
+  // Con la ventana de WhatsApp cerrada son críticos y cuentan en las alertas.
+  const viejos = payload(rows.map((r) => ({ ...r, lastCustomerAt: r.waitStart })), { ...NONE, openBlocks });
+  assert.deepEqual([viejos.waiting.critical, viejos.window.closed, viejos.list[0].conversationId, viejos.list[0].level], [3, 3, "sin-marcas", "CRITICO"]);
   // Sin las marcas no se clasifica: null, no cero.
   const sin = payload(rows);
   assert.deepEqual([sin.stale.total, sin.stale.probableClose, sin.stale.pending, sin.stale.items[0].kind], [4, null, null, null]);
@@ -135,14 +142,14 @@ test("semáforo: sale del horario y los umbrales vigentes; sin configuración qu
   assert.deepEqual([sin.schedule, sin.list[0].level, sin.list[0].businessMinutes], [null, null, null]);
 });
 
-test("pedidos completos sin atender: solo abiertas de la ventana y sin respuesta de una persona", () => {
+test("pedidos completos sin atender: abiertas sin respuesta de una persona, también las antiguas pendientes", () => {
   const p = payload([
     open("a", { botOrderComplete: true }),
     open("vieja", { botOrderComplete: true, waitStart: hoursAgo(100) }),
     open("respondida", { botOrderComplete: true, hasHumanResponse: true }),
     row("cerrada", { botOrderComplete: true }),
   ]);
-  assert.equal(p.waiting.completedOrders, 1);
+  assert.equal(p.waiting.completedOrders, 2);
 });
 
 test("hoy, cerradas sin responder e histórico: si no se pudieron calcular quedan null, no cero", () => {
@@ -179,12 +186,12 @@ test("la respuesta no lleva teléfono, nombre ni texto, y se puede serializar", 
 test("cliente urgente o insistiendo: dos niveles; si es las dos cosas cuenta como urgente", () => {
   const p = payload([
     open("urgente", { urgent: true }), open("las-dos", { urgent: true, insisting: true }), open("insiste", { insisting: true }), open("normal"),
-    // Las antiguas y las cerradas no entran en la alerta.
+    // Los posibles pendientes antiguos entran en la alerta; las cerradas no.
     open("vieja", { waitStart: hoursAgo(200), urgent: true }), row("cerrada", { urgent: true }),
   ]);
   const by = Object.fromEntries(p.list.map((i) => [i.conversationId, i.alert]));
-  assert.deepEqual(by, { urgente: "URGENTE", "las-dos": "URGENTE", insiste: "INSISTIENDO", normal: null });
-  assert.deepEqual([p.waiting.urgent, p.waiting.insisting], [2, 1]);
+  assert.deepEqual(by, { vieja: "URGENTE", urgente: "URGENTE", "las-dos": "URGENTE", insiste: "INSISTIENDO", normal: null });
+  assert.deepEqual([p.waiting.urgent, p.waiting.insisting], [3, 1]);
 });
 
 test("quién tiene cada caso: una fila por cuenta asignada, filas especiales y el último en responder como dato detectado", () => {
@@ -205,21 +212,21 @@ test("quién tiene cada caso: una fila por cuenta asignada, filas especiales y e
     open("e", { externalAssigneeId: "9000", waitStart: hoursAgo(1), lastCustomerAt: hoursAgo(1) }),
     open("i", { waitStart: hoursAgo(3), lastCustomerAt: hoursAgo(3) }),
     open("l", { waitStart: hoursAgo(4), lastCustomerAt: hoursAgo(4) }),
-    // Espera hace más de 72 horas: es un caso antiguo, no está en "Casos" y no cuenta como esperando.
+    // Espera hace más de 72 horas y sin señal de cierre: posible pendiente antiguo, está en "Casos" y cuenta como esperando.
     open("vieja", { externalAssigneeId: "9001", waitStart: hoursAgo(200), lastCustomerAt: hoursAgo(200) }),
   ];
   const p = payload(rows, { ...NONE, accounts, openOwners });
   const o = p.owners!;
   assert.equal(o.open, 13);
   assert.deepEqual(o.rows.map((r) => [r.key, r.group, r.label, r.open, r.waiting, r.windowClosed]), [
-    ["a:9001", "OPERADOR", "Alias inventado", 4, 2, 1],
+    ["a:9001", "OPERADOR", "Alias inventado", 4, 3, 2],
     ["a:9002", "OPERADOR", "Cuenta 9002", 1, 0, 0],
     ["a:9999", "OPERADOR", "Cuenta 9999", 1, 0, 0],
     ["a:9007", "SUPERVISION", "Supervisión inventada", 1, 0, 0],
     ["system", "SIN_TOMAR", "Sin tomar", 2, 1, 0],
     ["none", "SIN_DATO", "Sin dato de asignado", 4, 2, 0],
   ]);
-  assert.equal(o.rows[0].oldestWaitStart, hoursAgo(30).toISOString());
+  assert.equal(o.rows[0].oldestWaitStart, hoursAgo(200).toISOString());
   assert.equal(o.rows[1].oldestWaitStart, null);
   // El detectado va solo en "Sin dato de asignado" y no mueve la conversación de fila.
   assert.deepEqual(o.rows[5].detected, { byAccount: [{ label: "Alias inventado", open: 2 }, { label: "Supervisión inventada · supervisión", open: 1 }], none: 1 });
@@ -230,7 +237,7 @@ test("quién tiene cada caso: una fila por cuenta asignada, filas especiales y e
   assert.deepEqual([by.a.detectedOwner, by.i.detectedOwner, by.l.detectedOwner], [null, "Alias inventado", null]);
   // Las filas suman las abiertas y los que esperan.
   assert.equal(o.rows.reduce((n, r) => n + r.open, 0), o.open);
-  assert.equal(o.rows.reduce((n, r) => n + r.waiting, 0), p.waiting.total);
+  assert.equal(o.rows.reduce((n, r) => n + r.waiting, 0), p.waiting.total + p.waiting.oldPending);
   // Sin la lectura de abiertas no hay bloque: null, no vacío.
   assert.equal(payload(rows, { ...NONE, accounts }).owners, null);
 });

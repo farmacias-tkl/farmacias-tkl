@@ -109,8 +109,13 @@ export function toNowPayload(
   });
   const probableClose = blockById ? staleItems.filter((i) => i.kind === "PROBABLE_CLOSE").length : null;
   const closedItems = closed ? closed.items.map((it) => ({ ...it, windowClosed: windowOf(new Date(it.lastCustomerAt)) === "CERRADA" })) : null;
+  // Posibles pendientes antiguos: los antiguos sin señal de cierre (o sin clasificar). Entran
+  // en la lista y en las alertas; nunca se excluye un caso solo por antiguo.
+  const staleKind = new Map(staleItems.map((s) => [s.conversationId, s.kind]));
+  const oldPending = stale.filter((it) => staleKind.get(it.conversationId) !== "PROBABLE_CLOSE");
+  const oldPendingIds = new Set(oldPending.map((it) => it.conversationId));
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
-  const items = waiting.map((it) => {
+  const items = [...oldPending, ...waiting].map((it) => {
     const window = windowOf(it.lastCustomerAt);
     const byClock = wait ? classifyWait(it, now, wait) : { level: null, businessMinutes: null };
     return {
@@ -131,6 +136,7 @@ export function toNowPayload(
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
     thanksCandidate: it.thanksCandidate,
+    oldPending: oldPendingIds.has(it.conversationId),
     };
   });
   // Primero los críticos por ventana cerrada, del que más espera real al que menos; después el resto, como venía.
@@ -145,9 +151,10 @@ export function toNowPayload(
     schedule: wait ? { ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes } : null,
     waiting: {
       total: waiting.length,
+      oldPending: oldPending.length,
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
-      completedOrders: neverHuman.filter((it) => it.botOrderComplete).length,
+      completedOrders: items.filter((it) => !it.hasHumanResponse && it.botOrderComplete).length,
       // Sin configuración solo se pueden contar los críticos por ventana cerrada: si no hay ninguno, queda sin dato.
       critical: wait || items.some((it) => it.level === "CRITICO") ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
@@ -156,7 +163,7 @@ export function toNowPayload(
     },
     today,
     list: closedFirst.slice(0, maxRows),
-    listTotal: waiting.length,
+    listTotal: items.length,
     stale: {
       total: stale.length,
       probableClose,

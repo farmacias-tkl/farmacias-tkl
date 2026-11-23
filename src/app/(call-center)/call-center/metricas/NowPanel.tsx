@@ -131,6 +131,16 @@ export default function NowPanel() {
           <ActionButton label="Mayor espera" value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} tone="plain"
             active={filter === "longest"} disabled={!w.oldestWaitStart} onClick={() => toggle("longest")} />
         </div>
+        <a href="#cerradas-sin-responder"
+          className={`mt-2 flex min-h-[44px] items-center justify-between gap-3 rounded-md border px-2 py-1.5 ${d.closedUnanswered?.total ? "border-orange-200 bg-orange-50" : "border-gray-200 bg-white"}`}>
+          <span className="text-[11px] leading-tight text-gray-700">
+            Cerradas sin responder{d.closedUnanswered ? ` · últimos ${d.closedUnanswered.days} días` : ""}
+            <span className="block">No suman al total de pendientes. Tocá para revisarlas.</span>
+          </span>
+          <span className={`text-xl font-semibold tabular-nums ${d.closedUnanswered?.total ? "text-orange-900" : "text-gray-900"}`}>
+            {d.closedUnanswered ? nf.format(d.closedUnanswered.total) : "—"}
+          </span>
+        </a>
         <p className="mt-2 text-xs text-gray-700">
           Tocá un número para ver esos casos.
           {w.critical === null ? " Sin configuración cargada no se puede marcar la demora crítica." : ""}
@@ -142,6 +152,7 @@ export default function NowPanel() {
           los feriados. Pasado ese plazo la conversación solo se reabre con una plantilla aprobada. &quot;Por vencer&quot; son las que todavía se pueden responder y les
           quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
           {" "}Los grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
+          {" "}Las alertas cuentan los casos recientes y los posibles pendientes antiguos. Las cerradas sin responder ya no están abiertas: son una alerta aparte y no suman al total.
           {d.schedule ? ` En plazo es hasta ${d.schedule.goalMinutes} minutos hábiles de espera, demorado hasta ${d.schedule.criticalMinutes} y crítico más de ${d.schedule.criticalMinutes}.` : ""}
           {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso conserva su color. Además es crítico todo caso
           con la ventana de WhatsApp cerrada: {d.window.hours} horas o más de espera real desde el último mensaje del cliente, sume lo que sume el reloj hábil.
@@ -149,22 +160,33 @@ export default function NowPanel() {
       </div>
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-gray-700">Conversaciones esperando respuesta</h2>
+        <h2 className="text-sm font-medium text-gray-700">Total de pendientes</h2>
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-gray-900">
-          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.total)}</span>
-          <span className="text-sm">en las últimas {d.windowHours} h</span>
-          <span className="text-2xl font-semibold tabular-nums">+ {nf.format(d.stale.total)}</span>
-          <span className="text-sm">antiguas por revisar</span>
+          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.total + w.oldPending)}</span>
+          <span className="text-sm">conversaciones esperando respuesta</span>
         </p>
+        <dl className="mt-2 space-y-0.5 text-sm text-gray-800">
+          <div className="flex justify-between gap-2"><dt>Recientes (últimas {d.windowHours} h)</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(w.total)}</dd></div>
+          <div className="flex justify-between gap-2"><dt>Posibles pendientes antiguos</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(w.oldPending)}</dd></div>
+          {d.stale.probableClose !== null && d.stale.probableClose > 0 && (
+            <div className="flex justify-between gap-2 text-gray-600"><dt>Aparte, antiguas probablemente resueltas (por revisar)</dt><dd className="tabular-nums">{nf.format(d.stale.probableClose)}</dd></div>
+          )}
+        </dl>
         <p className="mt-1 text-sm text-gray-700">
-          {w.oldestWaitStart ? <>La que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay ninguna esperando en las últimas horas."}
+          {w.oldestWaitStart ? <>La reciente que más espera: <span className="font-semibold">{formatWait(minutesSince(w.oldestWaitStart, nowMs))}</span></> : "No hay ninguna esperando en las últimas horas."}
         </p>
         {w.total > 0 && (
           <p className="mt-2 text-xs text-gray-600">
-            {nf.format(w.neverHuman)} esperan la primera respuesta · {nf.format(w.awaitingNext)} esperan la siguiente
+            De las recientes, {nf.format(w.neverHuman)} esperan la primera respuesta y {nf.format(w.awaitingNext)} la siguiente.
           </p>
         )}
-        <Evidence level="MEDIDO" />
+        <More>
+          Pendiente es una conversación abierta cuyo último mensaje es del cliente. Las {d.windowHours} horas solo separan las recientes de las antiguas: ninguna se
+          excluye por antigua. &quot;Posibles pendientes antiguos&quot; son las que esperan hace más de {d.windowHours} horas y cuyo último mensaje no parece un cierre;
+          la separación es por palabras, por eso &quot;posibles&quot;. Las antiguas cuyo último mensaje es un agradecimiento o un cierre no se suman: están abajo, para
+          revisar y cerrar si corresponde. Nada se cierra por antigüedad.
+        </More>
+        <Evidence level={w.oldPending > 0 ? "DETECTADO" : "MEDIDO"} />
       </div>
 
       <div className="mt-3">
@@ -502,6 +524,7 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <ConversationLink id={it.conversationId} />
       </div>
       <p className="mt-1 flex flex-wrap gap-1.5">
+        {it.oldPending && <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900">Posible pendiente antiguo</span>}
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{ownerLabel(it.owner)}</span>
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
         {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
@@ -561,7 +584,7 @@ function StaleCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
       </p>
       {classified ? (
         <>
-          <StaleGroup title="Siguen pendientes" count={s.pending!} note="El último mensaje del cliente no es un cierre, o trae una consulta, un pedido o un adjunto." items={pending} nowMs={nowMs} />
+          <StaleGroup title="Posibles pendientes antiguos" count={s.pending!} note="El último mensaje del cliente no es un cierre, o trae una consulta, un pedido o un adjunto. Están también en la lista de casos y en las alertas." items={pending} nowMs={nowMs} />
           <StaleGroup title="Probablemente resueltas" count={s.probableClose!} note="El último mensaje del cliente es un agradecimiento o un cierre: pueden haber quedado abiertas por error." items={closing} nowMs={nowMs} />
         </>
       ) : (
@@ -599,7 +622,7 @@ function StaleGroup({ title, count, note, items, nowMs }: { title: string; count
 function ClosedCard({ d, nowMs }: { d: NowPayload; nowMs: number }) {
   const c = d.closedUnanswered;
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+    <div id="cerradas-sin-responder" className="mt-3 scroll-mt-4 rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-gray-800">Cerradas sin responder</h2>
         <p className="text-2xl font-semibold tabular-nums text-gray-900">{c ? nf.format(c.total) : "No disponible"}</p>
