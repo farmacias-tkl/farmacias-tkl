@@ -237,6 +237,8 @@ export default function NowPanel() {
 
       <ObservedCard d={d} nowMs={nowMs} />
 
+      <TrendCard d={d} />
+
       <ProgressCard d={d} />
 
       <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
@@ -276,6 +278,112 @@ export default function NowPanel() {
       <StaleCard d={d} nowMs={nowMs} />
       <ClosedCard d={d} nowMs={nowMs} />
     </section>
+  );
+}
+
+/**
+ * Gráfico chico de pendientes durante el turno: una sola serie, línea fina, eje recesivo y los
+ * valores inicial, máximo y actual rotulados. Cada punto tiene su valor al pasar el cursor
+ * o tocarlo, y la misma información está en la tabla desplegable.
+ */
+function TrendChart({ points }: { points: NonNullable<NowPayload["trend"]>["points"] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 320, H = 96, PL = 26, PR = 30, PT = 10, PB = 18;
+  const t0 = new Date(points[0].at).getTime();
+  const t1 = new Date(points[points.length - 1].at).getTime();
+  const max = Math.max(1, ...points.map((p) => p.pending));
+  const x = (iso: string) => PL + (t1 === t0 ? 0 : ((new Date(iso).getTime() - t0) / (t1 - t0)) * (W - PL - PR));
+  const y = (v: number) => PT + (1 - v / max) * (H - PT - PB);
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at).toFixed(1)},${y(p.pending).toFixed(1)}`).join(" ");
+  const last = points[points.length - 1];
+  const h = hover !== null ? points[hover] : null;
+  return (
+    <div className="mt-2">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" className="h-24 w-full max-w-md" onMouseLeave={() => setHover(null)}
+        aria-label={`Pendientes durante el turno: ${points[0].pending} a las ${timeFmt.format(new Date(points[0].at))}, ${last.pending} a las ${timeFmt.format(new Date(last.at))}, máximo ${max}.`}>
+        {/* Eje y líneas de referencia, recesivos */}
+        <line x1={PL} x2={W - PR} y1={y(0)} y2={y(0)} stroke="#d1d5db" strokeWidth="1" />
+        <line x1={PL} x2={W - PR} y1={y(max)} y2={y(max)} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="2 3" />
+        <text x={PL - 4} y={y(max) + 3} textAnchor="end" fontSize="9" fill="#6b7280">{max}</text>
+        <text x={PL - 4} y={y(0) + 3} textAnchor="end" fontSize="9" fill="#6b7280">0</text>
+        <text x={PL} y={H - 4} textAnchor="start" fontSize="9" fill="#6b7280">{timeFmt.format(new Date(points[0].at))}</text>
+        <text x={W - PR} y={H - 4} textAnchor="end" fontSize="9" fill="#6b7280">{timeFmt.format(new Date(last.at))}</text>
+        <path d={path} fill="none" stroke="#1E2D5A" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {/* Valor actual, rotulado en tinta de texto */}
+        <circle cx={x(last.at)} cy={y(last.pending)} r="4" fill="#1E2D5A" stroke="#fff" strokeWidth="2" />
+        <text x={x(last.at) + 7} y={y(last.pending) + 3} fontSize="11" fontWeight="600" fill="#111827">{last.pending}</text>
+        {h && (
+          <>
+            <line x1={x(h.at)} x2={x(h.at)} y1={PT} y2={y(0)} stroke="#9ca3af" strokeWidth="1" />
+            <circle cx={x(h.at)} cy={y(h.pending)} r="4" fill="#1E2D5A" stroke="#fff" strokeWidth="2" />
+          </>
+        )}
+        {/* Zonas de contacto más anchas que la marca */}
+        {points.map((p, i) => {
+          const left = i === 0 ? PL : (x(points[i - 1].at) + x(p.at)) / 2;
+          const right = i === points.length - 1 ? W - PR : (x(p.at) + x(points[i + 1].at)) / 2;
+          return <rect key={p.at} x={left} y={0} width={Math.max(1, right - left)} height={H} fill="transparent" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />;
+        })}
+      </svg>
+      <p className="h-4 text-xs tabular-nums text-gray-700" aria-live="polite">
+        {h ? <>{timeFmt.format(new Date(h.at))} · <span className="font-semibold text-gray-900">{nf.format(h.pending)}</span> pendientes</> : null}
+      </p>
+      <details>
+        <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver como tabla</summary>
+        <table className="mt-1 text-xs text-gray-800">
+          <thead><tr><th className="pr-4 text-left font-medium text-gray-600">Hora</th><th className="text-right font-medium text-gray-600">Pendientes</th></tr></thead>
+          <tbody>
+            {points.map((p) => <tr key={p.at}><td className="pr-4 tabular-nums">{timeFmt.format(new Date(p.at))}</td><td className="text-right tabular-nums">{nf.format(p.pending)}</td></tr>)}
+          </tbody>
+        </table>
+      </details>
+    </div>
+  );
+}
+
+/** "Últimos 60 minutos" y la evolución de la cola durante el turno. */
+function TrendCard({ d }: { d: NowPayload }) {
+  const t = d.trend;
+  if (!t) {
+    return (
+      <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+        <h2 className="text-sm font-semibold text-gray-800">Últimos 60 minutos</h2>
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+        <Evidence level="NO_DISPONIBLE" />
+      </div>
+    );
+  }
+  const h = t.lastHour;
+  const diff = h.pendingNow - h.pendingBefore;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">
+        Últimos 60 minutos
+        <span className="ml-2 text-xs font-normal text-gray-600">calculado a las {timeFmt.format(new Date(t.generatedAt))}</span>
+      </h2>
+      <p className="mt-1 text-sm text-gray-900">
+        <span className="text-lg font-semibold" aria-hidden="true">{diff > 0 ? "↑" : diff < 0 ? "↓" : "→"}</span>{" "}
+        <span className="font-semibold">
+          {diff === 0 ? "La cola está igual" : diff > 0 ? `La cola subió ${nf.format(diff)}` : `La cola bajó ${nf.format(-diff)}`}
+        </span>
+        : había {nf.format(h.pendingBefore)} pendientes hace una hora y hay {nf.format(h.pendingNow)} ahora.
+      </p>
+      <dl className="mt-2 space-y-0.5 text-sm text-gray-800">
+        <div className="flex justify-between gap-2"><dt>Conversaciones nuevas</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(h.newConversations)}</dd></div>
+        <div className="flex justify-between gap-2"><dt>Conversaciones que recibieron una respuesta de un operador</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(h.answered)}</dd></div>
+      </dl>
+      <h3 className="mt-3 text-xs font-semibold text-gray-700">
+        Pendientes {t.fromIsShift ? "desde el inicio del horario de operadores" : "desde el comienzo del día"}
+      </h3>
+      {t.points.length >= 2 ? <TrendChart points={t.points} /> : <p className="mt-1 text-sm text-gray-600">Todavía no hay puntos para mostrar.</p>}
+      <More>
+        &quot;Pendiente&quot; es, en todos los momentos, una conversación abierta cuyo último mensaje era del cliente y que esperaba hace hasta {d.windowHours} horas. No
+        incluye los posibles pendientes antiguos, por eso el número de ahora puede ser menor que el total de pendientes de arriba. La variación compara la cola en dos
+        momentos con la misma regla; no es conversaciones nuevas menos respondidas, porque en el medio hay reaperturas, cierres y clientes que vuelven a escribir. Que la
+        cola baje no quiere decir que se atendió esa cantidad de casos. Hay un punto cada {t.stepMinutes} minutos y el cálculo se renueva cada 5 minutos.
+      </More>
+      <Evidence level="MEDIDO" />
+    </div>
   );
 }
 

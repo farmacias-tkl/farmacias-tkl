@@ -75,6 +75,31 @@ export interface NowObserved {
   accounts: Array<{ label: string; lastResponseAt: string; conversations: number }>;
 }
 
+/**
+ * Evolución de la cola durante el turno y últimos 60 minutos. "Pendiente" es siempre la misma
+ * regla en todos los momentos: abierta, último mensaje del cliente y hasta `windowHours` de
+ * espera (los pendientes recientes; sin los posibles pendientes antiguos).
+ */
+export interface NowTrend {
+  /** ISO. Cuándo se calculó: se guarda unos minutos, puede ser anterior al resto de la pantalla. */
+  generatedAt: string;
+  /** ISO. Primer punto: inicio del horario de operadores de hoy o, si no hay, comienzo del día. */
+  from: string;
+  fromIsShift: boolean;
+  stepMinutes: number;
+  /** Pendientes a cada hora, de la más vieja a la más nueva; el último punto es `generatedAt`. */
+  points: Array<{ at: string; pending: number }>;
+  lastHour: {
+    /** Conversaciones creadas en los últimos 60 minutos. */
+    newConversations: number;
+    /** Conversaciones con al menos una respuesta pública de un operador en los últimos 60 minutos. */
+    answered: number;
+    /** Pendientes hace 60 minutos y ahora, con la misma regla. */
+    pendingBefore: number;
+    pendingNow: number;
+  };
+}
+
 export interface NowOwners {
   /** Todas las conversaciones abiertas. */
   open: number;
@@ -293,6 +318,8 @@ export interface NowPayload {
   owners: NowOwners | null;
   /** Actividad observada. null si no se pudo calcular. */
   observed: NowObserved | null;
+  /** Evolución de la cola. null si no se pudo calcular. */
+  trend: NowTrend | null;
   /** null si no se pudo calcular. */
   progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */

@@ -33,6 +33,8 @@ import { buildOwners, detectedOwnerLabel, loadOpenOwnerRows, type OpenOwnerRow }
 import { buildObserved, loadObservedRows, type ObservedInput } from "./observed-activity";
 import { isWithinHours } from "./business-time";
 import { shiftStartOf } from "./progress";
+import { getQueueTrend } from "./queue-trend";
+import type { NowTrend } from "./now-types";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -60,6 +62,8 @@ export interface NowExtras {
   openOwners?: readonly OpenOwnerRow[] | null;
   /** Respuestas públicas de operador por cuenta, para "Actividad observada". null u omitido si no se pudieron leer. */
   observed?: ObservedInput | null;
+  /** Evolución de la cola, ya calculada. null u omitido si no se pudo calcular. */
+  trend?: NowTrend | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -197,6 +201,7 @@ export function toNowPayload(
           warningMinutes: wait?.lastResponseWarningMinutes ?? DEFAULT_LAST_RESPONSE_WARNING_MINUTES,
         })
       : null,
+    trend: extras.trend ?? null,
     progress,
     quality: {
       freshness: {
@@ -274,6 +279,8 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   const observed = await loadObservedRows(observedSince, now)
     .then((rows) => ({ rows, since: observedSince, sinceIsShift: shiftStart !== null }))
     .catch(() => null);
+  // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
+  const trend = await getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null);
 
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
@@ -291,7 +298,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }
