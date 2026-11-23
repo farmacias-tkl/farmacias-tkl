@@ -21,19 +21,57 @@ export type WaitLevel = "EN_PLAZO" | "DEMORADO" | "CRITICO";
 
 /**
  * Responsable de un caso, según la cuenta de Emozion asignada y la configuración vigente:
- * una cuenta de sistema (asignación automática), una cuenta configurada, o nadie identificado
- * (sin asignado, o asignado a una cuenta que no está en la configuración).
+ * una cuenta de sistema (asignación automática: nadie lo tomó), una cuenta, o sin dato de
+ * asignado.
  */
 export type NowOwner =
   | { kind: "SYSTEM" }
-  | { kind: "ACCOUNT"; /** Alias de la configuración, o "cuenta N" si no tiene. */ label: string }
+  | { kind: "ACCOUNT"; /** Alias de la configuración, o "Cuenta N" si no tiene o no está configurada. */ label: string }
   | { kind: "UNKNOWN" };
+
+/** Grupo de una fila de "Quién tiene cada caso". */
+export type OwnerGroup = "OPERADOR" | "SUPERVISION" | "SIN_TOMAR" | "SIN_DATO";
+
+/** Una cuenta (o fila especial) con conversaciones abiertas, según el asignado actual. */
+export interface NowOwnerRow {
+  /** Clave de la fila: la misma que lleva cada caso de la lista (ownerKey). */
+  key: string;
+  group: OwnerGroup;
+  /** Alias, "Cuenta N", "Sin tomar" o "Sin dato de asignado". */
+  label: string;
+  /** Conversaciones abiertas asignadas, de cualquier antigüedad. */
+  open: number;
+  /** De esas, las que esperan respuesta de un operador y están en la lista "Casos". */
+  waiting: number;
+  /** ISO. Desde cuándo espera la más vieja de las que esperan; null si ninguna espera. */
+  oldestWaitStart: string | null;
+  /** De las que esperan, cuántas tienen la ventana de WhatsApp cerrada. */
+  windowClosed: number;
+  /**
+   * Solo en "Sin dato de asignado". DETECTADO, no medido: la cuenta del último mensaje
+   * público de un operador en cada conversación, y cuántas no tuvieron ninguno.
+   */
+  detected: { byAccount: Array<{ label: string; open: number }>; none: number } | null;
+}
+
+export interface NowOwners {
+  /** Todas las conversaciones abiertas. */
+  open: number;
+  rows: NowOwnerRow[];
+}
 
 export interface NowListItem {
   conversationId: string;
   /** Estado de la conversación: PENDIENTE, SIN_ASIGNAR o ASIGNADA. */
   status: string;
   owner: NowOwner;
+  /** Clave de quién lo tiene: la de su fila en "Quién tiene cada caso". */
+  ownerKey: string;
+  /**
+   * Solo sin dato de asignado: cuenta del último operador que respondió. Es un dato DETECTADO,
+   * no el asignado. null si hay asignado, si nadie respondió o si no se pudo leer.
+   */
+  detectedOwner: string | null;
   /** ISO. Cuándo entró la conversación. */
   createdAt: string;
   /** ISO. Desde cuándo espera: primer mensaje del cliente del bloque sin responder. */
@@ -219,6 +257,8 @@ export interface NowPayload {
     /** Entre las cerradas sin responder; null si no se pudieron calcular. */
     closedUnansweredClosed: number | null;
   };
+  /** "Quién tiene cada caso": abiertas por cuenta asignada. null si no se pudo calcular. */
+  owners: NowOwners | null;
   /** null si no se pudo calcular. */
   progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */

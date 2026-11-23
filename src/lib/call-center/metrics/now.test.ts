@@ -114,10 +114,11 @@ test("responsable: asignación automática, cuenta con alias o número, o sin re
   const accounts = [acc("9000", { system: true, active: false }), acc("9001", { alias: "Alias inventado" }), acc("9002")];
   assert.deepEqual(ownerOf("9000", accounts), { kind: "SYSTEM" });
   assert.deepEqual(ownerOf("9001", accounts), { kind: "ACCOUNT", label: "Alias inventado" });
-  assert.deepEqual(ownerOf("9002", accounts), { kind: "ACCOUNT", label: "cuenta 9002" });
-  assert.deepEqual(ownerOf("9999", accounts), { kind: "UNKNOWN" });
+  assert.deepEqual(ownerOf("9002", accounts), { kind: "ACCOUNT", label: "Cuenta 9002" });
+  // Una cuenta que no está en la configuración se muestra por su número: el asignado es un dato medido.
+  assert.deepEqual(ownerOf("9999", accounts), { kind: "ACCOUNT", label: "Cuenta 9999" });
   assert.deepEqual(ownerOf(null, accounts), { kind: "UNKNOWN" });
-  assert.deepEqual(ownerOf("9001", []), { kind: "UNKNOWN" });
+  assert.deepEqual(ownerOf("9001", []), { kind: "ACCOUNT", label: "Cuenta 9001" });
   // En la respuesta, y sin depender de si ya hubo primera respuesta.
   const p = payload([open("a", { externalAssigneeId: "9000" }), open("b", { externalAssigneeId: "9001", hasHumanResponse: true })], { ...NONE, accounts });
   const by = Object.fromEntries(p.list.map((i) => [i.conversationId, i]));
@@ -184,6 +185,54 @@ test("cliente urgente o insistiendo: dos niveles; si es las dos cosas cuenta com
   const by = Object.fromEntries(p.list.map((i) => [i.conversationId, i.alert]));
   assert.deepEqual(by, { urgente: "URGENTE", "las-dos": "URGENTE", insiste: "INSISTIENDO", normal: null });
   assert.deepEqual([p.waiting.urgent, p.waiting.insisting], [2, 1]);
+});
+
+test("quién tiene cada caso: una fila por cuenta asignada, filas especiales y el último en responder como dato detectado", () => {
+  const acc = (externalId: string, over: object = {}) => ({ externalId, alias: null, active: true, borrowed: false, historical: false, ...over });
+  const accounts = [
+    acc("9000", { system: true, alias: "Automática inventada" }), acc("9001", { alias: "Alias inventado" }), acc("9002"),
+    acc("9007", { supervision: true, alias: "Supervisión inventada" }), acc("9008", { system: true }),
+  ];
+  const own = (conversationId: string, externalAssigneeId: string | null, lastOperatorAccount: string | null = null) => ({ conversationId, externalAssigneeId, lastOperatorAccount });
+  const openOwners = [
+    own("a", "9001"), own("b", "9001"), own("c", "9001", "9002"), // c no espera: respondieron último
+    own("d", "9002"), own("e", "9000"), own("f", "9008"), own("g", "9007"), own("h", "9999"),
+    own("i", null, "9001"), own("j", null, "9001"), own("k", null, "9007"), own("l", null), own("vieja", "9001"),
+  ];
+  const rows = [
+    open("a", { externalAssigneeId: "9001", waitStart: hoursAgo(30), lastCustomerAt: hoursAgo(30) }),
+    open("b", { externalAssigneeId: "9001", waitStart: hoursAgo(2), lastCustomerAt: hoursAgo(2) }),
+    open("e", { externalAssigneeId: "9000", waitStart: hoursAgo(1), lastCustomerAt: hoursAgo(1) }),
+    open("i", { waitStart: hoursAgo(3), lastCustomerAt: hoursAgo(3) }),
+    open("l", { waitStart: hoursAgo(4), lastCustomerAt: hoursAgo(4) }),
+    // Espera hace más de 72 horas: es un caso antiguo, no está en "Casos" y no cuenta como esperando.
+    open("vieja", { externalAssigneeId: "9001", waitStart: hoursAgo(200), lastCustomerAt: hoursAgo(200) }),
+  ];
+  const p = payload(rows, { ...NONE, accounts, openOwners });
+  const o = p.owners!;
+  assert.equal(o.open, 13);
+  assert.deepEqual(o.rows.map((r) => [r.key, r.group, r.label, r.open, r.waiting, r.windowClosed]), [
+    ["a:9001", "OPERADOR", "Alias inventado", 4, 2, 1],
+    ["a:9002", "OPERADOR", "Cuenta 9002", 1, 0, 0],
+    ["a:9999", "OPERADOR", "Cuenta 9999", 1, 0, 0],
+    ["a:9007", "SUPERVISION", "Supervisión inventada", 1, 0, 0],
+    ["system", "SIN_TOMAR", "Sin tomar", 2, 1, 0],
+    ["none", "SIN_DATO", "Sin dato de asignado", 4, 2, 0],
+  ]);
+  assert.equal(o.rows[0].oldestWaitStart, hoursAgo(30).toISOString());
+  assert.equal(o.rows[1].oldestWaitStart, null);
+  // El detectado va solo en "Sin dato de asignado" y no mueve la conversación de fila.
+  assert.deepEqual(o.rows[5].detected, { byAccount: [{ label: "Alias inventado", open: 2 }, { label: "Supervisión inventada · supervisión", open: 1 }], none: 1 });
+  assert.ok(o.rows.slice(0, 5).every((r) => r.detected === null));
+  // Cada caso lleva la clave de su fila; el detectado solo si falta el asignado.
+  const by = Object.fromEntries(p.list.map((i) => [i.conversationId, i]));
+  assert.deepEqual([by.a.ownerKey, by.e.ownerKey, by.i.ownerKey], ["a:9001", "system", "none"]);
+  assert.deepEqual([by.a.detectedOwner, by.i.detectedOwner, by.l.detectedOwner], [null, "Alias inventado", null]);
+  // Las filas suman las abiertas y los que esperan.
+  assert.equal(o.rows.reduce((n, r) => n + r.open, 0), o.open);
+  assert.equal(o.rows.reduce((n, r) => n + r.waiting, 0), p.waiting.total);
+  // Sin la lectura de abiertas no hay bloque: null, no vacío.
+  assert.equal(payload(rows, { ...NONE, accounts }).owners, null);
 });
 
 console.log(`\nmetrics/now: ${passed} ok, ${failures.length} fail`);

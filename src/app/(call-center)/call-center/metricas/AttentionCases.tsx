@@ -21,7 +21,7 @@ type State =
   | { status: "ready"; data: AttentionCasesPayload };
 
 const ownerLabel = (o: AttentionCase["owner"]) =>
-  o.kind === "SYSTEM" ? "Asignación automática" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin responsable identificado";
+  o.kind === "SYSTEM" ? "Sin tomar" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin dato de asignado";
 
 /** Lista de conversaciones detrás de un indicador de "Atención y demoras". Se pide al abrirla. */
 export default function AttentionCases({ kind, period, onClose }: { kind: AttentionCaseKind; period: { from: string; to: string }; onClose: () => void }) {

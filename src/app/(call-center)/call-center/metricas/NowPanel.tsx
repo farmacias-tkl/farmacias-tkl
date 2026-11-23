@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
-import type { ClosedReason, NowListItem, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
+import type { ClosedReason, NowListItem, NowOwnerRow, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
 import { useNowData } from "./useNowData";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -29,7 +29,7 @@ function whenLabel(iso: string, nowMs: number): string {
 }
 
 const ownerLabel = (o: NowListItem["owner"]) =>
-  o.kind === "SYSTEM" ? "Asignación automática" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin responsable identificado";
+  o.kind === "SYSTEM" ? "Sin tomar" : o.kind === "ACCOUNT" ? `Asignada a ${o.label}` : "Sin dato de asignado";
 
 /** Semáforo: fondo suave y la etiqueta siempre en texto. */
 const LEVELS: Record<WaitLevel, { label: string; chip: string; dot: string }> = {
@@ -74,6 +74,8 @@ const FILTER_LABELS: Record<Exclude<CaseFilter, "all">, string> = {
 export default function NowPanel() {
   const { state, refreshing, reload } = useNowData();
   const [filter, setFilter] = useState<CaseFilter>("all");
+  // Filtro por quién tiene el caso (clave de la fila de "Quién tiene cada caso"). Se combina con el anterior.
+  const [ownerKey, setOwnerKey] = useState<string | null>(null);
 
   if (state.status === "loading") return <p className="mt-6 text-sm text-gray-600">Cargando…</p>;
   if (state.status === "error") {
@@ -89,7 +91,9 @@ export default function NowPanel() {
   const nowMs = new Date(d.generatedAt).getTime();
   const w = d.waiting;
   const toggle = (f: CaseFilter) => setFilter((cur) => (cur === f ? "all" : f));
-  const shown =
+  const ownerRow = ownerKey ? d.owners?.rows.find((r) => r.key === ownerKey) ?? null : null;
+  const byOwner = (list: NowListItem[]) => (ownerKey ? list.filter((it) => it.ownerKey === ownerKey) : list);
+  const shown = byOwner(
     filter === "urgent" ? d.list.filter((it) => it.alert === "URGENTE")
     : filter === "insisting" ? d.list.filter((it) => it.alert === "INSISTIENDO")
     : filter === "closing" ? d.list.filter((it) => it.window === "POR_VENCER").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : 1))
@@ -97,7 +101,7 @@ export default function NowPanel() {
     : filter === "critical" ? d.list.filter((it) => it.level === "CRITICO")
     : filter === "orders" ? d.list.filter((it) => it.botOrderComplete && !it.hasHumanResponse)
     : filter === "longest" ? d.list.slice(0, 1)
-    : d.list;
+    : d.list);
 
   return (
     <section className="mt-4" aria-label="Ahora">
@@ -184,10 +188,12 @@ export default function NowPanel() {
         </div>
       </div>
 
+      <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
+
       <ProgressCard d={d} />
 
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
-        Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" ? d.listTotal : shown.length)})` : ""}
+        Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" && !ownerKey ? d.listTotal : shown.length)})` : ""}
         <span className="ml-2 text-xs font-normal text-gray-600">primero los de ventana cerrada, después del que más espera al que menos</span>
       </h2>
       {filter !== "all" && (
@@ -196,12 +202,21 @@ export default function NowPanel() {
           <button type="button" onClick={() => setFilter("all")} className="font-medium text-[#1E2D5A] underline">Ver todos</button>
         </p>
       )}
+      {ownerKey && (
+        <p className="mt-1">
+          <button type="button" onClick={() => setOwnerKey(null)} aria-label={`Quitar el filtro: ${ownerRow?.label ?? "cuenta"}`}
+            className="inline-flex min-h-[32px] items-center gap-1.5 rounded-full border border-[#1E2D5A] bg-white px-3 text-xs font-semibold text-[#1E2D5A]">
+            <span>Quién lo tiene: {ownerRow?.label ?? "cuenta sin casos abiertos"}</span>
+            <span aria-hidden="true">✕</span>
+          </button>
+        </p>
+      )}
       {d.listTotal > d.list.length && (
         <p className="mt-1 text-xs text-gray-600">Se muestran los {nf.format(d.list.length)} que más esperan.</p>
       )}
       {shown.length === 0 ? (
         <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
-          {filter === "all" ? "No hay nadie esperando una respuesta." : "Ningún caso en este grupo."}
+          {filter === "all" && !ownerKey ? "No hay nadie esperando una respuesta." : "Ningún caso en este grupo."}
         </p>
       ) : (
         <ul className="mt-2 grid gap-2 lg:grid-cols-2">
@@ -212,6 +227,68 @@ export default function NowPanel() {
       <StaleCard d={d} nowMs={nowMs} />
       <ClosedCard d={d} nowMs={nowMs} />
     </section>
+  );
+}
+
+const OWNER_GROUP_NOTES: Partial<Record<NowOwnerRow["group"], string>> = {
+  SUPERVISION: "supervisión",
+  SIN_TOMAR: "asignación automática",
+};
+
+/**
+ * "Quién tiene cada caso": una fila por cuenta con conversaciones abiertas, según el asignado
+ * actual. Cada fila es un botón que filtra la lista de casos. Compacto: en el celular cada
+ * fila ocupa dos líneas.
+ */
+function OwnersCard({ d, nowMs, selected, onSelect }: { d: NowPayload; nowMs: number; selected: string | null; onSelect: (key: string) => void }) {
+  const o = d.owners;
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+      <h2 className="text-sm font-semibold text-gray-800">
+        Quién tiene cada caso
+        {o ? <span className="ml-2 text-xs font-normal text-gray-600">{nf.format(o.open)} conversaciones abiertas</span> : null}
+      </h2>
+      {!o ? (
+        <p className="mt-1 text-sm text-gray-600">No disponible</p>
+      ) : o.rows.length === 0 ? (
+        <p className="mt-1 text-sm text-gray-600">No hay conversaciones abiertas.</p>
+      ) : (
+        <ul className="mt-2 divide-y divide-gray-100">
+          {o.rows.map((r) => (
+            <li key={r.key}>
+              <button type="button" onClick={() => onSelect(r.key)} aria-pressed={selected === r.key}
+                className={`flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 text-left ${selected === r.key ? "bg-blue-50 ring-2 ring-[#1E2D5A]" : "hover:bg-gray-50"}`}>
+                <span className="min-w-0 text-sm font-medium text-gray-900">
+                  {r.label}
+                  {OWNER_GROUP_NOTES[r.group] ? <span className="ml-1.5 text-xs font-normal text-gray-600">{OWNER_GROUP_NOTES[r.group]}</span> : null}
+                </span>
+                <span className="text-xs tabular-nums text-gray-700">
+                  <span className="font-semibold text-gray-900">{nf.format(r.open)}</span> abiertas
+                  {" · "}<span className="font-semibold text-gray-900">{nf.format(r.waiting)}</span> esperan
+                  {r.oldestWaitStart ? <> · la más vieja <span className="font-semibold text-gray-900">{formatWait(minutesSince(r.oldestWaitStart, nowMs))}</span></> : null}
+                  {r.windowClosed > 0 ? <> · <span className="font-semibold text-red-800">{nf.format(r.windowClosed)} con ventana cerrada</span></> : null}
+                </span>
+              </button>
+              {r.detected && (r.detected.byAccount.length > 0 || r.detected.none > 0) && (
+                <p className="px-2 pb-1.5 text-[11px] leading-snug text-gray-600">
+                  <span className="mr-1 rounded border border-gray-300 px-1 font-semibold text-gray-700">Detectado</span>
+                  último operador que respondió:{" "}
+                  {[...r.detected.byAccount.map((a) => `${a.label} ${nf.format(a.open)}`), ...(r.detected.none > 0 ? [`ninguno ${nf.format(r.detected.none)}`] : [])].join(" · ")}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-gray-700">Tocá una fila para ver sus casos.</p>
+      <More>
+        Cada conversación abierta va en la fila de la cuenta de Emozion que tiene asignada según el último evento recibido. Una reasignación que no cambia el estado
+        puede tardar en verse. &quot;Esperan&quot; son las que están en la lista de casos: el último mensaje es del cliente y esperan hace hasta {d.windowHours} horas;
+        las más viejas van en los casos antiguos. &quot;Sin tomar&quot; son las que siguen en una cuenta de asignación automática. &quot;Sin dato de asignado&quot; son
+        las que no traen asignado: para esas se muestra, como dato detectado y aparte, la cuenta del último mensaje de un operador, que no es lo mismo que tenerla asignada.
+      </More>
+      <Evidence level={o ? "MEDIDO" : "NO_DISPONIBLE"} />
+    </div>
   );
 }
 
@@ -429,6 +506,12 @@ function CaseCard({ it, nowMs, schedule, windowHours }: { it: NowListItem; nowMs
         <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">{it.hasHumanResponse ? "Esperando nueva respuesta" : "Sin primera respuesta"}</span>
         {it.botOrderComplete && !it.hasHumanResponse && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800">Pedido completo</span>}
       </p>
+      {it.detectedOwner && (
+        <p className="mt-1 text-xs text-gray-700">
+          <span className="mr-1 rounded border border-gray-300 px-1 text-[11px] font-semibold text-gray-700">Detectado</span>
+          último operador que respondió: <span className="font-medium text-gray-900">{it.detectedOwner}</span>
+        </p>
+      )}
       {it.alert === "URGENTE" && (
         <p className="mt-1"><span className="inline-block rounded-md border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-900">Urgente · el cliente pide urgencia o avisa que se va</span></p>
       )}

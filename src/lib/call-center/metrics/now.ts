@@ -19,7 +19,7 @@ import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
 import { getClosedUnanswered, isProbablyClosed, loadOpenBlockRows, type ClosedBlockRow } from "./closed-unanswered";
 import { loadDailyActivityRows } from "./activity";
 import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
-import { DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, isSystemAccount, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
+import { DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
 import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
@@ -28,6 +28,8 @@ import {
 } from "./now-types";
 import { loadProgress } from "./progress";
 import { loadQualityChecks } from "./quality";
+import { accountRef, ownerKeyOf } from "./account-label";
+import { buildOwners, detectedOwnerLabel, loadOpenOwnerRows, type OpenOwnerRow } from "./owners";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
 export type { NowGroup, NowListItem, NowPayload } from "./now-types";
@@ -51,14 +53,15 @@ export interface NowExtras {
   openBlocks: readonly ClosedBlockRow[] | null;
   progress: NowProgress | null;
   checks: QualityChecks | null;
+  /** Todas las abiertas con su asignado, para "Quién tiene cada caso". null u omitido si no se pudieron leer. */
+  openOwners?: readonly OpenOwnerRow[] | null;
 }
 
 /** Responsable de un caso. PURO. */
 export function ownerOf(assignee: string | null, accounts: readonly ConfigAccount[]): NowOwner {
-  const cfg = assignee ? accounts.find((a) => a.externalId === assignee) : undefined;
-  if (!cfg) return { kind: "UNKNOWN" };
-  if (isSystemAccount(cfg)) return { kind: "SYSTEM" };
-  return { kind: "ACCOUNT", label: cfg.alias ?? `cuenta ${cfg.externalId}` };
+  if (!assignee) return { kind: "UNKNOWN" };
+  const ref = accountRef(assignee, accounts);
+  return ref.role === "SISTEMA" ? { kind: "SYSTEM" } : { kind: "ACCOUNT", label: ref.label };
 }
 
 /** Horario y umbrales con la configuración vigente al momento `now`. PURO. */
@@ -91,6 +94,8 @@ export function toNowPayload(
   const stale = open.filter((it) => it.waitHours > windowHours);
   const neverHuman = waiting.filter((it) => !it.hasHumanResponse);
   const { history, today, closed, wait, accounts, openBlocks, progress, checks } = extras;
+  const openOwners = extras.openOwners ?? null;
+  const ownerRowById = openOwners ? new Map(openOwners.map((r) => [r.conversationId, r])) : null;
   const blockById = openBlocks ? new Map(openBlocks.map((b) => [b.conversationId, b])) : null;
   // Una antigua sin marcas (no debería pasar) queda como pendiente: nunca se da por cerrada sin evidencia.
   const now = snapshot.generatedAt;
@@ -112,6 +117,8 @@ export function toNowPayload(
     conversationId: it.conversationId,
     status: it.status,
     owner: ownerOf(it.externalAssigneeId, accounts),
+    ownerKey: ownerKeyOf(it.externalAssigneeId, accounts),
+    detectedOwner: it.externalAssigneeId ? null : detectedOwnerLabel(ownerRowById?.get(it.conversationId), accounts),
     createdAt: it.createdAt.toISOString(),
     waitStart: it.waitStart.toISOString(),
     waitMinutes: Math.round(it.waitHours * 60),
@@ -168,6 +175,8 @@ export function toNowPayload(
       staleClosed: staleItems.filter((it) => it.windowClosed).length,
       closedUnansweredClosed: closedItems ? closedItems.filter((it) => it.windowClosed).length : null,
     },
+    // Sobre todos los que esperan, no solo sobre las filas que entran en la lista.
+    owners: openOwners ? buildOwners(openOwners, items, accounts) : null,
     progress,
     quality: {
       freshness: {
@@ -229,9 +238,10 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
-  const [snapshot, freshness, today, openBlocks, versions] = await Promise.all([
+  const [snapshot, freshness, today, openBlocks, versions, openOwners] = await Promise.all([
     getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null), loadOpenBlockRows().catch(() => null),
     loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
+    loadOpenOwnerRows().catch(() => null),
   ]);
   const wait = waitContext(versions, now);
   const current = configForDay(versions, arDayISO(now));
@@ -255,7 +265,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     }
   }
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }
