@@ -63,6 +63,7 @@ export async function upsertConversationFromEmozion(
         externalAssigneeId: n.externalAssigneeId ?? null,
         externalAssigneeType: n.externalAssigneeType ?? null,
         externalAssigneeAt: n.assigneeEventAt ?? null,
+        externalStatusAt: n.assigneeEventAt ?? null,
         ...(n.externalCreatedAt ? { createdAt: n.externalCreatedAt } : {}),
       },
     });
@@ -209,12 +210,25 @@ function assigneeTypeOf(
 }
 
 /**
- * ¿El evento es anterior al que fijó el asignado guardado? Los eventos de Emozion llegan
- * desordenados y cada uno trae el asignado del momento en que se armó. Sin alguna de las dos
- * horas no se puede saber: no es atrasado y se aplica, como antes de tener este dato.
+ * ¿El evento es anterior al que fijó el dato guardado? Los eventos de Emozion llegan
+ * desordenados y cada uno trae la conversación como estaba cuando se armó.
+ *  - Hora anterior a la guardada: atrasado, no pisa.
+ *  - La MISMA hora: no es atrasado. No se pueden ordenar; se aplica el que llega (con el
+ *    bloqueo por conversación, de a uno).
+ *  - Sin hora en el evento, o sin hora guardada: no se puede saber. Se aplica, como antes de
+ *    tener este dato, y un evento sin hora no mueve la hora guardada.
  */
-export function isStaleAssigneeEvent(eventAt: Date | null | undefined, storedAt: Date | null | undefined): boolean {
+export function isStaleEvent(eventAt: Date | null | undefined, storedAt: Date | null | undefined): boolean {
   return !!eventAt && !!storedAt && eventAt.getTime() < storedAt.getTime();
+}
+
+/**
+ * Bloquea la fila de la conversación hasta el fin de la transacción. Dos eventos de la misma
+ * conversación se aplican de a uno: el segundo lee lo que dejó el primero, en lugar de leer
+ * los dos la misma versión y pisarse. Si la conversación no existe no bloquea nada.
+ */
+async function lockConversation(tx: Prisma.TransactionClient, externalConversationId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "Conversation" WHERE "externalConversationId" = ${externalConversationId} FOR UPDATE`;
 }
 
 /**
@@ -270,9 +284,10 @@ export async function applyStatusChangedFromEmozion(
   closureLabels: ReadonlySet<string> = NO_CLOSURE_LABELS,
 ): Promise<ApplyStatusResult> {
   const warnings: string[] = [];
+  await lockConversation(tx, n.externalConversationId);
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true, externalAssigneeId: true, externalAssigneeType: true, externalAssigneeAt: true },
+    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true, externalAssigneeId: true, externalAssigneeType: true, externalAssigneeAt: true, externalStatusAt: true },
   });
   if (!conv) {
     return {
@@ -280,6 +295,40 @@ export async function applyStatusChangedFromEmozion(
       conversationId: null,
       warnings: [`status change sobre conversación inexistente (${n.externalConversationId}) → needsRetry`],
     };
+  }
+
+  // Cambio de estado ATRASADO: ya se aplicó uno más nuevo. No toca el estado, el cierre, el
+  // asignado ni las etiquetas de la conversación. El hecho igual ocurrió: queda en el
+  // historial, con la hora del evento y no la de llegada, para no perder ese cierre.
+  if (isStaleEvent(n.assigneeEventAt, conv.externalStatusAt)) {
+    const at = n.assigneeEventAt!;
+    const prev = await tx.conversationStateHistory.findFirst({
+      where: { conversationId: conv.id, changedAt: { lte: at } },
+      orderBy: [{ changedAt: "desc" }, { id: "desc" }],
+      select: { toStatus: true },
+    });
+    if (!prev || prev.toStatus !== n.status) {
+      const isResolved = n.status === "RESUELTA";
+      // Sin las etiquetas guardadas de aquel momento, la de cierre vale solo si es la única.
+      const lateLabel = isResolved ? closureLabelOf(n.labels, closureLabels, n.labels ?? []) : null;
+      await tx.conversationStateHistory.create({
+        data: {
+          conversationId: conv.id,
+          fromStatus: prev?.toStatus ?? null,
+          toStatus: n.status,
+          changedByUserId: null,
+          changedAt: at,
+          note: "Cambio de estado de Emozion (webhook, llegó atrasado)",
+          externalAssigneeId: n.externalAssigneeId ?? null,
+          externalAssigneeType: n.externalAssigneeId ? n.externalAssigneeType ?? null : null,
+          closureTypeId: isResolved && !lateLabel ? n.closureTypeId ?? null : null,
+          closureTypeName: isResolved ? lateLabel ?? n.closureTypeName ?? null : null,
+          ...(isResolved ? { externalLabelsSeen: mergeLabelsSeen(n.labels) } : {}),
+        },
+      });
+    }
+    warnings.push("cambio de estado anterior al último aplicado → no cambia el estado actual; queda en el historial con su hora");
+    return { outcome: "processed", conversationId: conv.id, warnings };
   }
 
   const from = conv.status;
@@ -299,12 +348,12 @@ export async function applyStatusChangedFromEmozion(
   // `?? null`: los eventos guardados antes de estos campos no los traen.
   const externalAssigneeId = n.externalAssigneeId ?? null;
   const externalAssigneeType = assigneeTypeOf(externalAssigneeId, n.externalAssigneeType, conv);
-  // El asignado de la CONVERSACIÓN respeta el orden de los eventos según Emozion: si este
-  // evento es anterior al que fijó el asignado guardado, no lo pisa (pasa cuando el cambio de
-  // estado llega después del conversation_updated que ya desasignó). La fila del historial
-  // lleva siempre el asignado de su propio evento.
-  const staleAssignee = isStaleAssigneeEvent(n.assigneeEventAt, conv.externalAssigneeAt);
-  if (staleAssignee) warnings.push("cambio de estado anterior al evento que fijó el asignado → el asignado guardado no se pisa");
+  // El asignado y la lista actual de etiquetas de la CONVERSACIÓN respetan el orden de los
+  // eventos según Emozion: si este evento es anterior al que los fijó, no los pisa (pasa
+  // cuando el cambio de estado llega después del conversation_updated que ya desasignó). La
+  // fila del historial lleva siempre el asignado de su propio evento.
+  const staleAssignee = isStaleEvent(n.assigneeEventAt, conv.externalAssigneeAt);
+  if (staleAssignee) warnings.push("cambio de estado anterior al evento que fijó el asignado y las etiquetas → no se pisan");
   const resolved = n.status === "RESUELTA";
   //  - etiqueta de cierre: si el evento trae las etiquetas y agrega una de cierre a las
   //    guardadas (closureLabelOf), ese es el resultado de la resolución y se guarda como
@@ -327,8 +376,10 @@ export async function applyStatusChangedFromEmozion(
       ...(staleAssignee ? {} : { externalAssigneeId, externalAssigneeType, ...(n.assigneeEventAt ? { externalAssigneeAt: n.assigneeEventAt } : {}) }),
       closureTypeId,
       closureTypeName,
-      // Las etiquetas del evento reemplazan a las guardadas, solo si el evento trae la clave.
-      ...(n.labels ? { externalLabels: n.labels } : {}),
+      ...(n.assigneeEventAt ? { externalStatusAt: n.assigneeEventAt } : {}),
+      // Las etiquetas del evento reemplazan a las guardadas, solo si el evento trae la clave
+      // y no es anterior al que fijó las guardadas.
+      ...(n.labels && !staleAssignee ? { externalLabels: n.labels } : {}),
       externalLabelsSeen: labelsSeen,
       ...(n.closedAt && !conv.closedAt ? { closedAt: n.closedAt } : {}),
     },
@@ -373,7 +424,9 @@ export async function applyStatusChangedFromEmozion(
  *    RESUELTA se completa también la fila de esa resolución. Las de un evento anterior a la
  *    última reapertura no se suman: son del ciclo que ya cerró.
  *
- * Conversación inexistente → "ignored" (sin reintento: el evento no trae con qué crearla).
+ * Conversación inexistente → "needsRetry": el evento llegó antes que el alta. No trae con qué
+ * crearla, pero sí datos que hay que aplicar cuando exista (el asignado, las etiquetas): queda
+ * pendiente y se reintenta, no se da por procesado.
  */
 export async function applyConversationUpdatedFromEmozion(
   tx: Prisma.TransactionClient,
@@ -381,24 +434,30 @@ export async function applyConversationUpdatedFromEmozion(
   closureLabels: ReadonlySet<string> = NO_CLOSURE_LABELS,
 ): Promise<ApplyStatusResult> {
   const warnings: string[] = [];
+  await lockConversation(tx, n.externalConversationId);
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
     select: { id: true, status: true, externalAssigneeId: true, externalAssigneeType: true, externalAssigneeAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true },
   });
   if (!conv) {
-    return { outcome: "ignored", conversationId: null, warnings: ["conversation_updated sobre conversación inexistente → ignorado"] };
+    return { outcome: "needsRetry", conversationId: null, warnings: ["conversation_updated sobre conversación inexistente → needsRetry"] };
   }
 
   const data: Prisma.ConversationUpdateInput = {};
-  if (n.assigneePresent && isStaleAssigneeEvent(n.assigneeEventAt, conv.externalAssigneeAt)) {
-    warnings.push("conversation_updated anterior al evento que fijó el asignado → el asignado guardado no se pisa");
-  } else if (n.assigneePresent) {
-    if (n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
-    const type = assigneeTypeOf(n.externalAssigneeId, n.externalAssigneeType, conv);
-    if (type !== conv.externalAssigneeType) data.externalAssigneeType = type;
-    if (n.assigneeEventAt && n.assigneeEventAt.getTime() !== conv.externalAssigneeAt?.getTime()) data.externalAssigneeAt = n.assigneeEventAt;
+  // Atrasado: anterior al evento que fijó el asignado y la lista actual de etiquetas. No los
+  // pisa. Las etiquetas VISTAS se suman igual más abajo: no dependen del orden.
+  const stale = isStaleEvent(n.assigneeEventAt, conv.externalAssigneeAt);
+  if (stale) {
+    warnings.push("conversation_updated anterior al evento que fijó el asignado y las etiquetas → no se pisan");
+  } else {
+    if (n.assigneePresent) {
+      if (n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
+      const type = assigneeTypeOf(n.externalAssigneeId, n.externalAssigneeType, conv);
+      if (type !== conv.externalAssigneeType) data.externalAssigneeType = type;
+    }
+    if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
+    if ((n.assigneePresent || n.labels) && n.assigneeEventAt && n.assigneeEventAt.getTime() !== conv.externalAssigneeAt?.getTime()) data.externalAssigneeAt = n.assigneeEventAt;
   }
-  if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
 
   // El resultado del cierre: la etiqueta de cierre si la hay; si no, el tipo de cierre del evento.
   const label = closureLabelOf(n.labels, closureLabels, conv.externalLabels);
