@@ -12,18 +12,20 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { canViewCallCenterMetrics } from "@/lib/permissions";
-import { getNowPayload } from "@/lib/call-center/metrics/now";
+import { getNowPayload, getNowSummary } from "@/lib/call-center/metrics/now";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   if (!canViewCallCenterMetrics(session.user)) return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
 
   try {
-    return NextResponse.json({ data: await getNowPayload() }, { headers: { "Cache-Control": "private, no-store" } });
+    // ?part=summary: carga progresiva. Devuelve primero el resumen; la pantalla pide después el completo.
+    const summary = new URL(req.url).searchParams.get("part") === "summary";
+    return NextResponse.json({ data: summary ? await getNowSummary() : await getNowPayload() }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (e) {
     console.error("[call-center/metrics/now]", e instanceof Error ? e.name : "error");
     return NextResponse.json({ error: "Error interno" }, { status: 500 });

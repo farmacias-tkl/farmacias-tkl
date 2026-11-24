@@ -338,26 +338,79 @@ async function loadFreshness(): Promise<{ lastWebhookAt: Date | null; lastMessag
 let nowCache: { at: number; payload: NowPayload } | null = null;
 let historyCache: { at: number; before: number; value: ClosedUnansweredHistory } | null = null;
 
-/** El bloque "Ahora", con caché de NOW_CACHE_SECONDS por instancia. */
-export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
-  if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
+/** Lo que no depende de nada: la cola, la frescura, lo de hoy, la configuración y los asignados. */
+interface Stage1 {
+  now: Date;
+  snapshot: QueueSnapshot;
+  freshness: { lastWebhookAt: Date | null; lastMessageAt: Date | null };
+  today: { entered: number; answered: number; attended: number } | null;
+  openBlocks: ClosedBlockRow[] | null;
+  versions: ConfigVersion[];
+  openOwners: OpenOwnerRow[] | null;
+  ms: Record<string, number>;
+}
 
-  // Cada parte informa cuánto tardó (solo milisegundos, sin datos) para poder ver en el log
-  // dónde se va el tiempo.
-  const ms: Record<string, number> = {};
-  const timed = <T,>(name: string, p: Promise<T>): Promise<T> => {
-    const t0 = Date.now();
-    return p.finally(() => { ms[name] = Date.now() - t0; });
-  };
+// Cada parte informa cuánto tardó (solo milisegundos, sin datos) para poder ver en el log
+// dónde se va el tiempo.
+const timedInto = (ms: Record<string, number>) => <T,>(name: string, p: Promise<T>): Promise<T> => {
   const t0 = Date.now();
+  return p.finally(() => { ms[name] = Date.now() - t0; });
+};
 
-  // Tanda 1: lo que no depende de nada.
-  const [snapshot, freshness, today, openBlocks, versions, openOwners] = await Promise.all([
+let stage1Cache: { at: number; value: Promise<Stage1> } | null = null;
+
+/**
+ * Primera tanda, compartida por el resumen y por la pantalla completa. Se guarda la PROMESA:
+ * dos pedidos simultáneos (el resumen y el completo, o dos personas a la vez) esperan el
+ * mismo cálculo en lugar de repetirlo.
+ */
+function loadStage1(now: Date): Promise<Stage1> {
+  if (stage1Cache && now.getTime() - stage1Cache.at < NOW_CACHE_SECONDS * 1000) return stage1Cache.value;
+  const ms: Record<string, number> = {};
+  const timed = timedInto(ms);
+  const value = Promise.all([
     timed("cola", getQueueSnapshot(now)), timed("frescura", loadFreshness()), timed("hoy", loadToday(now).catch(() => null)),
     timed("bloques", loadOpenBlockRows().catch(() => null)),
     timed("config", loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[])),
     timed("asignados", loadOpenOwnerRows().catch(() => null)),
-  ]);
+  ]).then(([snapshot, freshness, today, openBlocks, versions, openOwners]) => ({ now, snapshot, freshness, today, openBlocks, versions, openOwners, ms }));
+  stage1Cache = { at: now.getTime(), value };
+  // Si falla no queda guardada: el próximo pedido vuelve a intentar.
+  value.catch(() => { if (stage1Cache?.value === value) stage1Cache = null; });
+  return value;
+}
+
+/**
+ * Resumen de "Ahora": solo la primera tanda. Trae la portada (menos los cierres de hoy), las
+ * alertas, el total de pendientes, las asignaciones y la lista de casos. Lo demás va en null y
+ * `partial` en true: la pantalla lo muestra como "cargando" y lo completa con getNowPayload.
+ */
+export async function getNowSummary(now: Date = new Date()): Promise<NowPayload> {
+  if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
+  const t0 = Date.now();
+  const s1 = await loadStage1(now);
+  const wait = waitContext(s1.versions, s1.now);
+  const accounts = configForDay(s1.versions, arDayISO(s1.now))?.data.accounts ?? [];
+  const payload = toNowPayload(
+    s1.snapshot,
+    { history: null, today: s1.today, closed: null, wait, accounts, openBlocks: s1.openBlocks, progress: null, checks: null, openOwners: s1.openOwners },
+    s1.freshness,
+  );
+  console.log("[call-center/metrics/now] resumen ms", JSON.stringify({ total: Date.now() - t0, ...s1.ms }));
+  return { ...payload, partial: true };
+}
+
+/** El bloque "Ahora" completo, con caché de NOW_CACHE_SECONDS por instancia. */
+export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
+  if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
+
+  const t0 = Date.now();
+  // Tanda 1: lo que no depende de nada. Si el resumen ya la pidió, es la misma.
+  const s1 = await loadStage1(now);
+  const { snapshot, freshness, today, openBlocks, versions, openOwners } = s1;
+  now = s1.now;
+  const ms: Record<string, number> = {};
+  const timed = timedInto(ms);
   const wait = waitContext(versions, now);
   const current = configForDay(versions, arDayISO(now));
   const accounts = current?.data.accounts ?? [];
@@ -387,7 +440,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
           .then((value) => { historyCache = { at: now.getTime(), before: snapshot.closedSince.getTime(), value }; return value as ClosedUnansweredHistory | null; })
           .catch(() => null)),
   ]);
-  console.log("[call-center/metrics/now] ms", JSON.stringify({ total: Date.now() - t0, ...ms }));
+  console.log("[call-center/metrics/now] ms", JSON.stringify({ total: Date.now() - t0, ...s1.ms, ...ms }));
 
   const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims, todayClosures }, freshness);
   nowCache = { at: now.getTime(), payload };
