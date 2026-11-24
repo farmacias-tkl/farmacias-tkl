@@ -158,14 +158,13 @@ export const ORDER_FREE_TEXT =
  * pregunta, no una queja: "no llegó en el horario acordado" sí es un reclamo.
  */
 export const FOLLOW_UP_ARRIVAL =
-  "cu[aá]ndo (llega|me lo traen|lo env[ií]an|lo mandan)|a qu[eé] hora (llega|lo traen|pasan)|(saber|avisaron|avisan|avisen) si lleg[oó]" +
-  "|d[oó]nde est[aá] (mi|el) pedido|(estado|seguimiento) de(l| mi) pedido";
+  "cu[aá]ndo (me )?(lo |la |los |las )?(llega|traen|env[ií]an|mandan)|a qu[eé] hora (me )?(lo |la |los |las )?(llega|traen|env[ií]an|mandan|pasan)" +
+  "|(saber|avisaron|avisan|avisen) si lleg[oó]|d[oó]nde est[aá] (mi|el) pedido|(estado|seguimiento) de(l| mi) pedido" +
+  // Cuánto tarda el aviso o el pedido, y avisos al repartidor: es un pedido en curso.
+  "|cu[aá]nto (tarda|demora)[^|]{0,40}(aviso|pedido|env[ií]o|retir)|aviso para retirar|no tengo timbre|no (anda|funciona) el timbre|que me llamen? (cuando|al) lleg";
 
-/**
- * "Pedido sin novedades" con la regla de esta pestaña: solo cuando el cliente dice que no
- * tiene novedades. Preguntar cuándo llega es seguimiento.
- */
-export const CLAIM_NO_NEWS_STRICT = "sin novedad|no tengo novedad|pedido[^|]{0,40}novedad";
+/** Consulta de stock dicha en pasado o en condicional ("tenían", "tendrían"): solo para motivos. */
+export const CONSULT_STOCK_PAST = "\\mten[ií]an\\M|\\mtendr[ií]an\\M";
 
 /** Plataforma de la receta, por el dominio del enlace. El enlace nunca se abre. */
 export const PRESCRIPTION_PLATFORM_CAPTURE = "https?://[^[:space:]/]*(qbitos|meducar|misrx|receto|drapp|rcta|osde)\\.";

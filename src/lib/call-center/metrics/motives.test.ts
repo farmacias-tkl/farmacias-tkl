@@ -27,6 +27,10 @@ test("solicitar un pedido: receta, datos completos del bot o pedido en texto; au
   assert.deepEqual([classifyMotive(f({ prescription: true })).main, classifyMotive(f({ prescription: true })).orderSignal], ["PEDIDO", "RECETA"]);
   assert.equal(orderSignalOf(f({ prescriptionLink: true })), "RECETA");
   assert.equal(orderSignalOf(f({ botOrderComplete: true, orderButton: true })), "DATOS_COMPLETOS");
+  // El mensaje final del bot también cierra el camino "Asesor": sin el recorrido de pedido no es un pedido.
+  assert.equal(orderSignalOf(f({ botOrderComplete: true, advisorButton: true, infoHours: true })), null);
+  assert.equal(main({ botOrderComplete: true, advisorButton: true, infoHours: true, hasFreeText: true, coverage: true }), "CONSULTA");
+  assert.deepEqual([main({ hasFreeText: true, stockPast: true }), classifyMotive(f({ hasFreeText: true, stockPast: true })).consult], ["CONSULTA", "STOCK"]);
   assert.equal(orderSignalOf(f({ ...text, orderText: true })), "TEXTO");
 });
 
@@ -42,10 +46,10 @@ test("el botón 'Pedir medicamentos' no alcanza solo: hace falta un adjunto o te
 });
 
 test("el motivo es la necesidad que originó el contacto: un reclamo o un seguimiento posterior no lo reemplaza", () => {
-  const m = classifyMotive(f({ botOrderComplete: true, strictClaim: true, followUpArrival: true, ...text, price: true }));
+  const m = classifyMotive(f({ botOrderComplete: true, orderButton: true, strictClaim: true, followUpArrival: true, ...text, price: true }));
   assert.deepEqual([m.main, m.extra], ["PEDIDO", ["CONSULTA", "SEGUIMIENTO", "RECLAMO"]]);
   // Excepción: si el primer contacto ya es un reclamo, el principal es el reclamo.
-  const r = classifyMotive(f({ botOrderComplete: true, firstClaim: true, strictClaim: true, ...text }));
+  const r = classifyMotive(f({ botOrderComplete: true, orderButton: true, firstClaim: true, strictClaim: true, ...text }));
   assert.deepEqual([r.main, r.extra, r.orderSignal], ["RECLAMO", ["PEDIDO"], null]);
 });
 
@@ -86,7 +90,7 @@ test("la receta es una característica del contacto, no un motivo", () => {
 test("informe: los motivos suman el total, con día, hora y el cruce con la clasificación anterior", () => {
   const at = (s: string) => new Date(`${s}:00.000-03:00`);
   const rows = [
-    { ...f({ botOrderComplete: true }), createdAt: at("2026-03-02T10:00"), old: "PEDIDO_SIN_CONFIRMAR" as const },
+    { ...f({ botOrderComplete: true, orderButton: true }), createdAt: at("2026-03-02T10:00"), old: "PEDIDO_SIN_CONFIRMAR" as const },
     { ...f({ prescriptionLink: true, prescriptionPlatform: "plataforma-a", strictClaim: true }), createdAt: at("2026-03-02T10:30"), old: "RECLAMO" as const },
     { ...f({ ...text, price: true }), createdAt: at("2026-03-03T15:00"), old: "CONSULTA" as const },
     { ...f({ ...text, onlyEmptyText: true }), createdAt: at("2026-03-03T16:00"), old: "SALUDO" as const },
@@ -107,7 +111,7 @@ test("informe: los motivos suman el total, con día, hora y el cruce con la clas
 test("casos de un motivo: los de ese motivo principal, del más nuevo al más viejo, con el total antes del tope y sin datos del cliente", () => {
   const at = (s: string) => new Date(`${s}:00.000-03:00`);
   const rows = [
-    { ...f({ botOrderComplete: true }), conversationId: "c1", createdAt: at("2026-03-02T10:00") },
+    { ...f({ botOrderComplete: true, orderButton: true }), conversationId: "c1", createdAt: at("2026-03-02T10:00") },
     { ...f({ prescriptionLink: true, strictClaim: true }), conversationId: "c2", createdAt: at("2026-03-03T10:00") },
     { ...f({ hasFreeText: true, price: true }), conversationId: "c3", createdAt: at("2026-03-03T11:00") },
   ];

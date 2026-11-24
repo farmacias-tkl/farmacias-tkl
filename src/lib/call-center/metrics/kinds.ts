@@ -40,7 +40,7 @@ import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, arHour, utcTimestampParam } from "./business-time";
 import { BOT_ORDER_COMPLETE_LIKE, PRESCRIPTION_LINK_REGEX } from "./patterns";
 import { claimsOf, loadDetectedRows, messageMatches } from "./detected";
-import { CLAIM_MOTIVES, CLAIM_PATTERNS, NOTHING_ARRIVED, branchNamesRegex, type MessagePattern } from "./detected-patterns";
+import { OWN_PROBLEM_CLAIM_PATTERNS, branchNamesRegex, type MessagePattern } from "./detected-patterns";
 import { BOT_ORDER_FLOW_LIKE } from "./management-type";
 import { buildMotivesReport, selectMotiveCases, type MotiveFlags } from "./motives";
 import type { Motive, MotiveCasesPayload } from "./motives-types";
@@ -52,7 +52,7 @@ import {
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
   BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_CANCELLED, OPERATOR_POSTPONED, OPERATOR_WAITING, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
-  BUTTON_ADVISOR, BUTTON_HOURS, BUTTON_ONLINE_STORE, BUTTON_ORDER, CLAIM_NO_NEWS_STRICT, FOLLOW_UP_ARRIVAL, ORDER_FREE_TEXT, PRESCRIPTION_PLATFORM_CAPTURE,
+  BUTTON_ADVISOR, BUTTON_HOURS, BUTTON_ONLINE_STORE, BUTTON_ORDER, CONSULT_STOCK_PAST, FOLLOW_UP_ARRIVAL, ORDER_FREE_TEXT, PRESCRIPTION_PLATFORM_CAPTURE,
 } from "./kinds-patterns";
 import {
   CLOSURE_OUTCOME_LIST, CONSULT_KINDS, LOST_KINDS, MAIN_KINDS, NO_TAKE_KINDS, ORDER_KINDS, OUTCOME_MATCHES,
@@ -127,15 +127,8 @@ type Flags = Omit<KindRow, "conversationId" | "createdAt" | "resolved" | "closur
 /** Una conversación con las marcas de las dos clasificaciones: la de tipos y la de motivos de contacto. */
 export type KindMotiveRow = KindRow & MotiveFlags;
 
-/**
- * Reclamo con la regla de "Motivos de contacto": los motivos de "Reclamos y pérdidas", salvo
- * que preguntar cuándo llega un pedido es seguimiento y no reclamo.
- */
-export const STRICT_CLAIM_PATTERNS: readonly MessagePattern[] = [
-  ...CLAIM_MOTIVES.filter((m) => m !== "SIN_NOVEDADES").flatMap((m) => CLAIM_PATTERNS[m] as readonly MessagePattern[]),
-  { all: [CLAIM_NO_NEWS_STRICT] },
-  ...NOTHING_ARRIVED,
-];
+/** Reclamo como motivo de contacto: un problema propio del cliente (ver detected-patterns.ts). */
+export const STRICT_CLAIM_PATTERNS: readonly MessagePattern[] = OWN_PROBLEM_CLAIM_PATTERNS;
 
 function consultKind(r: Flags): ConsultKind {
   if (r.services) return "SERVICIOS";
@@ -340,6 +333,7 @@ export function kindRowsQuery(from: Date, to: Date, tkl: string): Prisma.Sql {
         ${flag(Prisma.sql`(${cust} AND m.body = ${BUTTON_ORDER}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})`)} AS "orderButton",
         ${flag(Prisma.sql`${free} AND m.body ~* ${ORDER_FREE_TEXT}`)} AS "orderText",
         ${flag(Prisma.sql`${free} AND m.body ~* ${FOLLOW_UP_ARRIVAL}`)} AS "followUpArrival",
+        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_STOCK_PAST}`)} AS "stockPast",
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ADVISOR}`)} AS "advisorButton",
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOURS}`)} AS "infoHours",
         ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ONLINE_STORE}`)} AS "infoOnline",

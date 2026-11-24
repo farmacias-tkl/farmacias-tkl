@@ -65,7 +65,9 @@ export function saleBoughtAtTkl(branchRegex: string): readonly MessagePattern[] 
 export const CLAIM_PATTERNS = {
   // Call Center
   DEMORA: [{ all: ["\\m(demora(n|ron)?|tarda(n|ron)?|sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden))\\M"] }],
-  SIN_NOVEDADES: [{ all: ["(pedido[^|]{0,40}(novedad|d[oó]nde est))|sin novedad|no tengo novedad|cu[aá]ndo (llega|me lo traen|lo env[ií]an|lo mandan)|(saber|avisaron|avisan|avisen) si lleg[oó]"] }],
+  // Solo cuando el cliente dice que no tiene novedades. Preguntar cuándo llega, o dónde está el
+  // pedido, es seguimiento y no reclamo (la misma regla que "Motivos de contacto").
+  SIN_NOVEDADES: [{ all: ["sin novedad|no tengo novedad|pedido[^|]{0,40}novedad"] }],
   INCORRECTO: [{ all: ["\\m(equivocad[oa]s?|incorrect[oa]s?|vencid[oa]s?)\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)"] }],
   STOCK: [{ all: ["no (hay|tienen|ten[ií]an|queda) stock|sin stock|\\men falta\\M|no (lo|la|los|las) tienen"] }],
   // Factura: solo si viene con una queja. Un pedido común de factura no es un reclamo.
@@ -147,3 +149,28 @@ export const CLAIM_LABELS: Record<ClaimMotive, string> = {
   WEB_SIN_CONFIRMACION: "Pagó y no recibió la confirmación",
   WEB_PAGINA: "Problemas con la página",
 };
+
+/**
+ * Reclamo como MOTIVO DE CONTACTO: el cliente habla de un problema con un pedido, un pago, una
+ * entrega o la atención PROPIOS. Es más estricto que los motivos de arriba, que buscan casos
+ * para revisar: acá no cuentan "en falta" o "falta de stock" (es una consulta de stock),
+ * "reintegro", "descuento" o "cobertura" dentro de una pregunta de precio, ni "demora" o
+ * "tarda" sueltos (preguntar cuánto tarda es seguimiento).
+ */
+export const OWN_PROBLEM_CLAIM_PATTERNS: readonly MessagePattern[] = [
+  // Espera sin respuesta, dicha como queja.
+  { all: ["sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden)"] },
+  { all: ["sin novedad|no tengo novedad|pedido[^|]{0,40}novedad"] },
+  // Lo que llegó está mal o incompleto.
+  { all: ["\\m(equivocad[oa]s?|incorrect[oa]s?|vencid[oa]s?)\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)|se olvidaron|falta[^|]{0,30}en (el|mi) pedido"] },
+  // Cobro o devolución con problema.
+  { all: ["me cobraron (de )?m[aá]s|me cobraron mal|cobraron dos veces|doble cobro|no me (hicieron|aplicaron|tomaron) el descuento|no me (lleg[oó]|hicieron|devolvieron|acreditaron) (la |el )?(devoluci[oó]n|reintegro|reembolso|plata|dinero)|me debitaron"] },
+  ...CLAIM_PATTERNS.FACTURA,
+  ...CLAIM_PATTERNS.TRATO,
+  ...CLAIM_PATTERNS.OTROS,
+  ...CLAIM_PATTERNS.ENVIO_NO_LLEGO,
+  ...CLAIM_PATTERNS.ENVIO_ENTREGA,
+  ...CLAIM_PATTERNS.WEB_SIN_CONFIRMACION,
+  ...CLAIM_PATTERNS.WEB_PAGINA,
+  ...NOTHING_ARRIVED,
+];

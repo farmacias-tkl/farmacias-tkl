@@ -8,7 +8,9 @@
  *     empezado un pedido en el bot.
  *  2. Solicitar un pedido: una solicitud explícita de compra, aunque nadie haya respondido.
  *     Cuenta una receta digital (el mensaje armado o el enlace de una plataforma), los datos
- *     completos del recorrido del bot, o un pedido en texto libre. Tocar "Pedir medicamentos"
+ *     completos del recorrido de PEDIDO del bot (el mensaje final solo, sin haber entrado por
+ *     "Pedir medicamentos", no alcanza: también cierra el camino "Asesor"), o un pedido en
+ *     texto libre. Tocar "Pedir medicamentos"
  *     NO alcanza solo: hace falta además un adjunto, o texto propio que no sea una pregunta
  *     ni un tema de consulta (lo más parecido a un producto escrito que se puede detectar).
  *  3. Consultar un pedido o pago existente: "¿a qué hora llega?" es seguimiento, no reclamo.
@@ -41,7 +43,10 @@ export interface MotiveFlags {
   prescriptionLink: boolean;
   /** Plataforma reconocida por el dominio del enlace; null si no hay enlace reconocido. */
   prescriptionPlatform: string | null;
-  /** El bot recibió todos los datos del pedido. */
+  /**
+   * El bot cerró su recorrido con el mensaje final. OJO: ese mensaje también cierra el camino
+   * "Asesor", así que solo vale como "datos completos del pedido" junto con `orderButton`.
+   */
   botOrderComplete: boolean;
   /** Tocó "Pedir medicamentos" o entró al recorrido de pedido. */
   orderButton: boolean;
@@ -69,12 +74,14 @@ export interface MotiveFlags {
   coverage: boolean;
   paymentMethod: boolean;
   onlineStore: boolean;
+  /** Pregunta por stock en pasado o condicional ("tenían", "tendrían"). */
+  stockPast?: boolean;
 }
 
 function consultOf(r: MotiveFlags): ConsultKind {
   if (r.services) return "SERVICIOS";
   if (r.price) return "PRECIO";
-  if (r.stock) return "STOCK";
+  if (r.stock || r.stockPast) return "STOCK";
   if (r.hours || r.infoHours) return "HORARIOS";
   if (r.coverage) return "COBERTURA";
   if (r.paymentMethod) return "PAGO";
@@ -85,9 +92,10 @@ function consultOf(r: MotiveFlags): ConsultKind {
 /** La señal más fuerte de que es una solicitud de pedido; null si no lo es. PURO. */
 export function orderSignalOf(r: MotiveFlags): OrderSignal | null {
   if (r.prescription || r.prescriptionLink) return "RECETA";
-  if (r.botOrderComplete) return "DATOS_COMPLETOS";
+  // El mensaje final del bot vale solo si el cliente había entrado por el recorrido de pedido.
+  if (r.botOrderComplete && r.orderButton) return "DATOS_COMPLETOS";
   if (r.orderText) return "TEXTO";
-  const topic = r.services || r.price || r.stock || r.hours || r.coverage || r.paymentMethod || r.onlineStore;
+  const topic = r.services || r.price || r.stock || r.stockPast === true || r.hours || r.coverage || r.paymentMethod || r.onlineStore;
   const ownContent = r.hasFreeText && !r.onlyEmptyText && !topic && !r.hasQuestionMark;
   if (r.orderButton && (r.customerMedia || ownContent)) return "BOTON_Y_CONTENIDO";
   return null;
@@ -96,7 +104,7 @@ export function orderSignalOf(r: MotiveFlags): OrderSignal | null {
 /** PURO. */
 export function classifyMotive(r: MotiveFlags): ConversationMotive {
   const orderSignal = orderSignalOf(r);
-  const topic = r.services || r.price || r.stock || r.hours || r.coverage || r.paymentMethod || r.onlineStore;
+  const topic = r.services || r.price || r.stock || r.stockPast === true || r.hours || r.coverage || r.paymentMethod || r.onlineStore;
   const consult = topic || r.hasQuestionMark || r.infoHours || r.infoOnline;
   const followUp = r.followUp || r.followUpArrival;
   const present: Record<Motive, boolean> = {
