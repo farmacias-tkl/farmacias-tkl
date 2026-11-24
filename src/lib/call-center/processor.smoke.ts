@@ -494,6 +494,85 @@ async function main() {
       assert.deepEqual([c!.status, c!.closureTypeName], ["RESUELTA", null]);
     });
 
+    // 5u. Etiquetas vistas (datos inventados): la lista actual sigue al evento; las vistas solo suman.
+    const SEEN = 39800;
+    const rawSeen = (event: string, status: string, labels?: string[], extra: Record<string, unknown> = {}) => {
+      const { labels: _l, ...base } = rawConvCreated(SEEN, "+5491100000008", "Cliente Ficticio Vistas", status, [], 77, event);
+      return { ...base, ...(labels ? { labels } : {}), ...extra };
+    };
+    const convSeen = () => prisma.conversation.findUnique({ where: { externalConversationId: String(SEEN) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] } } });
+    const later = (ms: number) => ({ updated_at: new Date(Date.now() + ms).toISOString() });
+
+    await check("5u. etiquetas vistas: lo que Emozion quita al resolver queda en la conversación y en la fila RESUELTA", async () => {
+      await run(rawSeen("conversation_created", "open", ["sucursal_ficticia_a"]));
+      await run(rawSeen("conversation_updated", "open", ["sucursal_ficticia_a", "retiro_en_sucursal"], later(1000)));
+      await run(rawSeen("conversation_status_changed", "resolved", ["sucursal_ficticia_a", "retiro_en_sucursal"]));
+      // La automatización quita sucursal y modalidad y queda la de cierre.
+      await run(rawSeen("conversation_updated", "resolved", ["solo_consulta"], later(2000)));
+      const c = await convSeen();
+      assert.deepEqual(c!.externalLabels, ["solo_consulta"], "la lista actual sigue al evento");
+      assert.deepEqual(c!.externalLabelsSeen, ["sucursal_ficticia_a", "retiro_en_sucursal", "solo_consulta"]);
+      const last = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([last.toStatus, last.externalLabelsSeen], ["RESUELTA", ["sucursal_ficticia_a", "retiro_en_sucursal", "solo_consulta"]]);
+      assert.deepEqual(c!.stateHistory[0].externalLabelsSeen, [], "solo las filas RESUELTA las llevan");
+      // Repetido: idempotente, sin filas nuevas.
+      await run(rawSeen("conversation_updated", "resolved", ["solo_consulta"], later(3000)));
+      assert.equal((await convSeen())!.stateHistory.length, c!.stateHistory.length);
+    });
+    await check("5v. reapertura: las vistas empiezan de nuevo; la fila del cierre anterior no cambia", async () => {
+      await run(rawSeen("conversation_status_changed", "open", ["solo_consulta"]));
+      let c = await convSeen();
+      assert.deepEqual(c!.externalLabelsSeen, ["solo_consulta"]);
+      const cierre1 = c!.stateHistory.filter((h) => h.toStatus === "RESUELTA")[0];
+      assert.deepEqual(cierre1.externalLabelsSeen, ["sucursal_ficticia_a", "retiro_en_sucursal", "solo_consulta"]);
+      // Un evento atrasado, anterior a la reapertura, no suma la sucursal del pedido viejo.
+      await run(rawSeen("conversation_updated", "open", ["solo_consulta", "sucursal_ficticia_a"], { updated_at: ISO2 }));
+      c = await convSeen();
+      assert.deepEqual([c!.externalLabels, c!.externalLabelsSeen], [["solo_consulta", "sucursal_ficticia_a"], ["solo_consulta"]]);
+      // Pedido nuevo en otra sucursal.
+      await run(rawSeen("conversation_updated", "open", ["solo_consulta", "sucursal_ficticia_b", "envio_a_domicilio"], later(4000)));
+      assert.deepEqual((await convSeen())!.externalLabelsSeen, ["solo_consulta", "sucursal_ficticia_b", "envio_a_domicilio"]);
+    });
+    await check("5w. la quita llega ANTES del cambio de estado, y el cambio de estado sin etiquetas: la fila RESUELTA igual las lleva", async () => {
+      await run(rawSeen("conversation_updated", "resolved", ["solo_consulta", "venta_concretada"], later(5000)));
+      await run(rawSeen("conversation_status_changed", "resolved"));
+      const c = await convSeen();
+      const esperadas = ["solo_consulta", "sucursal_ficticia_b", "envio_a_domicilio", "venta_concretada"];
+      assert.deepEqual([c!.status, c!.externalLabels, c!.externalLabelsSeen], ["RESUELTA", ["solo_consulta", "venta_concretada"], esperadas]);
+      assert.deepEqual(c!.stateHistory[c!.stateHistory.length - 1].externalLabelsSeen, esperadas);
+    });
+
+    // 5x. Tipo de asignado (datos inventados): bots y usuarios tienen numeraciones separadas.
+    const TYP = 39850;
+    const rawTyp = (event: string, status: string, assignee: { id: number; type?: string } | null, extra: Record<string, unknown> = {}) => {
+      const base = rawConvCreated(TYP, "+5491100000010", "Cliente Ficticio Tipo", status, [], null, event);
+      return { ...base, meta: { ...base.meta, assignee: assignee ? { id: assignee.id } : null, ...(assignee?.type ? { assignee_type: assignee.type } : {}) }, ...extra };
+    };
+    const convTyp = () => prisma.conversation.findUnique({ where: { externalConversationId: String(TYP) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] } } });
+    await check("5x. tipo de asignado: se guarda con el id en la conversación y en cada fila; sin dato queda null", async () => {
+      await run(rawTyp("conversation_created", "open", { id: 37, type: "AgentBot" }));
+      let c = await convTyp();
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType, c!.stateHistory[0].externalAssigneeType], ["37", "AGENT_BOT", "AGENT_BOT"]);
+      // Mismo asignado y el evento no dice el tipo: se conserva.
+      await run(rawTyp("conversation_updated", "open", { id: 37 }));
+      assert.equal((await convTyp())!.externalAssigneeType, "AGENT_BOT");
+      // Pasa a una persona con el MISMO número: el tipo es lo único que los distingue.
+      await run(rawTyp("conversation_updated", "open", { id: 37, type: "User" }));
+      assert.deepEqual([(await convTyp())!.externalAssigneeId, (await convTyp())!.externalAssigneeType], ["37", "USER"]);
+      // Cambia el asignado y el evento no dice el tipo: queda sin dato, no arrastra el anterior.
+      await run(rawTyp("conversation_updated", "open", { id: 80 }));
+      assert.deepEqual([(await convTyp())!.externalAssigneeId, (await convTyp())!.externalAssigneeType], ["80", null]);
+      // El cambio de estado lo guarda en su fila.
+      await run(rawTyp("conversation_status_changed", "resolved", { id: 80, type: "User" }));
+      c = await convTyp();
+      const last = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.externalAssigneeType, last.toStatus, last.externalAssigneeId, last.externalAssigneeType], ["USER", "RESUELTA", "80", "USER"]);
+      // Sin asignado no hay tipo.
+      await run(rawTyp("conversation_status_changed", "open", null));
+      c = await convTyp();
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType], [null, null]);
+    });
+
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)
     await check("6. fallo de dominio → ERROR persiste; dominio rolled back", async () => {
       // status inválido (no producible por el mapper) → fuerza error de Prisma DENTRO de la tx.

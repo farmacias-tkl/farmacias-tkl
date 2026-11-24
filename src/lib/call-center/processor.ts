@@ -118,6 +118,7 @@ function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
     resolved: u.resolved === true,
     assigneePresent: u.assigneePresent === true,
     externalAssigneeId: typeof u.externalAssigneeId === "string" ? u.externalAssigneeId : null,
+    externalAssigneeType: u.externalAssigneeType === "USER" || u.externalAssigneeType === "AGENT_BOT" ? u.externalAssigneeType : null,
     closureTypeId: typeof u.closureTypeId === "string" ? u.closureTypeId : null,
     closureTypeName: typeof u.closureTypeName === "string" ? u.closureTypeName : null,
     eventAt: toDate(u.eventAt),

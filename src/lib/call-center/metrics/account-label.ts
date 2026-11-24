@@ -19,7 +19,25 @@ export interface AccountRef {
 /** Subconjunto de la configuración que hace falta para nombrar una cuenta. */
 export type LabelAccount = Pick<ConfigAccount, "externalId" | "alias" | "system" | "supervision">;
 
+/**
+ * Un bot de Emozion como asignado (el del menú, por ejemplo). Los bots y los usuarios tienen
+ * numeraciones separadas, así que un bot NUNCA se busca entre las cuentas de la configuración:
+ * su clave lleva este prefijo y cuenta como sistema ("Sin tomar"), no como una persona.
+ */
+export const BOT_ACCOUNT_PREFIX = "bot:";
+
+/**
+ * Clave de cuenta del asignado de una conversación: el id, o "bot:<id>" si el evento dijo que
+ * es un bot. Sin tipo (dato anterior, o el evento no lo dijo) vale el id solo, como hasta ahora.
+ */
+export function assigneeAccount(id: string | null, type: string | null | undefined): string | null {
+  return id && type === "AGENT_BOT" ? `${BOT_ACCOUNT_PREFIX}${id}` : id;
+}
+
 export function accountRef(account: string, accounts: readonly LabelAccount[]): AccountRef {
+  if (account.startsWith(BOT_ACCOUNT_PREFIX)) {
+    return { account, label: `Bot ${account.slice(BOT_ACCOUNT_PREFIX.length)}`, role: "SISTEMA" };
+  }
   const cfg = accounts.find((a) => a.externalId === account);
   const alias = cfg?.alias?.trim();
   return {

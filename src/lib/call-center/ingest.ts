@@ -2,7 +2,9 @@ import { Prisma } from "@prisma/client";
 import { isExpectedIngestedTransition } from "./transitions";
 import { initialStorageFields, type AttachmentSourceCtx } from "./attachment-source";
 import { tagErrorStage } from "./safe-error";
+import { mergeLabelsSeen } from "./labels-seen";
 import type {
+  NormalizedAssigneeType,
   NormalizedConversation,
   NormalizedMessage,
   NormalizedStatusEvent,
@@ -57,7 +59,9 @@ export async function upsertConversationFromEmozion(
         firstResponseAt: n.firstResponseAt,
         closedAt: n.closedAt,
         externalLabels: n.externalLabels,
+        externalLabelsSeen: mergeLabelsSeen(n.externalLabels),
         externalAssigneeId: n.externalAssigneeId ?? null,
+        externalAssigneeType: n.externalAssigneeType ?? null,
         ...(n.externalCreatedAt ? { createdAt: n.externalCreatedAt } : {}),
       },
     });
@@ -69,6 +73,8 @@ export async function upsertConversationFromEmozion(
         changedByUserId: null,
         note: "Importado de Emozion (webhook)",
         externalAssigneeId: n.externalAssigneeId ?? null,
+        externalAssigneeType: n.externalAssigneeType ?? null,
+        ...(n.status === "RESUELTA" ? { externalLabelsSeen: mergeLabelsSeen(n.externalLabels) } : {}),
       },
     });
     return { conversationId: conv.id, created: true, warnings };
@@ -81,7 +87,9 @@ export async function upsertConversationFromEmozion(
       ...(n.firstResponseAt && !existing.firstResponseAt ? { firstResponseAt: n.firstResponseAt } : {}),
       ...(n.closedAt && !existing.closedAt ? { closedAt: n.closedAt } : {}),
       ...(n.customerPhoneSnapshot && !existing.customerPhoneSnapshot ? { customerPhoneSnapshot: n.customerPhoneSnapshot } : {}),
-      ...(n.externalLabels.length ? { externalLabels: n.externalLabels } : {}),
+      ...(n.externalLabels.length
+        ? { externalLabels: n.externalLabels, externalLabelsSeen: mergeLabelsSeen(seenSoFar(existing), n.externalLabels) }
+        : {}),
     },
   });
   return { conversationId: existing.id, created: false, warnings };
@@ -182,6 +190,29 @@ export async function upsertMessageFromEmozion(
 }
 
 const NO_CLOSURE_LABELS: ReadonlySet<string> = new Set();
+/** Un conversation_updated tan anterior a la última reapertura no suma etiquetas vistas. */
+const LABELS_STALE_MARGIN_MS = 60_000;
+/**
+ * Tipo del asignado que queda guardado: el del evento. Si el evento no lo dice y el asignado
+ * es el mismo que ya estaba, se conserva el guardado; si cambió, queda sin dato. Sin asignado,
+ * null.
+ */
+function assigneeTypeOf(
+  assigneeId: string | null,
+  eventType: NormalizedAssigneeType | null | undefined,
+  stored: { externalAssigneeId: string | null; externalAssigneeType: string | null },
+): string | null {
+  if (!assigneeId) return null;
+  if (eventType) return eventType;
+  return assigneeId === stored.externalAssigneeId ? stored.externalAssigneeType : null;
+}
+
+/**
+ * Etiquetas vistas hasta ahora. Las conversaciones anteriores a este dato no las tienen: para
+ * esas, el punto de partida es la lista actual. Con vistas ya guardadas la lista actual no se
+ * suma, porque la pudo dejar un evento atrasado de un ciclo anterior.
+ */
+const seenSoFar = (c: { externalLabelsSeen: string[]; externalLabels: string[] }) => (c.externalLabelsSeen.length > 0 ? c.externalLabelsSeen : c.externalLabels);
 const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
@@ -231,7 +262,7 @@ export async function applyStatusChangedFromEmozion(
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true },
+    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true, externalAssigneeId: true, externalAssigneeType: true },
   });
   if (!conv) {
     return {
@@ -257,6 +288,7 @@ export async function applyStatusChangedFromEmozion(
   //    su fila de StateHistory.
   // `?? null`: los eventos guardados antes de estos campos no los traen.
   const externalAssigneeId = n.externalAssigneeId ?? null;
+  const externalAssigneeType = assigneeTypeOf(externalAssigneeId, n.externalAssigneeType, conv);
   const resolved = n.status === "RESUELTA";
   //  - etiqueta de cierre: si el evento trae las etiquetas y agrega una de cierre a las
   //    guardadas (closureLabelOf), ese es el resultado de la resolución y se guarda como
@@ -265,16 +297,24 @@ export async function applyStatusChangedFromEmozion(
   const label = resolved ? closureLabelOf(n.labels, closureLabels, conv.externalLabels) : null;
   const closureTypeId = !resolved || label ? null : eventHasClosure ? n.closureTypeId ?? null : conv.closureTypeId;
   const closureTypeName = !resolved ? null : label ?? (eventHasClosure ? n.closureTypeName ?? null : conv.closureTypeName);
+  //  - etiquetas vistas: suman las guardadas y las del evento. En una REAPERTURA empiezan de
+  //    nuevo con las etiquetas de ese momento (las del cierre anterior quedaron en su fila).
+  const reopening = from === "RESUELTA" && !resolved;
+  const labelsSeen = reopening
+    ? mergeLabelsSeen(n.labels ?? conv.externalLabels)
+    : mergeLabelsSeen(seenSoFar(conv), n.labels);
 
   await tx.conversation.update({
     where: { id: conv.id },
     data: {
       status: n.status,
       externalAssigneeId,
+      externalAssigneeType,
       closureTypeId,
       closureTypeName,
       // Las etiquetas del evento reemplazan a las guardadas, solo si el evento trae la clave.
       ...(n.labels ? { externalLabels: n.labels } : {}),
+      externalLabelsSeen: labelsSeen,
       ...(n.closedAt && !conv.closedAt ? { closedAt: n.closedAt } : {}),
     },
   });
@@ -286,8 +326,10 @@ export async function applyStatusChangedFromEmozion(
       changedByUserId: null,
       note: "Cambio de estado de Emozion (webhook)",
       externalAssigneeId,
+      externalAssigneeType,
       closureTypeId,
       closureTypeName,
+      ...(resolved ? { externalLabelsSeen: labelsSeen } : {}),
     },
   });
   return { outcome: "processed", conversationId: conv.id, warnings };
@@ -307,9 +349,14 @@ export async function applyStatusChangedFromEmozion(
  *    hora del historial es la de procesamiento, y el evento que acompaña a una resolución
  *    puede traer una hora unos segundos anterior a la fila de esa misma resolución.
  *  - Asignado: solo si el evento trae la clave meta.assignee; con null queda sin asignado.
+ *    Su tipo (bot o usuario) lo acompaña; un evento que no lo dice no borra el que ya hay
+ *    para ese mismo asignado.
  *  - Etiquetas: si el evento trae la clave `labels`, reemplazan a las guardadas. Si agrega
  *    una de cierre a las guardadas (closureLabelOf), es el resultado de la resolución y se
  *    guarda como nombre del tipo de cierre, con las mismas reglas.
+ *  - Etiquetas vistas: las del evento se suman (nunca se quitan). Si la conversación está
+ *    RESUELTA se completa también la fila de esa resolución. Las de un evento anterior a la
+ *    última reapertura no se suman: son del ciclo que ya cerró.
  *
  * Conversación inexistente → "ignored" (sin reintento: el evento no trae con qué crearla).
  */
@@ -321,14 +368,18 @@ export async function applyConversationUpdatedFromEmozion(
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, externalAssigneeId: true, closureTypeId: true, closureTypeName: true, externalLabels: true },
+    select: { id: true, status: true, externalAssigneeId: true, externalAssigneeType: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true },
   });
   if (!conv) {
     return { outcome: "ignored", conversationId: null, warnings: ["conversation_updated sobre conversación inexistente → ignorado"] };
   }
 
   const data: Prisma.ConversationUpdateInput = {};
-  if (n.assigneePresent && n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
+  if (n.assigneePresent) {
+    if (n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
+    const type = assigneeTypeOf(n.externalAssigneeId, n.externalAssigneeType, conv);
+    if (type !== conv.externalAssigneeType) data.externalAssigneeType = type;
+  }
   if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
 
   // El resultado del cierre: la etiqueta de cierre si la hay; si no, el tipo de cierre del evento.
@@ -337,17 +388,27 @@ export async function applyConversationUpdatedFromEmozion(
   const closureName = label ?? n.closureTypeName;
   let eventHasClosure = closureId != null || closureName != null;
   const isResolved = conv.status === "RESUELTA";
-  if (eventHasClosure && n.eventAt) {
+  // Etiquetas vistas: lo que el evento agrega a las ya vistas.
+  let labelsSeen: string[] | null = null;
+  if (n.labels) {
+    const merged = mergeLabelsSeen(seenSoFar(conv), n.labels);
+    if (!sameList(merged, conv.externalLabelsSeen)) labelsSeen = merged;
+  }
+  if ((eventHasClosure || labelsSeen) && n.eventAt) {
     const reopened = await tx.conversationStateHistory.findFirst({
       where: { conversationId: conv.id, fromStatus: "RESUELTA", toStatus: { not: "RESUELTA" } },
       orderBy: [{ changedAt: "desc" }, { id: "desc" }],
       select: { changedAt: true },
     });
     if (reopened && n.eventAt.getTime() < reopened.changedAt.getTime()) {
+      if (eventHasClosure) warnings.push("conversation_updated atrasado: su tipo de cierre es anterior a la última reapertura → no se guarda");
       eventHasClosure = false;
-      warnings.push("conversation_updated atrasado: su tipo de cierre es anterior a la última reapertura → no se guarda");
     }
+    // Para las etiquetas vistas hay un margen: la hora de la reapertura es la de NUESTRO
+    // procesamiento, y el bot puede etiquetar en el mismo segundo en que se reabre.
+    if (reopened && n.eventAt.getTime() < reopened.changedAt.getTime() - LABELS_STALE_MARGIN_MS) labelsSeen = null;
   }
+  if (labelsSeen) data.externalLabelsSeen = labelsSeen;
   if (eventHasClosure) {
     if (isResolved || n.resolved) {
       if (closureId !== conv.closureTypeId || closureName !== conv.closureTypeName) {
@@ -360,18 +421,21 @@ export async function applyConversationUpdatedFromEmozion(
   }
   if (Object.keys(data).length > 0) await tx.conversation.update({ where: { id: conv.id }, data });
 
-  if (eventHasClosure && isResolved) {
+  if ((eventHasClosure || labelsSeen) && isResolved) {
     // Completa la fila de ESTA resolución; no agrega una fila nueva.
     const last = await tx.conversationStateHistory.findFirst({
       where: { conversationId: conv.id, toStatus: "RESUELTA" },
       orderBy: [{ changedAt: "desc" }, { id: "desc" }],
       select: { id: true, closureTypeId: true, closureTypeName: true },
     });
-    if (last && (last.closureTypeId !== closureId || last.closureTypeName !== closureName)) {
-      await tx.conversationStateHistory.update({
-        where: { id: last.id },
-        data: { closureTypeId: closureId, closureTypeName: closureName },
-      });
+    const rowData: Prisma.ConversationStateHistoryUpdateInput = {};
+    if (last && eventHasClosure && (last.closureTypeId !== closureId || last.closureTypeName !== closureName)) {
+      rowData.closureTypeId = closureId;
+      rowData.closureTypeName = closureName;
+    }
+    if (last && labelsSeen) rowData.externalLabelsSeen = labelsSeen;
+    if (last && Object.keys(rowData).length > 0) {
+      await tx.conversationStateHistory.update({ where: { id: last.id }, data: rowData });
     }
   }
   return { outcome: "processed", conversationId: conv.id, warnings };

@@ -18,7 +18,7 @@ import {
   LABELS_MAX,
   SUPPORTED_EVENTS,
   normalizeClosure,
-  normalizeExternalAssigneeId,
+  normalizeExternalAssigneeId, normalizeExternalAssigneeType,
   CLOSURE_TYPE_NAME_MAX,
   mapAuthor,
   readEnvelope,
@@ -276,6 +276,36 @@ test("asignado. meta.assignee.id número o string corto → string; ausente o ra
   assert.equal(normalizeExternalAssigneeId({ meta: { assignee: { id: "con espacios" } } } as never), null);
 });
 
+test("asignado. tipo: assignee_type o assignee.type; sin asignado o con un valor desconocido → null", () => {
+  const t = (meta: unknown) => normalizeExternalAssigneeType({ meta } as never);
+  assert.equal(t({ assignee: { id: 9 }, assignee_type: "AgentBot" }), "AGENT_BOT");
+  assert.equal(t({ assignee: { id: 9 }, assignee_type: "User" }), "USER");
+  assert.equal(t({ assignee: { id: 9, type: "agent_bot" } }), "AGENT_BOT");
+  assert.equal(t({ assignee: { id: 9, type: "user" } }), "USER");
+  // assignee_type manda sobre assignee.type.
+  assert.equal(t({ assignee: { id: 9, type: "user" }, assignee_type: "AgentBot" }), "AGENT_BOT");
+  assert.equal(t({ assignee: { id: 9 } }), null, "el evento no lo dice: no se adivina");
+  assert.equal(t({ assignee: { id: 9 }, assignee_type: "Otro" }), null);
+  assert.equal(t({ assignee: null, assignee_type: "User" }), null, "sin asignado no hay tipo");
+  assert.equal(normalizeExternalAssigneeType(null), null);
+  // Los tres eventos de conversación lo exponen.
+  const conv = { id: 611, status: "open", meta: { sender: { phone_number: "+5491100000009" }, assignee: { id: 9 }, assignee_type: "AgentBot" } };
+  assert.equal(normalizeConversation(conv).data?.externalAssigneeType, "AGENT_BOT");
+  assert.equal(normalizeStatusEvent(conv).data?.externalAssigneeType, "AGENT_BOT");
+  assert.equal(normalizeUpdateEvent(conv).data?.externalAssigneeType, "AGENT_BOT");
+});
+
+test("asignado. abierta con un BOT asignado es SIN_ASIGNAR: nadie la tomó; con una persona o sin tipo, ASIGNADA", () => {
+  const sender = { phone_number: "+5491100000011" };
+  const st = (meta: object) => [normalizeConversation({ id: 621, status: "open", meta: { sender, ...meta } } as never).data?.status, normalizeStatusEvent({ id: 621, status: "open", meta } as never).data?.status];
+  assert.deepEqual(st({ assignee: { id: 9 }, assignee_type: "AgentBot" }), ["SIN_ASIGNAR", "SIN_ASIGNAR"]);
+  assert.deepEqual(st({ assignee: { id: 9 }, assignee_type: "User" }), ["ASIGNADA", "ASIGNADA"]);
+  assert.deepEqual(st({ assignee: { id: 9 } }), ["ASIGNADA", "ASIGNADA"]);
+  // El id y el tipo del bot se siguen guardando.
+  const bot = normalizeStatusEvent({ id: 621, status: "open", meta: { assignee: { id: 9 }, assignee_type: "AgentBot" } } as never).data;
+  assert.deepEqual([bot?.externalAssigneeId, bot?.externalAssigneeType], ["9", "AGENT_BOT"]);
+});
+
 test("asignado. normalizeConversation lo expone y no cambia el mapeo de estado", () => {
   const sender = { phone_number: "+5491100000002" };
   const con = normalizeConversation({ id: 601, status: "open", meta: { sender, assignee: { id: 5 } } });
@@ -297,7 +327,7 @@ test("updated. está en la lista de eventos y lee SOLO tipo de cierre, asignado 
   } as never);
   assert.equal(r.outcome, "processed");
   assert.deepEqual(r.data, {
-    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null, labels: ["etiqueta"],
+    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", externalAssigneeType: null, closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null, labels: ["etiqueta"],
   });
   // Hora del evento: updated_at (ISO o epoch) o, si no viene, resolved_at.
   assert.equal(normalizeUpdateEvent({ id: 707, updated_at: ISO2, resolved_at: ISO }).data?.eventAt?.toISOString(), new Date(ISO2).toISOString());

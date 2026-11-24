@@ -19,6 +19,7 @@ import { arDayISO } from "./business-time";
 import { configForDay, loadConfigVersions } from "./config";
 import type { ConfigAccount } from "./config-schema";
 import { ownerOf } from "./now";
+import { assigneeAccount } from "./account-label";
 import { publicHours } from "./schedule";
 import type { AttentionCase, AttentionCaseKind, AttentionCasesPayload } from "./attention-types";
 
@@ -80,9 +81,9 @@ export async function getAttentionCases(from: string, to: string, kind: Attentio
   // Estado y asignado actuales, solo de las filas que se muestran.
   const states = await prisma.conversation.findMany({
     where: { id: { in: shown.map((c) => c.conversationId) } },
-    select: { id: true, status: true, externalAssigneeId: true },
+    select: { id: true, status: true, externalAssigneeId: true, externalAssigneeType: true },
   });
-  const byId = new Map(states.map((s) => [s.id, { status: s.status as string, externalAssigneeId: s.externalAssigneeId }]));
+  const byId = new Map(states.map((s) => [s.id, { status: s.status as string, externalAssigneeId: assigneeAccount(s.externalAssigneeId, s.externalAssigneeType) }]));
   const accounts = configForDay(versions, arDayISO(now))?.data.accounts ?? [];
   const facts = new Map(selected.map((f) => [f.conversationId, f]));
 
