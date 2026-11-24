@@ -251,11 +251,18 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const branchRegex = branchNamesRegex(branches.map((b) => b.name));
   const tkl = branchRegex ? `${BOUGHT_AT_TKL}|\\m(${branchRegex})\\M` : BOUGHT_AT_TKL;
 
-  const [rows, detected, derivations] = await Promise.all([
-    prisma.$queryRaw<RawKindRow[]>(kindRowsQuery(from, to, tkl)),
+  const [parts, detected, derivations] = await Promise.all([
+    Promise.all(KIND_ROWS_PARTS.map((part) => prisma.$queryRaw<Array<Partial<RawKindRow> & { conversationId: string }>>(kindRowsQuery(from, to, tkl, part)))),
     loadDetectedRows(fromDay, toDayInclusive),
     getDerivations(fromDay, toDayInclusive),
   ]);
+  // Las tres partes traen las mismas conversaciones: se unen por id sobre la primera.
+  const rest = parts.slice(1).map((rs) => new Map(rs.map((r) => [r.conversationId, r])));
+  const rows = parts[0].flatMap((r) => {
+    const others = rest.map((m) => m.get(r.conversationId));
+    // Una conversación creada entre una consulta y otra puede faltar en alguna parte: entra en la próxima carga.
+    return others.every(Boolean) ? [Object.assign({}, r, ...others) as RawKindRow] : [];
+  });
   const derivationOf = new Map(derivations.map((d) => [d.conversationId, d.timing]));
 
   const withClaim = new Set(detected.rows.filter((r) => claimsOf(r).length > 0).map((r) => r.conversationId));
@@ -270,8 +277,20 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   }));
 }
 
-/** La consulta de loadKindRows, aparte para poder medirla. `tkl`: expresión que reconoce a TKL y sus sucursales. */
-export function kindRowsQuery(from: Date, to: Date, tkl: string): Prisma.Sql {
+/**
+ * Las marcas se piden en tres consultas, no en una. Postgres guarda compiladas solo las
+ * últimas 32 expresiones regulares de cada conexión: con más de 32 distintas en una misma
+ * consulta las vuelve a compilar en cada fila, y la consulta pasa de menos de un segundo a
+ * más de 30 (medido el 24/11 con 7 días). Cada parte tiene que quedar por debajo de ese tope
+ * (lo comprueba kinds.smoke.ts).
+ */
+export const KIND_ROWS_PARTS = ["base", "text", "claims"] as const;
+export type KindRowsPart = (typeof KIND_ROWS_PARTS)[number];
+/** Tope de expresiones regulares distintas por consulta (el de Postgres es 32; se deja margen). */
+export const MAX_REGEX_PER_QUERY = 28;
+
+/** Una parte de la consulta de loadKindRows, aparte para poder medirla. `tkl`: expresión que reconoce a TKL y sus sucursales. */
+export function kindRowsQuery(from: Date, to: Date, tkl: string, part: KindRowsPart): Prisma.Sql {
   const buttons = Prisma.join([...BOT_BUTTONS]);
   const cust = Prisma.sql`m.author = 'CUSTOMER'`;
   const op = Prisma.sql`m.author = 'OPERATOR' AND NOT m."isPrivate"`;
@@ -294,50 +313,59 @@ export function kindRowsQuery(from: Date, to: Date, tkl: string): Prisma.Sql {
     FROM "ConversationMessage" m
     WHERE m."conversationId" = c.id AND m.author = 'CUSTOMER' AND m.body IS NOT NULL AND m.body NOT IN (${buttons})
     ORDER BY m."sentAt", m.id LIMIT 1), false)`;
+  const columns: Record<KindRowsPart, Prisma.Sql[]> = {
+    base: [
+      Prisma.sql`c."createdAt" AS "createdAt"`,
+      Prisma.sql`(c.status = 'RESUELTA') AS "resolved"`,
+      Prisma.sql`c."closureTypeName" AS "closureTypeName"`,
+      Prisma.sql`c."externalLabels" AS "labels"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_ORDER}`)} AS "prescription"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOME}`)} AS "homeDelivery"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_PICKUP}`)} AS "pickup"`,
+      Prisma.sql`${flag(Prisma.sql`m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}`)} AS "botOrderComplete"`,
+      Prisma.sql`(${flag(strong)} OR (NOT ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_CANCELLED}`)} AND (${flag(evidence)} OR (${flag(closing)} AND NOT ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_WAITING}`)})))) AS "confirmed"`,
+      Prisma.sql`${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_POSTPONED}`)} AS "postponed"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_PROBABLE}`)} AS "saleProbable"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${NOT_A_LOSS}`)} AS "notALoss"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleLost"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_ELSEWHERE} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleElsewhere"`,
+      Prisma.sql`(${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body ~* ${tkl}`)} OR (${flag(Prisma.sql`${cust} AND m.body ~* ${CUSTOMER_GOES_TO_BRANCH}`)} AND ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_OFFERED_STOCK}`)})) AS "boughtAtTkl"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${CUSTOMER_DECLINED}`)} AS "declined"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${FOLLOW_UP_CUSTOMER}`)} AS "followUp"`,
+      Prisma.sql`${flag(op)} AS "hasHumanResponse"`,
+      Prisma.sql`${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_IN_PERSON_ONLY}`)} AS "operatorInPersonOnly"`,
+      Prisma.sql`${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_NO_STOCK}`)} AS "operatorNoStock"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND (m.body IS NULL OR m."mediaType" IS NOT NULL)`)} AS "customerMedia"`,
+    ],
+    text: [
+      Prisma.sql`(count(*) FILTER (WHERE ${free}))::int AS "freeMessages"`,
+      Prisma.sql`(count(*) FILTER (WHERE ${free} AND ${empty}))::int AS "emptyMessages"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body LIKE '%?%'`)} AS "hasQuestionMark"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_SERVICES}`)} AS "services"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_PRICE}`)} AS "price"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_STOCK}`)} AS "stock"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_HOURS}`)} AS "hours"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_COVERAGE}`)} AS "coverage"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_PAYMENT}`)} AS "paymentMethod"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_ONLINE_STORE}`)} AS "onlineStore"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_LINK_REGEX}`)} AS "prescriptionLink"`,
+      Prisma.sql`(min(substring(lower(m.body) from ${PRESCRIPTION_PLATFORM_CAPTURE})) FILTER (WHERE ${cust})) AS "prescriptionPlatform"`,
+      Prisma.sql`${flag(Prisma.sql`(${cust} AND m.body = ${BUTTON_ORDER}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})`)} AS "orderButton"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${ORDER_FREE_TEXT}`)} AS "orderText"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${FOLLOW_UP_ARRIVAL}`)} AS "followUpArrival"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_STOCK_PAST}`)} AS "stockPast"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ADVISOR}`)} AS "advisorButton"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOURS}`)} AS "infoHours"`,
+      Prisma.sql`${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ONLINE_STORE}`)} AS "infoOnline"`,
+      Prisma.sql`(count(*) FILTER (WHERE ${cust}))::int AS "customerMessages"`,
+    ],
+    claims: [
+      Prisma.sql`${firstClaim} AS "firstClaim"`,
+      Prisma.sql`${flag(Prisma.sql`${free} AND ${messageMatches(STRICT_CLAIM_PATTERNS)}`)} AS "strictClaim"`,
+    ],
+  };
   return Prisma.sql`
-      SELECT c.id AS "conversationId", c."createdAt" AS "createdAt",
-        (c.status = 'RESUELTA') AS "resolved", c."closureTypeName" AS "closureTypeName", c."externalLabels" AS "labels",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_ORDER}`)} AS "prescription",
-        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOME}`)} AS "homeDelivery",
-        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_PICKUP}`)} AS "pickup",
-        ${flag(Prisma.sql`m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}`)} AS "botOrderComplete",
-        (${flag(strong)} OR (NOT ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_CANCELLED}`)}
-          AND (${flag(evidence)} OR (${flag(closing)} AND NOT ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_WAITING}`)})))) AS "confirmed",
-        ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_POSTPONED}`)} AS "postponed",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_PROBABLE}`)} AS "saleProbable",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${NOT_A_LOSS}`)} AS "notALoss",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleLost",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_ELSEWHERE} AND m.body !~* ${SALE_LOST_PROBABLE}`)} AS "saleElsewhere",
-        (${flag(Prisma.sql`${cust} AND m.body ~* ${SALE_LOST_CUSTOMER} AND m.body ~* ${tkl}`)}
-          OR (${flag(Prisma.sql`${cust} AND m.body ~* ${CUSTOMER_GOES_TO_BRANCH}`)} AND ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_OFFERED_STOCK}`)})) AS "boughtAtTkl",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${CUSTOMER_DECLINED}`)} AS "declined",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${FOLLOW_UP_CUSTOMER}`)} AS "followUp",
-        ${flag(op)} AS "hasHumanResponse",
-        ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_IN_PERSON_ONLY}`)} AS "operatorInPersonOnly",
-        ${flag(Prisma.sql`${op} AND m.body ~* ${OPERATOR_NO_STOCK}`)} AS "operatorNoStock",
-        ${flag(Prisma.sql`${cust} AND (m.body IS NULL OR m."mediaType" IS NOT NULL)`)} AS "customerMedia",
-        (count(*) FILTER (WHERE ${free}))::int AS "freeMessages",
-        (count(*) FILTER (WHERE ${free} AND ${empty}))::int AS "emptyMessages",
-        ${flag(Prisma.sql`${free} AND m.body LIKE '%?%'`)} AS "hasQuestionMark",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_SERVICES}`)} AS "services",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_PRICE}`)} AS "price",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_STOCK}`)} AS "stock",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_HOURS}`)} AS "hours",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_COVERAGE}`)} AS "coverage",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_PAYMENT}`)} AS "paymentMethod",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_ONLINE_STORE}`)} AS "onlineStore",
-        ${firstClaim} AS "firstClaim",
-        ${flag(Prisma.sql`${free} AND ${messageMatches(STRICT_CLAIM_PATTERNS)}`)} AS "strictClaim",
-        ${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_LINK_REGEX}`)} AS "prescriptionLink",
-        (min(substring(lower(m.body) from ${PRESCRIPTION_PLATFORM_CAPTURE})) FILTER (WHERE ${cust})) AS "prescriptionPlatform",
-        ${flag(Prisma.sql`(${cust} AND m.body = ${BUTTON_ORDER}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})`)} AS "orderButton",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${ORDER_FREE_TEXT}`)} AS "orderText",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${FOLLOW_UP_ARRIVAL}`)} AS "followUpArrival",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_STOCK_PAST}`)} AS "stockPast",
-        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ADVISOR}`)} AS "advisorButton",
-        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOURS}`)} AS "infoHours",
-        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ONLINE_STORE}`)} AS "infoOnline",
-        (count(*) FILTER (WHERE ${cust}))::int AS "customerMessages"
+      SELECT c.id AS "conversationId", ${Prisma.join(columns[part], ", ")}
       FROM "Conversation" c
       LEFT JOIN "ConversationMessage" m ON m."conversationId" = c.id
       WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp AND c."createdAt" < ${utcTimestampParam(to)}::timestamp
