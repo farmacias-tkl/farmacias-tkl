@@ -144,7 +144,7 @@ export default function NowPanel() {
         {(actionsAtZero.length > 0 || actionsUnknown.length > 0) && (
           <p className="mt-2 text-xs text-gray-700">
             {actionsAtZero.length > 0 && <>En cero: {actionsAtZero.map((a) => a.short).join(" · ")}. </>}
-            {actionsUnknown.length > 0 && <>Sin dato: {actionsUnknown.map((a) => a.short).join(" · ")}. </>}
+            {actionsUnknown.length > 0 && <>{d.partial ? "Cargando" : "Sin dato"}: {actionsUnknown.map((a) => a.short).join(" · ")}. </>}
             {actionsAtZero.some((a) => a.key === "urgent") && <>Las posibles urgencias salen de palabras: cero detectadas no significa que no haya urgencias.</>}
           </p>
         )}
@@ -159,7 +159,7 @@ export default function NowPanel() {
             <span className="block">No suman al total de pendientes. Tocá para revisarlas.</span>
           </span>
           <span className={`text-xl font-semibold tabular-nums ${d.closedUnanswered?.total ? "text-orange-900" : "text-gray-900"}`}>
-            {d.closedUnanswered ? nf.format(d.closedUnanswered.total) : "—"}
+            {d.closedUnanswered ? nf.format(d.closedUnanswered.total) : d.partial ? "…" : "—"}
           </span>
         </a>
         <p className="mt-2 text-xs text-gray-700">
@@ -251,11 +251,17 @@ export default function NowPanel() {
         </div>
       </div>
 
-      <ObservedCard d={d} nowMs={nowMs} />
+      {d.partial ? (
+        <SkeletonCard title="Actividad observada, últimos 60 minutos y avances" />
+      ) : (
+        <>
+          <ObservedCard d={d} nowMs={nowMs} />
 
-      <TrendCard d={d} />
+          <TrendCard d={d} />
 
-      <ProgressCard d={d} />
+          <ProgressCard d={d} />
+        </>
+      )}
 
       <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
 
@@ -314,8 +320,23 @@ export default function NowPanel() {
       )}
 
       <StaleCard d={d} nowMs={nowMs} />
-      <ClosedCard d={d} nowMs={nowMs} />
+      {d.partial ? <SkeletonCard title="Cerradas sin responder" /> : <ClosedCard d={d} nowMs={nowMs} />}
     </section>
+  );
+}
+
+/** Lugar de una tarjeta que todavía se está calculando (carga progresiva). */
+function SkeletonCard({ title }: { title: string }) {
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3" aria-busy="true">
+      <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
+      <p className="mt-1 text-sm text-gray-600">Cargando…</p>
+      <div className="mt-2 space-y-2" aria-hidden="true">
+        <div className="h-3 w-2/3 animate-pulse rounded bg-gray-200" />
+        <div className="h-3 w-1/2 animate-pulse rounded bg-gray-200" />
+        <div className="h-3 w-3/5 animate-pulse rounded bg-gray-200" />
+      </div>
+    </div>
   );
 }
 
@@ -368,7 +389,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
             : d.schedule.operatorShiftActive ? "Fuera del horario público · dentro del horario de operadores"
             : "Fuera del horario público y del horario de operadores"}
           {paused ? " · reloj de la meta pausado" : ""}
-          {" · "}calculado a las {timeFmt.format(new Date(d.generatedAt))}{refreshing ? " · actualizando…" : ""}
+          {" · "}calculado a las {timeFmt.format(new Date(d.generatedAt))}{d.partial ? " · cargando el resto…" : refreshing ? " · actualizando…" : ""}
           {" · "}último evento: {d.quality.freshness.lastWebhookAt ? whenLabel(d.quality.freshness.lastWebhookAt, nowMs) : "sin dato"}
         </p>
       </div>
@@ -378,7 +399,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
         <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
           <CoverFigure value={nf.format(w.ordersUntaken)} label="pedidos sin tomar" tag="Detectado" />
           <CoverFigure value={nf.format(w.queriesUnanswered)} label="consultas sin responder" tag="Detectado" />
-          <CoverFigure value={w.claims === null ? "—" : nf.format(w.claims)} label="posibles reclamos abiertos" tag="Detectado por palabras" />
+          <CoverFigure value={w.claims === null ? (d.partial ? "…" : "—") : nf.format(w.claims)} label="posibles reclamos abiertos" tag="Detectado por palabras" />
           <CoverFigure value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} label="mayor espera entre los recientes" />
         </dl>
         <p className="mt-1.5 text-sm text-gray-800">
@@ -387,7 +408,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
         </p>
         <p className="mt-0.5 text-sm text-gray-800">
           Primera respuesta hoy:{" "}
-          {!fr || !d.schedule ? "sin datos"
+          {d.partial ? "cargando…" : !fr || !d.schedule ? "sin datos"
             : fr.hasPublicHours === false ? <>la mitad en <span className="font-semibold">{mins(fr.medianClockMinutes)}</span> de espera real · hoy no hay horario público, la meta no aplica</>
             : <>la mitad en <span className="font-semibold">{mins(fr.medianBusinessMinutes)}</span> · meta {d.schedule.goalMinutes} min</>}
           {fr && frSmall ? <span className="text-gray-700"> · Muestra pequeña: {nf.format(fr.answered)} {fr.answered === 1 ? "respondida" : "respondidas"} de {nf.format(fr.entries)}, no permite concluir cómo viene el día</span> : null}
@@ -397,7 +418,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
       <div className="border-t border-gray-100 px-3 py-2">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Hoy</h2>
         {!tc ? (
-          <p className="mt-1 text-sm text-gray-600">Cierres de hoy: no disponible.</p>
+          <p className="mt-1 text-sm text-gray-600" aria-busy={d.partial ? "true" : undefined}>{d.partial ? "Cargando los cierres de hoy…" : "Cierres de hoy: no disponible."}</p>
         ) : (
           <>
             <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-3">

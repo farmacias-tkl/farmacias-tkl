@@ -15,7 +15,8 @@ const when = (iso: string | null) => (iso ? dateTimeFmt.format(new Date(iso)) : 
 export default function QualityPanel() {
   const { state, reload } = useNowData();
 
-  if (state.status === "loading") return <p className="mt-6 text-sm text-gray-600">Cargando…</p>;
+  // Con el resumen solo (carga progresiva) todavía faltan los controles: se espera el completo.
+  if (state.status === "loading" || (state.status === "ready" && state.data.partial)) return <p className="mt-6 text-sm text-gray-600">Cargando…</p>;
   if (state.status === "error") {
     return (
       <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">

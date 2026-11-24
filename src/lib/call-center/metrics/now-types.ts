@@ -267,6 +267,12 @@ export interface NowGroup extends Omit<QueueGroupCounts, "oldestWaitStart"> {
 }
 
 export interface NowPayload {
+  /**
+   * true en el RESUMEN (carga progresiva): solo trae lo de la primera tanda. Avances, actividad
+   * observada, evolución, cerradas sin responder, reclamos, cierres de hoy y controles de calidad
+   * vienen en null porque todavía se están calculando, no porque falten.
+   */
+  partial?: boolean;
   generatedAt: string;
   /** Horas de espera hasta las que una abierta cuenta como cliente esperando. */
   windowHours: number;
