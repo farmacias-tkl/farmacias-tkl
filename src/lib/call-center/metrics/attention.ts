@@ -18,6 +18,7 @@
  * solo lectura, partiendo de la conversación (índice por conversación de los mensajes).
  */
 import { Prisma } from "@prisma/client";
+import { SYNC_NOTE_LIKE } from "../sync-note";
 import { prisma } from "@/lib/prisma";
 import {
   arDayISO, arHour, arDayStartUTC, businessMinutesBetween, classifyAgainstGoal, isWithinHours, utcTimestampParam,
@@ -475,6 +476,7 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       EXISTS (
         SELECT 1 FROM "Conversation" p
         JOIN "ConversationStateHistory" h ON h."conversationId" = p.id AND h."toStatus" = 'RESUELTA'
+            AND (h.note IS NULL OR h.note NOT LIKE ${SYNC_NOTE_LIKE})
         WHERE p."customerId" = s."customerId" AND p.id <> s.id
           AND h."changedAt" BETWEEN s."createdAt" - ${prevHours}::interval AND s."createdAt"
       ) AS "prevResolved"

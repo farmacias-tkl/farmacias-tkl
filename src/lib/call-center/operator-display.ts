@@ -11,6 +11,7 @@ import {
 } from "./metrics/account-label";
 import { CLOSURE_OUTCOME_TEXT, type ClosureMap } from "./metrics/closure-outcome";
 import { formatMinutes } from "./metrics/format";
+import { isSyncNote } from "./sync-note";
 
 /** Filtro por operador de la bandeja: una cuenta, "Sin tomar" o "Sin dato de asignado". */
 export type OperatorFilter = { kind: "ACCOUNT"; account: string } | { kind: "SYSTEM" } | { kind: "NONE" };
@@ -97,6 +98,8 @@ export interface HistoryRow {
   toStatus: string;
   externalAssigneeId: string | null;
   closureTypeName: string | null;
+  /** Nota de la fila. Solo se usa para reconocer una corrección de estado (isSyncNote). */
+  note?: string | null;
 }
 
 export interface ShortHistoryEvent {
@@ -117,7 +120,10 @@ export function shortHistory(rows: readonly HistoryRow[], accounts: readonly Lab
   for (const r of rows) {
     const who = r.externalAssigneeId ? ownerDisplay(r.externalAssigneeId, accounts) : null;
     const isSystem = who === OWNER_TEXT.system;
-    if (r.toStatus === "RESUELTA" && r.fromStatus !== "RESUELTA") {
+    if (r.toStatus === "RESUELTA" && isSyncNote(r.note)) {
+      // No es un cierre de un operador: se corrigió el estado al comparar con Emozion.
+      out.push({ at: r.changedAt, kind: "RESOLUCION", text: "Figuraba abierta y en Emozion ya estaba resuelta: estado corregido (no es un cierre de un operador; la fecha es la del último mensaje)" });
+    } else if (r.toStatus === "RESUELTA" && r.fromStatus !== "RESUELTA") {
       const outcome = r.closureTypeName ? closureMap.get(r.closureTypeName) : undefined;
       const closure = outcome ? CLOSURE_OUTCOME_TEXT[outcome] : r.closureTypeName;
       out.push({

@@ -9,6 +9,7 @@ import {
 } from "./operator-display";
 import { inboxHref } from "./inbox-pagination";
 import { closureMapOf } from "./metrics/closure-outcome";
+import { isSyncNote } from "./sync-note";
 import { accountRef, assigneeAccount, ownerKeyOf } from "./metrics/account-label";
 
 let passed = 0;
@@ -62,6 +63,16 @@ test("un bot asignado no es una cuenta de persona: cuenta como 'Sin tomar' aunqu
   assert.equal(operatorInfo(assigneeAccount("9001", "USER"), null, accounts).attendedBy, "Alias inventado");
   // El último operador que respondió es la cuenta 9001 (una persona): se informa, porque no es el bot asignado.
   assert.equal(operatorInfo("bot:9001", "9001", accounts).lastResponder, "Alias inventado");
+});
+
+test("historial corto: una corrección de estado al comparar con Emozion no se muestra como cierre de un operador", () => {
+  const rows: HistoryRow[] = [
+    { changedAt: new Date("2026-03-01T10:00:00.000Z"), fromStatus: "SIN_ASIGNAR", toStatus: "RESUELTA", externalAssigneeId: null, closureTypeName: null, note: "Sincronizada con Emozion el 24/11/2026 (nota inventada)" },
+  ];
+  const h = shortHistory(rows, accounts, closureMapOf({ closureLabels: [] }));
+  assert.equal(h.length, 1);
+  assert.match(h[0].text, /estado corregido \(no es un cierre de un operador/);
+  assert.ok(isSyncNote("Sincronizada con Emozion el 24/11/2026") && !isSyncNote("Cambio de estado de Emozion (webhook)") && !isSyncNote(null));
 });
 
 test("opciones del selector: cuentas que no son de sistema por número, y las dos filas especiales", () => {

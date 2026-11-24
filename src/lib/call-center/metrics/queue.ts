@@ -20,6 +20,7 @@
  * Ninguna fila lleva teléfono, nombre ni texto del cliente: solo ids internos, horas y marcas.
  */
 import { Prisma } from "@prisma/client";
+import { SYNC_NOTE_LIKE } from "../sync-note";
 import { prisma } from "@/lib/prisma";
 import { utcTimestampParam } from "./business-time";
 import type { AgeBucket, QueueGroupCounts } from "./queue-types";
@@ -210,6 +211,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
         AND EXISTS (
           SELECT 1 FROM "Conversation" p
           JOIN "ConversationStateHistory" h ON h."conversationId" = p.id AND h."toStatus" = 'RESUELTA'
+            AND (h.note IS NULL OR h.note NOT LIKE ${SYNC_NOTE_LIKE})
           WHERE p."customerId" = s."customerId" AND p.id <> s.id
             AND h."changedAt" BETWEEN s."createdAt" - ${prevHours}::interval AND s."createdAt"
         )) AS "prevResolved"
