@@ -6,42 +6,12 @@
  * que sale la primera respuesta de cada cuenta. La respuesta lleva solo totales por cuenta
  * y del equipo: ninguna fila por conversación, ni teléfono, nombre o texto del cliente.
  */
-import { ACTIVITY_LOOKBACK_DAYS, buildAccountsReport, loadFollowupBlocks, loadOperatorMessages } from "./accounts";
+import { ACTIVITY_LOOKBACK_DAYS, buildAccountsReport, loadFollowupBlocks, loadOperatorMessages, loadPeriodClosures } from "./accounts";
 import { loadEntryRows, toEntryFact } from "./attention";
 import { arDayISO } from "./business-time";
 import { configForDay, loadConfigVersions } from "./config";
 import { publicHours } from "./schedule";
 import { ACCOUNTS_CACHE_SECONDS, type AccountsPayload } from "./accounts-types";
-import { prisma } from "@/lib/prisma";
-import { closureMapOf, closureOutcomeOf } from "./closure-outcome";
-import type { ClosureAttribution } from "./accounts";
-
-/**
- * Resultado de cierre de cada conversación resuelta y la cuenta que tenía asignada al
- * resolverse (la de su última fila RESUELTA del historial). Solo lectura: estado, resultado
- * guardado, etiquetas y asignado.
- */
-async function loadOutcomes(conversationIds: readonly string[], map: ReturnType<typeof closureMapOf>): Promise<Map<string, ClosureAttribution>> {
-  const out = new Map<string, ClosureAttribution>();
-  for (let i = 0; i < conversationIds.length; i += 5000) {
-    const rows = await prisma.conversation.findMany({
-      where: { id: { in: conversationIds.slice(i, i + 5000) }, status: "RESUELTA" },
-      select: {
-        id: true, closureTypeName: true, externalLabels: true,
-        stateHistory: {
-          where: { toStatus: "RESUELTA" }, orderBy: [{ changedAt: "desc" }, { id: "desc" }], take: 1,
-          select: { externalAssigneeId: true },
-        },
-      },
-    });
-    for (const r of rows) {
-      const o = closureOutcomeOf({ resolved: true, closureTypeName: r.closureTypeName, labels: r.externalLabels }, map);
-      if (o) out.set(r.id, { outcome: o.outcome, account: r.stateHistory[0]?.externalAssigneeId ?? null });
-    }
-  }
-  return out;
-}
-
 /** Tope de períodos guardados: al llenarse se descartan los vencidos y, si no alcanza, todos. */
 const CACHE_MAX_ENTRIES = 20;
 const cache = new Map<string, { at: number; payload: AccountsPayload }>();
@@ -53,19 +23,18 @@ export async function getAccountsPayload(from: string, to: string, now: Date = n
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < ttl) return hit.payload;
 
-  const [{ versions }, rows, messages, followups] = await Promise.all([
+  const [{ versions }, rows, messages, followups, closures] = await Promise.all([
     loadConfigVersions(), loadEntryRows(from, to), loadOperatorMessages(from, to), loadFollowupBlocks(from, to),
+    // Si falla, el resto del informe se muestra igual: null, no cero.
+    loadPeriodClosures(from, to).catch(() => null),
   ]);
   const pub = publicHours(versions);
   const facts = rows.map((r) => toEntryFact(r, now, versions, pub));
-  // Resultado de cierre confirmado por el operador, si la configuración vigente define etiquetas de cierre.
-  const closureMap = closureMapOf(configForDay(versions, arDayISO(now))?.data);
-  const outcomes = closureMap.size > 0
-    ? await loadOutcomes([...new Set(messages.map((m) => m.conversationId))], closureMap).catch(() => null)
-    : null;
-  const report = buildAccountsReport({ messages, followups, facts, outcomes }, { now, versions });
+  const report = buildAccountsReport({ messages, followups, facts, closures }, { now, versions });
   const payload = JSON.parse(JSON.stringify({
     ...report,
+    // Las cuentas ya llevan sus cierres: acá quedan los del equipo, sin el mapa por cuenta.
+    closures: report.closures ? { total: report.closures.total, coverage: report.closures.coverage, withoutAccount: report.closures.withoutAccount, byBot: report.closures.byBot } : null,
     period: { from, to },
     hasConfig: configForDay(versions, arDayISO(now)) !== null,
     lookbackDays: ACTIVITY_LOOKBACK_DAYS,

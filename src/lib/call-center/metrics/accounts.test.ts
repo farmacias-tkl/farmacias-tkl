@@ -108,6 +108,10 @@ test("actividad observada: dentro del horario público, solo en el de operadores
   ] });
   const a = of(r, "9001").activity;
   assert.deepEqual([a.inPublicHours, a.inOperatorHoursOnly, a.outsideAllHours], [3, 2, 1]);
+  // Una nota interna no entra en el desglose por horario: el desglose suma los mensajes a clientes.
+  const conNota = build({ messages: [msg("9001", "c1", "2026-03-02T10:00"), { ...msg("9001", "c1", "2026-03-02T10:05"), isPrivate: true }] });
+  const n = of(conNota, "9001");
+  assert.deepEqual([n.publicMessages, n.privateNotes, n.activity.inPublicHours! + n.activity.inOperatorHoursOnly! + n.activity.outsideAllHours!], [1, 1, 1]);
   assert.equal(a.daysWithActivity, 2);
   assert.equal(a.firstMessageAt?.toISOString(), at("2026-03-02T09:30").toISOString());
   assert.equal(a.lastMessageAt?.toISOString(), at("2026-03-03T11:00").toISOString());
