@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { AttentionCase, AttentionCaseKind, AttentionCasesPayload } from "@/lib/call-center/metrics/attention-types";
@@ -32,7 +33,7 @@ export default function AttentionCases({ kind, period, onClose }: { kind: Attent
   const load = useCallback(async () => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/attention/cases?kind=${kind}&from=${period.from}&to=${period.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/attention/cases?kind=${kind}&from=${period.from}&to=${period.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar los casos." });

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import TabBoundary from "./TabBoundary";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { canViewCallCenterMetrics, canViewCallCenterSales, canConfigureCallCenterMetrics } from "@/lib/permissions";
@@ -66,13 +67,13 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
         })}
       </nav>
 
-      {block === "ahora" && <NowPanel />}
-      {block === "atencion" && <AttentionPanel today={arDayISO(new Date())} />}
-      {block === "operadores" && <OperatorsPanel today={arDayISO(new Date())} />}
-      {block === "motivos" && <MotivesPanel today={arDayISO(new Date())} />}
-      {block === "reclamos" && <DetectedPanel today={arDayISO(new Date())} />}
-      {block === "ventas" && <SalesPanel today={arDayISO(new Date())} />}
-      {block === "datos" && <QualityPanel />}
+      {block === "ahora" && <TabBoundary><NowPanel /></TabBoundary>}
+      {block === "atencion" && <TabBoundary><AttentionPanel today={arDayISO(new Date())} /></TabBoundary>}
+      {block === "operadores" && <TabBoundary><OperatorsPanel today={arDayISO(new Date())} /></TabBoundary>}
+      {block === "motivos" && <TabBoundary><MotivesPanel today={arDayISO(new Date())} /></TabBoundary>}
+      {block === "reclamos" && <TabBoundary><DetectedPanel today={arDayISO(new Date())} /></TabBoundary>}
+      {block === "ventas" && <TabBoundary><SalesPanel today={arDayISO(new Date())} /></TabBoundary>}
+      {block === "datos" && <TabBoundary><QualityPanel /></TabBoundary>}
     </main>
   );
 }

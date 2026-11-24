@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import {
@@ -42,7 +43,7 @@ export default function ConversationResults({ period }: { period: Period }) {
   const load = useCallback(async () => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/kinds?from=${period.from}&to=${period.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/kinds?from=${period.from}&to=${period.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       setState(res.ok && body?.data ? { status: "ready", data: body.data as KindsPayload } : { status: "error" });
     } catch {

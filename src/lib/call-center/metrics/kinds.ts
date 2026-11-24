@@ -355,11 +355,15 @@ export async function getKindsPayload(from: string, to: string, now: Date = new 
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.payload;
 
+  const t0 = Date.now();
   const [rows, { versions }] = await Promise.all([loadKindRows(from, to), loadConfigVersions()]);
+  const t1 = Date.now();
   // Las etiquetas de cierre son las de la configuración vigente hoy.
   const closureMap = closureMapOf(configForDay(versions, arDayISO(now))?.data);
   const payload: KindsPayload = { ...buildKindsReport(rows, { now, from, to, closureMap }), motives: buildMotivesReport(rows, (r) => classifyKind(r).main) };
 
+  // Duración, para seguir el tiempo de carga de "Motivos de contacto" y "Reclamos y pérdidas". Solo números.
+  console.log("[call-center/metrics/kinds] ms", JSON.stringify({ consulta: t1 - t0, calculo: Date.now() - t1, total: Date.now() - t0, filas: rows.length, desde: from, hasta: to }));
   if (cache.size >= CACHE_MAX_ENTRIES) {
     for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);
     if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();

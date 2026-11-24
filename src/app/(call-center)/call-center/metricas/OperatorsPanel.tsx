@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS, POPULATION_LABELS } from "@/lib/call-center/metrics/indicators";
@@ -53,7 +54,7 @@ export default function OperatorsPanel({ today }: { today: string }) {
   const load = useCallback(async (p: Period) => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/accounts?from=${p.from}&to=${p.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/accounts?from=${p.from}&to=${p.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar las métricas." });
@@ -474,7 +475,7 @@ function OperatorCases({ picked, period, onClose }: { picked: Picked; period: Pe
     setState({ status: "loading" });
     try {
       const account = picked.account !== null ? `&account=${encodeURIComponent(picked.account)}` : "";
-      const res = await fetch(`/api/call-center/metrics/accounts/cases?kind=${picked.kind}&from=${period.from}&to=${period.to}${account}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/accounts/cases?kind=${picked.kind}&from=${period.from}&to=${period.to}${account}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar los casos." });

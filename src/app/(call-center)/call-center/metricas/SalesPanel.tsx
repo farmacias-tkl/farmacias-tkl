@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { EVIDENCE_LABELS, POPULATION_LABELS } from "@/lib/call-center/metrics/indicators";
 import type { SalesPayload } from "@/lib/call-center/metrics/sales-types";
@@ -28,7 +29,7 @@ export default function SalesPanel({ today }: { today: string }) {
   const load = useCallback(async (p: Period) => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/sales?from=${p.from}&to=${p.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/sales?from=${p.from}&to=${p.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar los comprobantes." });
