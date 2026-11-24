@@ -5,7 +5,12 @@
  * Son textos fijos del bot (plantillas), no datos de clientes.
  */
 
-/** Comienzo del mensaje final del bot cuando el pedido quedó completo y pasa a una persona. */
+/**
+ * Comienzo del mensaje final del bot cuando pasa la conversación a una persona. OJO: el bot
+ * manda el mismo mensaje al cerrar el camino "Asesor". Por eso vale como "pedido completo"
+ * SOLO si el cliente entró por el recorrido de pedido (tocó "Pedir medicamentos" o el bot le
+ * hizo la pregunta del recorrido). Es la misma regla que "Motivos de contacto".
+ */
 export const BOT_ORDER_COMPLETE_PREFIX = "✅ ¡Listo!";
 
 /** Patrón LIKE de SQL para ese mensaje. */

@@ -26,6 +26,7 @@ import {
   CLOSED_UNANSWERED_DAYS, CLOSING_MESSAGE_REGEX, NOT_CUSTOMER_REGEX, ORDER_REQUEST_REGEX, QUESTION_REGEX,
 } from "./patterns";
 import type { ClosedReason, ClosedUnansweredReport } from "./now-types";
+import { BOT_ORDER_FLOW_LIKE, CUSTOMER_ORDER_OPTION } from "./management-type";
 
 const MS_DAY = 86_400_000;
 
@@ -118,7 +119,9 @@ async function loadBlockRows(scopeWhere: Prisma.Sql, extraWhere: Prisma.Sql): Pr
       SELECT m."conversationId" AS cid,
         max(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate") AS last_op,
         max(m."sentAt") FILTER (WHERE m.author = 'CUSTOMER') AS last_cust,
-        coalesce(bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}), false) AS done,
+        -- Pedido completo: el mensaje final del bot Y el recorrido de pedido.
+        (coalesce(bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}), false)
+          AND coalesce(bool_or((m.author = 'CUSTOMER' AND m.body = ${CUSTOMER_ORDER_OPTION}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})), false)) AS done,
         coalesce(bool_or(m.author = 'BOT' AND (m.body LIKE ${info1} OR m.body LIKE ${info2})), false) AS bot_info
       FROM "ConversationMessage" m
       JOIN scope s ON s.id = m."conversationId"
