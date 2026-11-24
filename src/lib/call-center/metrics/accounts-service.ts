@@ -37,6 +37,7 @@ export async function getAccountsPayload(from: string, to: string, now: Date = n
     closures: report.closures ? { total: report.closures.total, coverage: report.closures.coverage, withoutAccount: report.closures.withoutAccount, byBot: report.closures.byBot } : null,
     period: { from, to },
     hasConfig: configForDay(versions, arDayISO(now)) !== null,
+    followupGoal: configForDay(versions, arDayISO(now))?.data.followupGoal ?? null,
     lookbackDays: ACTIVITY_LOOKBACK_DAYS,
   })) as AccountsPayload;
 
