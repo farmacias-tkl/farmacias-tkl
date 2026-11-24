@@ -4,7 +4,7 @@
  *   npx tsx src/lib/call-center/metrics/period.test.ts
  */
 import assert from "node:assert/strict";
-import { PERIOD_MAX_DAYS, addDaysISO, isDayISO, periodLength, resolvePeriod } from "./period";
+import { PERIOD_CACHE_PAST_MS, PERIOD_CACHE_TODAY_MS, PERIOD_MAX_DAYS, periodCacheMs, addDaysISO, isDayISO, periodLength, resolvePeriod } from "./period";
 
 let passed = 0;
 const failures: string[] = [];
@@ -54,6 +54,12 @@ test("addDaysISO cruza mes, año y febrero bisiesto; isDayISO", () => {
   assert.equal(isDayISO("2028-02-29"), true);
   assert.equal(isDayISO("2026-02-29"), false);
   assert.equal(isDayISO(20260310), false);
+});
+
+test("caché: corta si el período llega a hoy, larga si terminó antes", () => {
+  assert.equal(periodCacheMs(TODAY, TODAY), PERIOD_CACHE_TODAY_MS);
+  assert.equal(periodCacheMs(addDaysISO(TODAY, -1), TODAY), PERIOD_CACHE_PAST_MS);
+  assert.ok(PERIOD_CACHE_PAST_MS > PERIOD_CACHE_TODAY_MS);
 });
 
 console.log(`\nmetrics/period: ${passed} ok, ${failures.length} fail`);

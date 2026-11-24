@@ -599,8 +599,9 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
       "Conversaciones creadas en el período con mensajes del cliente que coinciden con los patrones de cada " +
       "grupo. Ventas: pérdida confirmada (otra farmacia, otro lado o cancela), compró por su cuenta sin decir " +
       "dónde, y compró en TKL (menciona TKL o una sucursal, o ya retiró el pedido); las tres van por separado " +
-      "y solo la primera es una pérdida. Reclamos del Call Center: demora, pedido sin novedades, producto o " +
-      "cantidad incorrectos, stock, factura con queja, precio o cobertura, pago o devolución, trato y otros. " +
+      "y solo la primera es una pérdida. Reclamos del Call Center (un problema propio del cliente, la misma regla " +
+      "que Motivos de contacto): espera sin respuesta, pedido sin novedades, producto o cantidad incorrectos, " +
+      "factura con queja, cobro de más o descuento no aplicado, cobro doble o devolución que no llega, trato y otros. " +
       "Envíos: no llegó el pedido y problema con la entrega. Tienda online: pagó y no recibió la confirmación, " +
       "y problemas con la página.",
     source: "ConversationMessage (texto del cliente)",

@@ -38,8 +38,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, arHour, utcTimestampParam } from "./business-time";
+import { periodCacheMs } from "./period";
 import { BOT_ORDER_COMPLETE_LIKE, PRESCRIPTION_LINK_REGEX } from "./patterns";
-import { claimsOf, loadDetectedRows, messageMatches } from "./detected";
+import { messageMatches } from "./detected";
 import { OWN_PROBLEM_CLAIM_PATTERNS, branchNamesRegex, type MessagePattern } from "./detected-patterns";
 import { BOT_ORDER_FLOW_LIKE } from "./management-type";
 import { buildMotivesReport, selectMotiveCases, type MotiveFlags } from "./motives";
@@ -70,7 +71,7 @@ export interface KindRow {
   resolved: boolean;
   closureTypeName: string | null;
   labels: string[];
-  /** Tiene algún motivo de reclamo (de detected.ts). */
+  /** Tiene un reclamo en algún mensaje escrito por el cliente: la misma regla que "Motivos de contacto". */
   claim: boolean;
   /** Mandó el mensaje armado de una receta digital para pedir. */
   prescription: boolean;
@@ -251,9 +252,8 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const branchRegex = branchNamesRegex(branches.map((b) => b.name));
   const tkl = branchRegex ? `${BOUGHT_AT_TKL}|\\m(${branchRegex})\\M` : BOUGHT_AT_TKL;
 
-  const [parts, detected, derivations] = await Promise.all([
+  const [parts, derivations] = await Promise.all([
     Promise.all(KIND_ROWS_PARTS.map((part) => prisma.$queryRaw<Array<Partial<RawKindRow> & { conversationId: string }>>(kindRowsQuery(from, to, tkl, part)))),
-    loadDetectedRows(fromDay, toDayInclusive),
     getDerivations(fromDay, toDayInclusive),
   ]);
   // Las tres partes traen las mismas conversaciones: se unen por id sobre la primera.
@@ -265,10 +265,10 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   });
   const derivationOf = new Map(derivations.map((d) => [d.conversationId, d.timing]));
 
-  const withClaim = new Set(detected.rows.filter((r) => claimsOf(r).length > 0).map((r) => r.conversationId));
   return rows.map(({ freeMessages, emptyMessages, customerMessages, ...r }) => ({
     ...r,
-    claim: withClaim.has(r.conversationId),
+    // Reclamo durante la conversación o como motivo principal (el principal siempre tiene la marca).
+    claim: r.strictClaim,
     operatorDerived: derivationOf.has(r.conversationId),
     derivation: derivationOf.get(r.conversationId) ?? null,
     hasFreeText: freeMessages > 0,
@@ -374,14 +374,13 @@ export function kindRowsQuery(from: Date, to: Date, tkl: string, part: KindRowsP
 }
 
 const CACHE_MAX_ENTRIES = 20;
-const CACHE_MS = 60_000;
-const cache = new Map<string, { at: number; payload: KindsPayload }>();
+const cache = new Map<string, { at: number; ttl: number; payload: KindsPayload }>();
 
-/** Informe del período, con caché de un minuto por período. */
+/** Informe del período, con caché por período: un minuto si llega a hoy, cinco si terminó antes. */
 export async function getKindsPayload(from: string, to: string, now: Date = new Date()): Promise<KindsPayload> {
   const key = `${from}|${to}`;
   const hit = cache.get(key);
-  if (hit && now.getTime() - hit.at < CACHE_MS) return hit.payload;
+  if (hit && now.getTime() - hit.at < hit.ttl) return hit.payload;
 
   const t0 = Date.now();
   const [rows, { versions }] = await Promise.all([loadKindRows(from, to), loadConfigVersions()]);
@@ -393,10 +392,10 @@ export async function getKindsPayload(from: string, to: string, now: Date = new 
   // Duración, para seguir el tiempo de carga de "Motivos de contacto" y "Reclamos y pérdidas". Solo números.
   console.log("[call-center/metrics/kinds] ms", JSON.stringify({ consulta: t1 - t0, calculo: Date.now() - t1, total: Date.now() - t0, filas: rows.length, desde: from, hasta: to }));
   if (cache.size >= CACHE_MAX_ENTRIES) {
-    for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);
+    for (const [k, v] of cache) if (now.getTime() - v.at >= v.ttl) cache.delete(k);
     if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
   }
-  cache.set(key, { at: now.getTime(), payload });
+  cache.set(key, { at: now.getTime(), ttl: periodCacheMs(to, arDayISO(now)), payload });
   return payload;
 }
 

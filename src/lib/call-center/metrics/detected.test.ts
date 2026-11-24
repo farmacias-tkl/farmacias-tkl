@@ -66,7 +66,7 @@ test("cada motivo tiene un grupo, y los grupos listan todos sus motivos aunque e
   const r = build([]);
   assert.deepEqual(r.claims.ENVIOS.byMotive, [{ motive: "ENVIO_NO_LLEGO", count: 0 }, { motive: "ENVIO_ENTREGA", count: 0 }]);
   assert.deepEqual(r.claims.TIENDA_ONLINE.byMotive.map((b) => b.motive), ["WEB_SIN_CONFIRMACION", "WEB_PAGINA"]);
-  assert.equal(r.claims.CALL_CENTER.byMotive.length, 9);
+  assert.equal(r.claims.CALL_CENTER.byMotive.length, 8);
   assert.equal(CLAIM_MOTIVES.every((m) => CLAIM_GROUP_OF[m] !== undefined), true);
   assert.deepEqual([r.sales.conversations, r.sales.casesTotal, r.conversations], [0, 0, 100]);
 });
