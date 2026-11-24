@@ -162,7 +162,12 @@ export const OWN_PROBLEM_CLAIM_PATTERNS: readonly MessagePattern[] = [
   { all: ["sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden)"] },
   { all: ["sin novedad|no tengo novedad|pedido[^|]{0,40}novedad"] },
   // Lo que llegó está mal o incompleto.
-  { all: ["\\m(equivocad[oa]s?|incorrect[oa]s?|vencid[oa]s?)\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)|se olvidaron|falta[^|]{0,30}en (el|mi) pedido"] },
+  { all: ["\\mincorrect[oa]s?\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)|se olvidaron|falta[^|]{0,30}en (el|mi) pedido"] },
+  // "Equivocado" cuenta salvo que el error sea del propio cliente ("me había equivocado").
+  { all: ["\\mequivocad[oa]s?\\M"], none: ["\\mme (hab[ií]a |he )?equivo(qu|c)|\\m(estaba|estoy|estuve) equivocad|\\mmi error\\M"] },
+  // "Vencido" cuenta como producto recibido en mal estado: no si es una pregunta, ni si se
+  // habla de una receta, una orden o un descuento (ahí es una consulta).
+  { all: ["\\mvencid[oa]s?\\M"], none: ["\\?", "\\m(recetas?|[oó]rden(es)?|descuentos?|cup[oó]n|promo|promoci[oó]n|autorizaci[oó]n)\\M"] },
   // Cobro o devolución con problema.
   { all: ["me cobraron (de )?m[aá]s|me cobraron mal|cobraron dos veces|doble cobro|no me (hicieron|aplicaron|tomaron) el descuento|no me (lleg[oó]|hicieron|devolvieron|acreditaron) (la |el )?(devoluci[oó]n|reintegro|reembolso|plata|dinero)|me debitaron"] },
   ...CLAIM_PATTERNS.FACTURA,

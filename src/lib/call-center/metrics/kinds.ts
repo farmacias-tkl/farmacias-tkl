@@ -50,7 +50,7 @@ import { configForDay, loadConfigVersions } from "./config";
 import {
   BOT_BUTTONS, BUTTON_HOME, BUTTON_PICKUP,
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
-  BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_CANCELLED, OPERATOR_POSTPONED, OPERATOR_WAITING, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
+  APOLOGY_MESSAGE, BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_CANCELLED, OPERATOR_POSTPONED, OPERATOR_WAITING, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
   BUTTON_ADVISOR, BUTTON_HOURS, BUTTON_ONLINE_STORE, BUTTON_ORDER, CONSULT_STOCK_PAST, FOLLOW_UP_ARRIVAL, ORDER_FREE_TEXT, PRESCRIPTION_PLATFORM_CAPTURE,
 } from "./kinds-patterns";
@@ -278,8 +278,8 @@ export function kindRowsQuery(from: Date, to: Date, tkl: string): Prisma.Sql {
   // Texto libre del cliente: lo que escribió, sin los botones del bot.
   const free = Prisma.sql`m.author = 'CUSTOMER' AND m.body IS NOT NULL AND m.body NOT IN (${buttons})`;
   const flag = (cond: Prisma.Sql) => Prisma.sql`coalesce(bool_or(${cond}), false)`;
-  // Un saludo, un sí/no o un agradecimiento (también largo) sin pregunta: no tiene contenido.
-  const empty = Prisma.sql`(m.body ~* ${EMPTY_MESSAGE} OR (m.body ~* ${THANKS_MESSAGE} AND m.body NOT LIKE '%?%'))`;
+  // Un saludo, un sí/no, una disculpa suelta o un agradecimiento (también largo) sin pregunta: no tiene contenido.
+  const empty = Prisma.sql`(m.body ~* ${EMPTY_MESSAGE} OR m.body ~* ${APOLOGY_MESSAGE} OR (m.body ~* ${THANKS_MESSAGE} AND m.body NOT LIKE '%?%'))`;
   // Evidencia firme (número de control, pago recibido) y evidencia de venta en general.
   const strong = Prisma.sql`(${op} AND m.body ~* ${ORDER_STRONG_OPERATOR}) OR (${cust} AND m.body ~* ${PAYMENT_CUSTOMER})`;
   const evidence = Prisma.sql`${op} AND m.body ~* ${ORDER_CONFIRMED_OPERATOR}`;

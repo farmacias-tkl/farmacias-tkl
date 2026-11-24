@@ -133,6 +133,13 @@ export const CONSULT_STOCK = "tienen|ten[eé]s|tendr[aá]n|\\mhay\\M|stock|dispo
 export const CONSULT_HOURS = "horario|abren|cierran|abierto|direcci[oó]n|sucursal|d[oó]nde queda";
 export const CONSULT_COVERAGE = "obra social|prepaga|\\mpami\\M|\\mosde\\M|cobertura|descuento|cubre";
 export const CONSULT_PAYMENT = "tarjeta|cuotas|transferencia|mercado ?pago|efectivo|d[eé]bito|cr[eé]dito";
+/**
+ * Una disculpa suelta ("y disculpame", "perdón por la molestia"): acompaña a un agradecimiento
+ * y no tiene otro contenido. Solo para motivos de contacto.
+ */
+export const APOLOGY_MESSAGE =
+  "^[^[:alnum:]]*(y )?(disc[uú]lp[aáeé](me|nme)?|(mil )?disculpas|perd[oó]n|perd[oó]n[aáeé]me)( (por )?(la|las) molestias?)?[^[:alnum:]]*$";
+
 export const CONSULT_ONLINE_STORE = "p[aá]gina|\\mweb\\M|online";
 export const CONSULT_SERVICES = "vacun|inyec|\\maplica(n|r|ci[oó]n|ciones)\\M|tomar la presi[oó]n|\\m(test|hisopado)\\M";
 

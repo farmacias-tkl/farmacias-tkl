@@ -105,6 +105,13 @@ async function main() {
     await add("mCuandoLlega", [[C, "Hola, cuándo llega mi pedido?"]], "2026-03-20T10:30");
     await add("mAsesor", [[C, "Asesor"]], "2026-03-20T10:40");
     await add("mEnlace", [[C, "Hola, les paso https://app.qbitos.com/r/inventada"]], "2026-03-20T10:50");
+    // Ajustes de la validación de la muestra (otro día, para no mover los conteos del 20/03).
+    await add("mVencidaPregunta", [[C, "Hola, la receta está vencida o todavía vale el descuento?"]], "2026-03-21T10:00");
+    await add("mErrorPropio", [[C, "Lo compré en la sucursal, me había equivocado de número"]], "2026-03-21T10:10");
+    await add("mVencidoReal", [[C, "Hola, el producto que me trajeron está vencido"]], "2026-03-21T10:20");
+    await add("mGraciasDisculpa", [[C, "Muchas gracias!"], [C, "Y discúlpame"]], "2026-03-21T10:30");
+    await add("mAsesorObra", [[C, "Suc. y Horarios"], [C, "Asesor"], [B, DONE], [C, "Hola, trabajan con la obra social inventada?"]], "2026-03-21T10:40");
+    await add("mTenian", [[C, "Hola, tenían el producto inventado de 70 mg"]], "2026-03-21T10:50");
 
     const rows = await loadKindRows("2026-03-02", "2026-03-04");
     const by = new Map(rows.map((r) => [r.conversationId, classifyKind(r)]));
@@ -213,6 +220,16 @@ async function main() {
       assert.deepEqual([x("mAsesor").main, x("mAsesor").unknownReason], ["NO_IDENTIFICADO", "ASESOR"]);
       assert.deepEqual([x("mEnlace").main, x("mEnlace").prescription], ["PEDIDO", { has: true, platform: "qbitos" }]);
 
+      const fix = new Map((await loadKindRows("2026-03-21", "2026-03-21")).map((r) => [r.conversationId, classifyMotive(r)]));
+      const y = (key: string) => fix.get(ids[key])!;
+      assert.equal(y("mVencidaPregunta").main, "CONSULTA", "preguntar si la receta está vencida no es un reclamo");
+      assert.notEqual(y("mErrorPropio").main, "RECLAMO", "un error propio del cliente no es un reclamo");
+      assert.equal(y("mErrorPropio").extra.includes("RECLAMO"), false);
+      assert.equal(y("mVencidoReal").main, "RECLAMO");
+      assert.equal(y("mGraciasDisculpa").main, "SALUDO", "una disculpa suelta junto a un agradecimiento no tiene contenido");
+      assert.deepEqual([y("mAsesorObra").main, y("mAsesorObra").orderSignal], ["CONSULTA", null], "el mensaje final del bot por el camino Asesor no es un pedido");
+      assert.deepEqual([y("mTenian").main, y("mTenian").consult], ["CONSULTA", "STOCK"]);
+
       const p = await getKindsPayload("2026-03-20", "2026-03-20", at("2026-03-21T12:00"));
       assert.equal(Object.values(p.motives!.total).reduce((a, b) => a + b, 0), p.motives!.conversations);
       assert.equal(p.motives!.conversations, 6);
@@ -221,7 +238,7 @@ async function main() {
     await check("período y hora: lo creado fuera no entra; las 23:59 quedan en su día de Buenos Aires", async () => {
       assert.equal(by.has(ids.fuera), false);
       const p = await getKindsPayload("2026-03-02", "2026-03-04", at("2026-03-05T12:00"));
-      // Fuera del período: "fuera" y los seis casos de motivos del 20/03.
+      // Fuera del período: "fuera" y los casos de motivos del 20/03 y del 21/03.
       assert.equal(p.conversations, Object.keys(ids).filter((k) => k !== "fuera" && !/^m[A-Z]/.test(k)).length);
       assert.equal(p.byDay.find((d) => d.day === "2026-03-04")!.CONSULTA, 1);
       assert.equal(p.byHour[23].CONSULTA, 1);
