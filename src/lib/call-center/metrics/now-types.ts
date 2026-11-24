@@ -7,6 +7,7 @@
  * abiertas con hasta `windowHours` de espera. Lo demás (abiertas viejas, cerradas, histórico
  * y calidad de datos) va aparte y no se suma a la cola.
  */
+import type { TodayClosures } from "./cover";
 import type { QueueGroupCounts } from "./queue-types";
 import type { WindowState } from "./whatsapp-window";
 import type { ClaimMotive } from "./detected-patterns";
@@ -148,6 +149,11 @@ export interface NowListItem {
   businessPartial: boolean;
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
+  /**
+   * Parece un pedido (DETECTADO): recorrido del bot completo, link de una receta electrónica o
+   * la frase con la que llega un pedido. No lee nombres de productos: no hay catálogo.
+   */
+  orderRequest: boolean;
   thanksCandidate: boolean;
   /**
    * Motivos de reclamo DETECTADOS por palabras en los mensajes del cliente (las reglas de
@@ -291,6 +297,12 @@ export interface NowPayload {
     current: number;
     /** Históricos por verificar: los posibles pendientes antiguos sin actividad reciente del cliente. current + historical = total + oldPending. */
     historical: number;
+    /**
+     * De atención actual y sin primera respuesta: los que parecen un pedido y el resto.
+     * DETECTADO. ordersUntaken + queriesUnanswered = los de atención actual sin primera respuesta.
+     */
+    ordersUntaken: number;
+    queriesUnanswered: number;
     /** Críticos de atención actual y críticos entre los históricos. null si `critical` es null. */
     criticalCurrent: number | null;
     criticalHistorical: number | null;
@@ -356,6 +368,8 @@ export interface NowPayload {
   observed: NowObserved | null;
   /** Evolución de la cola. null si no se pudo calcular. */
   trend: NowTrend | null;
+  /** Cierres de hoy por resultado, para la portada. null si no se pudieron calcular. */
+  todayClosures: TodayClosures | null;
   /** null si no se pudo calcular. */
   progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */

@@ -36,6 +36,9 @@ import { shiftStartOf } from "./progress";
 import { getQueueTrend } from "./queue-trend";
 import type { NowTrend } from "./now-types";
 import { loadClaimMotives } from "./detected";
+import { buildTodayClosures, type TodayClosureRow, type TodayClosures } from "./cover";
+import { closureMapOf } from "./closure-outcome";
+import { SYNC_NOTE_LIKE } from "../sync-note";
 import type { ClaimMotive } from "./detected-patterns";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
@@ -68,6 +71,8 @@ export interface NowExtras {
   trend?: NowTrend | null;
   /** Motivos de reclamo detectados, por conversación pendiente. null u omitido si no se pudieron revisar. */
   claims?: ReadonlyMap<string, ClaimMotive[]> | null;
+  /** Cierres de hoy por resultado. null u omitido si no se pudieron calcular. */
+  todayClosures?: TodayClosures | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -181,6 +186,7 @@ export function toNowPayload(
     businessPartial: coveredFromAt !== null && waitClockStart(it).getTime() < coveredFromAt,
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
+    orderRequest: it.botOrderComplete || it.customerSentPrescriptionLink === true || it.customerAskedOrder === true,
     thanksCandidate: it.thanksCandidate,
     claims: extras.claims ? extras.claims.get(it.conversationId) ?? [] : null,
     oldPending: oldPendingIds.has(it.conversationId),
@@ -211,6 +217,8 @@ export function toNowPayload(
       awaitingNext: waiting.length - neverHuman.length,
       current: current.length,
       historical: historical.length,
+      ordersUntaken: current.filter((it) => !it.hasHumanResponse && it.orderRequest).length,
+      queriesUnanswered: current.filter((it) => !it.hasHumanResponse && !it.orderRequest).length,
       criticalCurrent: criticalKnown ? current.filter((it) => it.level === "CRITICO").length : null,
       criticalHistorical: criticalKnown ? historical.filter((it) => it.level === "CRITICO").length : null,
       // Las alertas de acción cuentan la atención actual: son las que abre la lista operativa.
@@ -256,6 +264,7 @@ export function toNowPayload(
         })
       : null,
     trend: extras.trend ?? null,
+    todayClosures: extras.todayClosures ?? null,
     progress,
     quality: {
       freshness: {
@@ -273,6 +282,22 @@ export function toNowPayload(
       checks,
     },
   };
+}
+
+/**
+ * Conversaciones resueltas hoy (día de Buenos Aires): una fila por conversación, con el tipo
+ * de cierre de su última resolución del día. No cuentan las correcciones de estado contra
+ * Emozion, que no son cierres de un operador. Solo lectura; sin texto ni datos del cliente.
+ */
+export async function loadTodayClosureRows(now: Date): Promise<TodayClosureRow[]> {
+  const from = arDayStartUTC(arDayISO(now));
+  return prisma.$queryRaw<TodayClosureRow[]>`
+    SELECT DISTINCT ON (h."conversationId") h."closureTypeName" AS "closureTypeName"
+    FROM "ConversationStateHistory" h
+    WHERE h."toStatus" = 'RESUELTA' AND h."changedAt" >= ${utcTimestampParam(from)}::timestamp
+      AND (h.note IS NULL OR h.note NOT LIKE ${SYNC_NOTE_LIKE})
+    ORDER BY h."conversationId", h."changedAt" DESC, h.id DESC
+  `;
 }
 
 /**
@@ -343,7 +368,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   // Tanda 2: dependen de la cola o de la configuración, pero no entre sí. Van juntas.
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const historyFresh = historyCache && now.getTime() - historyCache.at < HISTORY_CACHE_SECONDS * 1000 ? historyCache.value : undefined;
-  const [checks, progress, observed, claims, trend, closed, history] = await Promise.all([
+  const [checks, progress, observed, claims, trend, closed, todayClosures, history] = await Promise.all([
     timed("calidad", loadQualityChecks(now, current ? accounts : null).catch(() => null)),
     timed("avance", loadProgress(now, versions, wait?.ops ?? null).catch(() => null)),
     timed("actividad", loadObservedRows(observedSince, now)
@@ -354,6 +379,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
     timed("evolucion", getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null)),
     timed("cerradas", getClosedUnanswered(now, snapshot.closedSince).catch(() => null)),
+    timed("cierres_hoy", loadTodayClosureRows(now).then((rows) => buildTodayClosures(rows, closureMapOf(current?.data))).catch(() => null)),
     // Histórico: se recalcula como mucho una vez por hora.
     historyFresh !== undefined
       ? Promise.resolve(historyFresh)
@@ -363,7 +389,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   ]);
   console.log("[call-center/metrics/now] ms", JSON.stringify({ total: Date.now() - t0, ...ms }));
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims, todayClosures }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

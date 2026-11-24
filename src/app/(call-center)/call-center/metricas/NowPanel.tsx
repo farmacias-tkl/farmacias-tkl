@@ -7,6 +7,7 @@ import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
 import type { ClosedReason, NowListItem, NowOwnerRow, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
 import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
 import { comparisonNote, comparisonVerdict, sameSchedule } from "@/lib/call-center/metrics/comparison";
+import { coverStatus } from "@/lib/call-center/metrics/cover";
 import { useNowData } from "./useNowData";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -126,28 +127,7 @@ export default function NowPanel() {
 
   return (
     <section className="mt-4" aria-label="Ahora">
-      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-        <p className="text-sm font-medium text-gray-900">
-          {!d.schedule ? "Sin configuración de horarios cargada"
-            : d.schedule.inPublicHours ? "Dentro del horario público"
-            : d.schedule.operatorShiftActive ? "Fuera del horario público · dentro del horario de operadores"
-            : "Fuera del horario público y del horario de operadores"}
-        </p>
-        <p className="mt-0.5 text-xs text-gray-600">
-          Pantalla calculada a las {timeFmt.format(new Date(d.generatedAt))}{refreshing ? " · actualizando…" : ""}
-          {" · "}último evento recibido: {d.quality.freshness.lastWebhookAt ? whenLabel(d.quality.freshness.lastWebhookAt, nowMs) : "sin dato"}
-        </p>
-        {d.quality.checks && d.quality.checks.events.error > 0 && (
-          <p role="status" className="mt-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs text-orange-900">
-            Hay {nf.format(d.quality.checks.events.error)} {d.quality.checks.events.error === 1 ? "evento" : "eventos"} de Emozion con error en los últimos {d.quality.checks.days} días:
-            los indicadores pueden estar incompletos. El detalle está en &quot;Calidad de datos&quot;.
-          </p>
-        )}
-        <More>
-          El horario público determina el cálculo de la meta. El horario de operadores indica cuándo está previsto que trabaje el equipo; no demuestra presencia.
-          La actividad observada son las respuestas que efectivamente se registraron. Que no lleguen eventos nuevos no prueba, por sí solo, una falla: puede no haber movimiento.
-        </More>
-      </div>
+      <CoverCard d={d} nowMs={nowMs} refreshing={refreshing} />
 
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
         <h2 className="text-sm font-semibold text-gray-800">Requiere acción</h2>
@@ -336,6 +316,128 @@ export default function NowPanel() {
       <StaleCard d={d} nowMs={nowMs} />
       <ClosedCard d={d} nowMs={nowMs} />
     </section>
+  );
+}
+
+const COVER_LEVELS = {
+  ATENCION: { label: "Atención", dot: "bg-red-600", box: "border-red-300 bg-red-50", text: "text-red-900" },
+  REVISAR: { label: "Para revisar", dot: "bg-orange-500", box: "border-orange-300 bg-orange-50", text: "text-orange-900" },
+  AL_DIA: { label: "Al día", dot: "bg-green-600", box: "border-green-300 bg-green-50", text: "text-green-900" },
+} as const;
+
+/** Un número de la portada con su rótulo. */
+function CoverFigure({ value, label, tag }: { value: string; label: string; tag?: string }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dd className="w-16 shrink-0 text-right text-2xl font-semibold tabular-nums text-gray-900">{value}</dd>
+      <dt className="text-sm leading-tight text-gray-800">
+        {label}
+        {tag ? <span className="ml-1.5 rounded border border-gray-300 px-1 text-[11px] font-semibold text-gray-700">{tag}</span> : null}
+      </dt>
+    </div>
+  );
+}
+
+/**
+ * Portada de 30 segundos: estado general con su motivo, lo que espera ahora y los cierres de
+ * hoy. Reemplaza al encabezado: lleva también el contexto horario, la hora de cálculo, el
+ * último evento y los avisos.
+ */
+function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; refreshing: boolean }) {
+  const w = d.waiting;
+  const status = coverStatus({ criticalCurrent: w.criticalCurrent, urgent: w.urgent, closing: d.window.closing, completedOrders: w.completedOrders, insisting: w.insisting });
+  const lv = COVER_LEVELS[status.level];
+  const paused = d.schedule !== null && !d.schedule.inPublicHours;
+  const fr = d.progress?.firstResponse.today ?? null;
+  const frSmall = fr ? comparisonVerdict(fr, fr).kind === "SMALL_SAMPLE" : false;
+  const tc = d.todayClosures;
+  const errors = d.quality.checks?.events.error ?? 0;
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+      <div className={`border-b px-3 py-2 ${lv.box}`}>
+        <p className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 text-base font-semibold ${lv.text}`}>
+          <span aria-hidden className={`h-3 w-3 shrink-0 rounded-full ${lv.dot}`} />
+          <span>{lv.label}</span>
+          <span className="text-sm font-medium">
+            {status.reasons.length > 0 ? status.reasons.join(" · ") : "Sin demoras críticas, posibles urgencias, ventanas por vencer ni pedidos completos sin respuesta."}
+          </span>
+        </p>
+        <p className="mt-0.5 text-xs text-gray-700">
+          {!d.schedule ? "Sin configuración de horarios cargada"
+            : d.schedule.inPublicHours ? "Dentro del horario público"
+            : d.schedule.operatorShiftActive ? "Fuera del horario público · dentro del horario de operadores"
+            : "Fuera del horario público y del horario de operadores"}
+          {paused ? " · reloj de la meta pausado" : ""}
+          {" · "}calculado a las {timeFmt.format(new Date(d.generatedAt))}{refreshing ? " · actualizando…" : ""}
+          {" · "}último evento: {d.quality.freshness.lastWebhookAt ? whenLabel(d.quality.freshness.lastWebhookAt, nowMs) : "sin dato"}
+        </p>
+      </div>
+
+      <div className="px-3 py-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Ahora</h2>
+        <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+          <CoverFigure value={nf.format(w.ordersUntaken)} label="pedidos sin tomar" tag="Detectado" />
+          <CoverFigure value={nf.format(w.queriesUnanswered)} label="consultas sin responder" tag="Detectado" />
+          <CoverFigure value={w.claims === null ? "—" : nf.format(w.claims)} label="posibles reclamos abiertos" tag="Detectado por palabras" />
+          <CoverFigure value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} label="mayor espera entre los recientes" />
+        </dl>
+        <p className="mt-1.5 text-sm text-gray-800">
+          <span className="font-semibold tabular-nums">{nf.format(w.current)}</span> {w.current === 1 ? "pendiente reciente" : "pendientes recientes"}
+          {w.historical > 0 ? <> + <span className="font-semibold tabular-nums">{nf.format(w.historical)}</span> {w.historical === 1 ? "antiguo" : "antiguos"} por verificar</> : null}
+        </p>
+        <p className="mt-0.5 text-sm text-gray-800">
+          Primera respuesta hoy:{" "}
+          {!fr || !d.schedule ? "sin datos"
+            : fr.hasPublicHours === false ? <>la mitad en <span className="font-semibold">{mins(fr.medianClockMinutes)}</span> de espera real · hoy no hay horario público, la meta no aplica</>
+            : <>la mitad en <span className="font-semibold">{mins(fr.medianBusinessMinutes)}</span> · meta {d.schedule.goalMinutes} min</>}
+          {fr && frSmall ? <span className="text-gray-700"> · Muestra pequeña: {nf.format(fr.answered)} {fr.answered === 1 ? "respondida" : "respondidas"} de {nf.format(fr.entries)}, no permite concluir cómo viene el día</span> : null}
+        </p>
+      </div>
+
+      <div className="border-t border-gray-100 px-3 py-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Hoy</h2>
+        {!tc ? (
+          <p className="mt-1 text-sm text-gray-600">Cierres de hoy: no disponible.</p>
+        ) : (
+          <>
+            <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-3">
+              <CoverFigure value={nf.format(tc.sales)} label="ventas concretadas" />
+              <CoverFigure value={nf.format(tc.queries)} label="consultas resueltas" />
+              <CoverFigure value={nf.format(tc.notCompleted.customerLeft + tc.notCompleted.noStockOrNotCarried)} label="no concretadas" />
+            </dl>
+            <p className="mt-1 text-xs text-gray-700">
+              No concretadas: {nf.format(tc.notCompleted.customerLeft)} el cliente no siguió · {nf.format(tc.notCompleted.noStockOrNotCarried)} sin stock o no lo trabajamos.
+              {tc.other > 0 ? ` Otros cierres con tipo: ${nf.format(tc.other)}.` : ""}
+            </p>
+            <p className="mt-0.5 text-xs text-gray-700">
+              {nf.format(tc.typed)} de {nf.format(tc.closed)} cierres con tipo.
+              {tc.lowCoverage ? <span className="ml-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-900">Pocos cierres con tipo: dato parcial</span> : null}
+            </p>
+          </>
+        )}
+      </div>
+
+      {errors > 0 && d.quality.checks && (
+        <p role="status" className="border-t border-orange-200 bg-orange-50 px-3 py-1.5 text-xs text-orange-900">
+          Hay {nf.format(errors)} {errors === 1 ? "evento" : "eventos"} de Emozion con error en los últimos {d.quality.checks.days} días: los indicadores pueden estar incompletos.
+          El detalle está en &quot;Calidad de datos&quot;.
+        </p>
+      )}
+      <div className="border-t border-gray-100 px-3 pb-2">
+        <More>
+          El color resume la atención actual: rojo si hay demoras críticas o posibles urgencias; naranja si hay ventanas de WhatsApp por vencer, pedidos completos sin
+          primera respuesta o clientes insistiendo; verde si no hay nada de eso. Los antiguos por verificar no cambian el color.
+          {" "}Pedidos sin tomar: pendientes recientes sin primera respuesta que completaron el recorrido del bot, mandaron el link de una receta electrónica o
+          escribieron la frase con la que llega un pedido. Consultas sin responder: el resto de los pendientes recientes sin primera respuesta. Los dos son detectados,
+          no medidos; no se leen nombres de productos.
+          {" "}Hoy: conversaciones resueltas hoy, por el tipo de cierre que eligió el operador. Las que se cerraron sin tipo no entran en ningún grupo, por eso se
+          muestra cuántas lo tienen. &quot;No concretadas&quot; no es lo mismo que una venta perdida: junta los pedidos que el cliente no siguió con los que no se
+          pudieron vender.
+          {" "}El horario público determina el cálculo de la meta. El horario de operadores indica cuándo está previsto que trabaje el equipo; no demuestra presencia.
+          Que no lleguen eventos nuevos no prueba, por sí solo, una falla: puede no haber movimiento.
+        </More>
+      </div>
+    </div>
   );
 }
 

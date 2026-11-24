@@ -25,6 +25,7 @@ import { prisma } from "@/lib/prisma";
 import { utcTimestampParam } from "./business-time";
 import type { AgeBucket, QueueGroupCounts } from "./queue-types";
 import { BOT_ACCOUNT_PREFIX } from "./account-label";
+import { ORDER_REQUEST_REGEX, PRESCRIPTION_LINK_REGEX } from "./patterns";
 import { BOT_ORDER_COMPLETE_LIKE, INSISTING, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, URGENT_CUSTOMER_REGEX, isThanksCandidate } from "./patterns";
 
 const MS_HOUR = 3_600_000;
@@ -54,6 +55,10 @@ export interface WaitingRow {
   customerChars: number;
   customerSentMedia: boolean;
   customerSentLink: boolean;
+  /** El cliente mandó el link de una receta electrónica (por dominio; el link no se abre). Opcional: ausente = false. */
+  customerSentPrescriptionLink?: boolean;
+  /** El cliente escribió la frase con la que llega un pedido ("quiero realizar un pedido"). Opcional: ausente = false. */
+  customerAskedOrder?: boolean;
   /** Cierre previo del mismo cliente en las horas anteriores. Solo se busca en las filas que pueden ser un agradecimiento; en el resto es false. */
   previousResolvedRecently: boolean;
   /** Algún mensaje del bloque sin responder pide urgencia o avisa que se va (URGENT_CUSTOMER_REGEX). */
@@ -147,6 +152,8 @@ interface RawWaitingRow {
   custChars: number | bigint | null;
   custMedia: boolean | null;
   custLink: boolean | null;
+  rxLink: boolean | null;
+  askedOrder: boolean | null;
   prevResolved: boolean;
   urgent: boolean | null;
   insisting: boolean | null;
@@ -172,6 +179,8 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
         coalesce(sum(length(coalesce(m.body, ''))) FILTER (WHERE m.author = 'CUSTOMER'), 0)::int AS cust_chars,
         bool_or(m.author = 'CUSTOMER' AND (m.body IS NULL OR m."mediaType" IS NOT NULL)) AS cust_media,
         bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link,
+        bool_or(m.author = 'CUSTOMER' AND m.body ~* ${PRESCRIPTION_LINK_REGEX}) AS rx_link,
+        bool_or(m.author = 'CUSTOMER' AND m.body ~* ${ORDER_REQUEST_REGEX}) AS asked_order,
         bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done,
         min(m."sentAt") FILTER (WHERE m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done_at
       FROM "ConversationMessage" m
@@ -203,6 +212,8 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
       a.cust_chars AS "custChars",
       a.cust_media AS "custMedia",
       a.cust_link AS "custLink",
+      a.rx_link AS "rxLink",
+      a.asked_order AS "askedOrder",
       -- Solo sirve para "posible agradecimiento" (isThanksCandidate), que además exige texto
       -- corto y sin adjunto, link ni pedido completo. Con esas condiciones adelante, la búsqueda
       -- de un cierre previo (la parte más cara de la consulta) corre solo para esas filas.
@@ -234,6 +245,8 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
     customerChars: Number(r.custChars ?? 0),
     customerSentMedia: r.custMedia === true,
     customerSentLink: r.custLink === true,
+    customerSentPrescriptionLink: r.rxLink === true,
+    customerAskedOrder: r.askedOrder === true,
     previousResolvedRecently: r.prevResolved,
     urgent: r.urgent === true,
     insisting: r.insisting === true,
