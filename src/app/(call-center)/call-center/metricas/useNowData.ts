@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState } from "react";
 import { NOW_CACHE_SECONDS, type NowPayload } from "@/lib/call-center/metrics/now-types";
 
@@ -16,7 +17,7 @@ export function useNowData(): { state: NowState; refreshing: boolean; reload: ()
   // Primera carga: el resumen primero, para mostrar algo enseguida. No pisa un resultado completo.
   const loadSummary = useCallback(async () => {
     try {
-      const res = await fetch("/api/call-center/metrics/now?part=summary", { cache: "no-store" });
+      const res = await fetchWithTimeout("/api/call-center/metrics/now?part=summary", { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.data) setState((prev) => (prev.status === "ready" ? prev : { status: "ready", data: body.data as NowPayload }));
     } catch {
@@ -27,7 +28,7 @@ export function useNowData(): { state: NowState; refreshing: boolean; reload: ()
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await fetch("/api/call-center/metrics/now", { cache: "no-store" });
+      const res = await fetchWithTimeout("/api/call-center/metrics/now", { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         // Si ya había datos en pantalla se conservan: un refresco fallido no los borra.

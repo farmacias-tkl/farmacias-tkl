@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
@@ -42,7 +43,7 @@ export default function DetectedPanel({ today }: { today: string }) {
   const load = useCallback(async (p: Period) => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/detected?from=${p.from}&to=${p.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/detected?from=${p.from}&to=${p.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar los casos." });

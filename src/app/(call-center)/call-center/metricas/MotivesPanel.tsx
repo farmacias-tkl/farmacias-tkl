@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithTimeout } from "./fetch-with-timeout";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { CONSULT_KINDS, MAIN_KINDS, type ConsultKind, type KindsPayload, type MainKind } from "@/lib/call-center/metrics/kinds-types";
@@ -79,7 +80,7 @@ export default function MotivesPanel({ today }: { today: string }) {
   const load = useCallback(async (p: Period) => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/kinds?from=${p.from}&to=${p.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/kinds?from=${p.from}&to=${p.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar los motivos." });
@@ -278,7 +279,7 @@ function MotiveCases({ motive, period, onClose }: { motive: Motive; period: Peri
   const load = useCallback(async () => {
     setState({ status: "loading" });
     try {
-      const res = await fetch(`/api/call-center/metrics/kinds/cases?motive=${motive}&from=${period.from}&to=${period.to}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`/api/call-center/metrics/kinds/cases?motive=${motive}&from=${period.from}&to=${period.to}`, { cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.data) {
         setState({ status: "error", message: body?.error ?? "No se pudieron cargar los casos." });
