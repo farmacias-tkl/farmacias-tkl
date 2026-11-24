@@ -18,7 +18,8 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { arDayStartUTC, utcTimestampParam } from "./business-time";
+import { arDayISO, arDayStartUTC, utcTimestampParam } from "./business-time";
+import { periodCacheMs } from "./period";
 import {
   CLAIM_GROUP_OF, CLAIM_MOTIVES, CLAIM_PATTERNS, CUSTOMER_HOME_DELIVERY_OPTION, NOTHING_ARRIVED, SALE_BOUGHT, SALE_ELSEWHERE, SALE_PICKED_UP,
   branchNamesRegex, saleBoughtAtTkl, type ClaimGroup, type ClaimMotive, type MessagePattern,
@@ -200,23 +201,22 @@ export async function loadClaimMotives(conversationIds: readonly string[]): Prom
 }
 
 const CACHE_MAX_ENTRIES = 20;
-const cache = new Map<string, { at: number; payload: DetectedPayload }>();
-const CACHE_MS = 60_000;
+const cache = new Map<string, { at: number; ttl: number; payload: DetectedPayload }>();
 
-/** Informe del período, con caché de un minuto por período. */
+/** Informe del período, con caché por período: un minuto si llega a hoy, cinco si terminó antes. */
 export async function getDetectedPayload(from: string, to: string, now: Date = new Date()): Promise<DetectedPayload> {
   const key = `${from}|${to}`;
   const hit = cache.get(key);
-  if (hit && now.getTime() - hit.at < CACHE_MS) return hit.payload;
+  if (hit && now.getTime() - hit.at < hit.ttl) return hit.payload;
 
   const [{ rows, conversations }, derivations] = await Promise.all([loadDetectedRows(from, to), getDerivations(from, to)]);
   const derivedInHours = derivations.filter((d) => d.timing === "EN_HORARIO" && !d.sold);
   const payload = buildDetectedReport(rows, { now, from, to, conversations, derivedInHours });
 
   if (cache.size >= CACHE_MAX_ENTRIES) {
-    for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);
+    for (const [k, v] of cache) if (now.getTime() - v.at >= v.ttl) cache.delete(k);
     if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
   }
-  cache.set(key, { at: now.getTime(), payload });
+  cache.set(key, { at: now.getTime(), ttl: periodCacheMs(to, arDayISO(now)), payload });
   return payload;
 }

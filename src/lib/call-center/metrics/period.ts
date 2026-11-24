@@ -24,6 +24,16 @@ export function addDaysISO(dayISO: string, days: number): string {
   return new Date(toMs(dayISO) + days * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** Caché de un informe cuyo período incluye el día de hoy: entran mensajes todo el tiempo. */
+export const PERIOD_CACHE_TODAY_MS = 60_000;
+/** Caché de un período que terminó antes de hoy: cambia poco (alguna respuesta o cierre tardío). */
+export const PERIOD_CACHE_PAST_MS = 5 * 60_000;
+
+/** Cuánto vale la caché de un informe: corta si el período llega a hoy, larga si terminó antes. `today`: día de Buenos Aires. */
+export function periodCacheMs(to: string, today: string): number {
+  return to >= today ? PERIOD_CACHE_TODAY_MS : PERIOD_CACHE_PAST_MS;
+}
+
 /** Cantidad de días del rango, contando los dos extremos. */
 export function periodLength(from: string, to: string): number {
   return Math.round((toMs(to) - toMs(from)) / DAY_MS) + 1;

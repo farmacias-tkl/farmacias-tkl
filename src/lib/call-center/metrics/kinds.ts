@@ -38,6 +38,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, arHour, utcTimestampParam } from "./business-time";
+import { periodCacheMs } from "./period";
 import { BOT_ORDER_COMPLETE_LIKE, PRESCRIPTION_LINK_REGEX } from "./patterns";
 import { claimsOf, loadDetectedRows, messageMatches } from "./detected";
 import { OWN_PROBLEM_CLAIM_PATTERNS, branchNamesRegex, type MessagePattern } from "./detected-patterns";
@@ -374,14 +375,13 @@ export function kindRowsQuery(from: Date, to: Date, tkl: string, part: KindRowsP
 }
 
 const CACHE_MAX_ENTRIES = 20;
-const CACHE_MS = 60_000;
-const cache = new Map<string, { at: number; payload: KindsPayload }>();
+const cache = new Map<string, { at: number; ttl: number; payload: KindsPayload }>();
 
-/** Informe del período, con caché de un minuto por período. */
+/** Informe del período, con caché por período: un minuto si llega a hoy, cinco si terminó antes. */
 export async function getKindsPayload(from: string, to: string, now: Date = new Date()): Promise<KindsPayload> {
   const key = `${from}|${to}`;
   const hit = cache.get(key);
-  if (hit && now.getTime() - hit.at < CACHE_MS) return hit.payload;
+  if (hit && now.getTime() - hit.at < hit.ttl) return hit.payload;
 
   const t0 = Date.now();
   const [rows, { versions }] = await Promise.all([loadKindRows(from, to), loadConfigVersions()]);
@@ -393,10 +393,10 @@ export async function getKindsPayload(from: string, to: string, now: Date = new 
   // Duración, para seguir el tiempo de carga de "Motivos de contacto" y "Reclamos y pérdidas". Solo números.
   console.log("[call-center/metrics/kinds] ms", JSON.stringify({ consulta: t1 - t0, calculo: Date.now() - t1, total: Date.now() - t0, filas: rows.length, desde: from, hasta: to }));
   if (cache.size >= CACHE_MAX_ENTRIES) {
-    for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);
+    for (const [k, v] of cache) if (now.getTime() - v.at >= v.ttl) cache.delete(k);
     if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
   }
-  cache.set(key, { at: now.getTime(), payload });
+  cache.set(key, { at: now.getTime(), ttl: periodCacheMs(to, arDayISO(now)), payload });
   return payload;
 }
 
