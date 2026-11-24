@@ -100,6 +100,12 @@ async function main() {
       assert.equal(r.customerOnlyGreeting, true);
       assert.equal(byId.get(ids.meducar)!.customerOnlyGreeting, false);
     });
+    await check("mayor silencio del cliente antes de la primera respuesta: hasta su mensaje siguiente o hasta la respuesta", () => {
+      assert.equal(byId.get(ids.pedido)!.maxCustomerSilenceMinutes, 20, "de las 10:00 a la respuesta pública de las 10:20; la nota interna no corta");
+      assert.equal(byId.get(ids.mencion)!.maxCustomerSilenceMinutes, 5, "entre sus dos mensajes; el último, sin respuesta, sigue corriendo y no se mide acá");
+      assert.equal(byId.get(ids.sinSalida)!.maxCustomerSilenceMinutes, null);
+      assert.equal(byId.get(ids.vacia)!.maxCustomerSilenceMinutes ?? null, null);
+    });
     await check("Meducar: solo por el primer mensaje del cliente", () => {
       assert.equal(byId.get(ids.meducar)!.firstCustomerMessageIsMeducar, true);
       assert.equal(byId.get(ids.mencion)!.firstCustomerMessageIsMeducar, false);

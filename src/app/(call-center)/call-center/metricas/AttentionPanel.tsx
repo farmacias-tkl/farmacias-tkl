@@ -7,6 +7,7 @@ import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
 import type { AttentionCaseKind } from "@/lib/call-center/metrics/attention-types";
 import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
 import AttentionCases from "./AttentionCases";
+import { DailyCharts, HoursTool, Journey } from "./AttentionCharts";
 import { formatMinutes, formatMinutesOrMissing, formatRatio, formatShortDay } from "@/lib/call-center/metrics/format";
 
 const nf = new Intl.NumberFormat("es-AR");
@@ -219,16 +220,18 @@ function Headline({ total }: { total: Summary }) {
   );
 }
 
-/** Pérdida de oportunidad: ventanas de 24 horas de WhatsApp que se cerraron sin la primera respuesta. */
+/** Ventana de 24 horas de WhatsApp: el hecho histórico (venció alguna vez) separado de la situación actual. */
 function WindowClosedNote({ total }: { total: Summary }) {
+  const notResumed = total.windowClosed - total.windowClosedAnsweredLater;
+  const reopened = notResumed - total.windowClosedNow;
   return (
     <p className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
-      <span className="font-semibold">En {nf.format(total.windowClosed)} de {nf.format(total.entries)} conversaciones la ventana de WhatsApp se cerró sin respuesta.</span>{" "}
-      Es un hecho del período: en algún momento pasaron más de 24 horas desde el último mensaje del cliente sin la primera respuesta de una persona.{" "}
-      Hoy, <span className="font-semibold">{nf.format(total.windowClosedAnsweredLater)}</span> de esas ya se retomaron y tienen respuesta, y{" "}
-      <span className="font-semibold">{nf.format(total.windowClosed - total.windowClosedAnsweredLater)}</span> siguen sin primera respuesta. Solo estas últimas pueden necesitar una plantilla,
-      y solo si el cliente no volvió a escribir.
-      <span className="mt-1 block text-[11px] text-gray-500">{EVIDENCE_LABELS.MEDIDO}</span>
+      <span className="font-semibold">En {nf.format(total.windowClosed)} de {nf.format(total.entries)} conversaciones la ventana de WhatsApp venció alguna vez antes de la primera respuesta.</span>{" "}
+      Es un hecho del período: en algún momento pasaron 24 horas o más desde un mensaje del cliente sin la primera respuesta de una persona.{" "}
+      De esas, <span className="font-semibold">{nf.format(total.windowClosedAnsweredLater)}</span> ya se retomaron y tienen respuesta.{" "}
+      <span className="font-semibold">{nf.format(total.windowClosedNow)}</span> siguen sin primera respuesta y tienen la ventana cerrada ahora: para escribirles hace falta una plantilla.
+      {reopened > 0 ? <> {nf.format(reopened)} siguen sin respuesta, pero el cliente volvió a escribir y la ventana está abierta de nuevo.</> : null}
+      <span className="mt-1 block text-[11px] text-gray-500">{EVIDENCE_LABELS.MEDIDO} · la misma regla de 24 horas que usa &quot;Ahora&quot;</span>
     </p>
   );
 }
@@ -308,9 +311,6 @@ function ActivityReportView({ activity }: { activity: AttentionPayload["activity
 function EntryReport({ data }: { data: AttentionPayload }) {
   const t = data.total;
   const goal = t.goal;
-  const hours = new Array<number>(24).fill(0);
-  for (const d of data.days) d.byHour.forEach((n, h) => { hours[h] += n; });
-
   return (
     <>
       {!data.hasConfig && (
@@ -342,13 +342,7 @@ function EntryReport({ data }: { data: AttentionPayload }) {
 
       {goal && <GoalGroups goal={goal} outside={t.outsidePublicHours.answered} withoutConfig={t.withoutConfig} entries={t.entries} />}
 
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Card small def={indicator("first_response.clock")} hasConfig={data.hasConfig} value={formatMinutesOrMissing(t.firstResponseClock.median)}
-          detail={`Mediana · 9 de cada 10 en ${formatMinutesOrMissing(t.firstResponseClock.p90)} o menos`}
-          extra={`Sobre ${nf.format(t.firstResponseClock.n)} respondidas`} />
-        <Card small def={indicator("first_response.from_first_message")} hasConfig={data.hasConfig} value={formatMinutesOrMissing(t.fromFirstMessage.median)}
-          detail={`Mediana · 9 de cada 10 en ${formatMinutesOrMissing(t.fromFirstMessage.p90)} o menos`}
-          extra="Incluye el tiempo en el bot" />
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-3">
           <p className="text-xs font-medium text-gray-600">De las que no tuvieron respuesta el día de entrada</p>
           <p className="mt-1 text-sm text-gray-800">
@@ -361,6 +355,10 @@ function EntryReport({ data }: { data: AttentionPayload }) {
           detail={t.lateOrders.total > 0 ? formatRatio(t.lateOrders.answeredSameDay / t.lateOrders.total) : "No entraron pedidos desde las 17:00"} />
       </div>
 
+      <DailyCharts data={data} />
+      <HoursTool groups={data.byHourKind} />
+      <Journey data={data} />
+
       <Fold title="Salida del bot" hint="cómo salieron las conversaciones del bot">
         <BotExitTable summary={t} />
       </Fold>
@@ -368,9 +366,9 @@ function EntryReport({ data }: { data: AttentionPayload }) {
         <ManagementTypeTable summary={t} />
       </Fold>
 
-      <DaysTable data={data} />
-
-      <HoursChart hours={hours} />
+      <Fold title="Tabla por día de entrada" hint="los números del gráfico diario">
+        <DaysTable data={data} />
+      </Fold>
     </>
   );
 }
@@ -385,53 +383,6 @@ function Fold({ title, hint, children }: { title: string; hint?: string; childre
       </summary>
       <div className="border-t border-gray-200 px-3 pb-3">{children}</div>
     </details>
-  );
-}
-
-/**
- * Entradas por hora: una sola serie, barras verticales. Alto fijo y ancho repartido entre
- * las 24 horas, así entra en una pantalla angosta sin desplazamiento. Se rotula solo la
- * hora pico; el resto se lee al tocar la barra o en la tabla plegada.
- */
-function HoursChart({ hours }: { hours: number[] }) {
-  const [picked, setPicked] = useState<number | null>(null);
-  const max = Math.max(...hours);
-  const peak = hours.indexOf(max);
-  const shown = picked ?? peak;
-  return (
-    <>
-      <h3 className="mt-6 text-sm font-semibold text-gray-800">Entradas por hora</h3>
-      <p className="mt-1 text-xs text-gray-600">Hora de Buenos Aires en que entró la conversación, sumando todos los días del período.</p>
-      {max === 0 ? (
-        <p className="mt-2 text-sm text-gray-600">Sin entradas en el período.</p>
-      ) : (
-        <div className="mt-2 rounded-lg border border-gray-200 bg-white p-3">
-          <p className="text-sm text-gray-900" aria-live="polite">
-            <span className="font-semibold tabular-nums">{nf.format(hours[shown])}</span> entre las {shown} y las {shown + 1} h
-            {shown === peak ? <span className="text-gray-600"> · la hora con más entradas</span> : null}
-          </p>
-          <div className="mt-2 flex h-32 items-end gap-[2px] border-b border-gray-300" role="group" aria-label="Entradas por hora">
-            {hours.map((n, h) => (
-              <button key={h} type="button" title={`${h} a ${h + 1} h: ${nf.format(n)}`} aria-label={`${h} a ${h + 1} horas: ${nf.format(n)} entradas`}
-                onClick={() => setPicked(h)} onMouseEnter={() => setPicked(h)} onFocus={() => setPicked(h)}
-                className="flex h-full min-w-0 flex-1 items-end">
-                <span className={`block w-full rounded-t-[4px] ${h === shown ? "bg-[#1E2D5A]" : "bg-[#8E9BC4]"}`}
-                  style={{ height: n === 0 ? "0" : `${Math.max(3, (n / max) * 100)}%` }} />
-              </button>
-            ))}
-          </div>
-          <div className="mt-1 flex gap-[2px] text-[10px] tabular-nums text-gray-600" aria-hidden>
-            {hours.map((_, h) => <span key={h} className="min-w-0 flex-1 text-center">{h % 3 === 0 ? h : ""}</span>)}
-          </div>
-          <details className="mt-2">
-            <summary className="cursor-pointer py-1 text-xs font-medium text-[#1E2D5A]">Ver los números</summary>
-            <ul className="mt-1 grid grid-cols-3 gap-x-4 text-xs tabular-nums text-gray-800 sm:grid-cols-6">
-              {hours.map((n, h) => <li key={h} className="flex justify-between gap-2"><span className="text-gray-600">{h} h</span><span>{nf.format(n)}</span></li>)}
-            </ul>
-          </details>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -557,8 +508,7 @@ function DaysTable({ data }: { data: AttentionPayload }) {
   const days = [...data.days].reverse();
   return (
     <>
-      <h3 className="mt-6 text-sm font-semibold text-gray-800">Por día de entrada</h3>
-      <p className="mt-1 text-xs text-gray-600" title={indicator("pending_at_close").definition}>
+      <p className="mt-3 text-xs text-gray-600" title={indicator("pending_at_close").definition}>
         Cada conversación cuenta en el día en que se creó. Las medianas son solo de las respondidas. Pendientes al cierre: de las que salieron del bot en horario público, cuántas no tenían respuesta al cerrar.
       </p>
       <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 bg-white">
@@ -579,14 +529,14 @@ function DaysTable({ data }: { data: AttentionPayload }) {
             {days.map((d) => (
               <tr key={d.day} className="border-b border-gray-100 last:border-0">
                 <th scope="row" className="whitespace-nowrap px-3 py-2 font-normal tabular-nums text-gray-700">
-                  {formatShortDay(d.day)}{d.inProgress ? <span className="ml-1 text-xs text-gray-500">en curso</span> : null}
+                  {formatShortDay(d.day)}{d.inProgress ? <span className="ml-1 text-xs text-gray-500">parcial</span> : null}
                 </th>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.entries)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.answered)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-900">{nf.format(d.pending.total)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{d.goal ? formatRatio(d.goal.compliance) : d.outsidePublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseBusiness ? formatMinutesOrMissing(d.firstResponseBusiness.median) : d.outsidePublicHours.answered > 0 ? "No aplica" : NO_CONFIG}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseClock.median !== null ? formatMinutes(d.firstResponseClock.median) : "Sin datos"}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-900">{d.goal ? formatRatio(d.goal.compliance, "Sin evaluables") : d.kind === "SIN_HORARIO" || d.outsidePublicHours.answered > 0 ? "No aplica: sin horario público" : NO_CONFIG}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseBusiness ? formatMinutesOrMissing(d.firstResponseBusiness.median, "Sin respondidas") : d.kind === "SIN_HORARIO" || d.outsidePublicHours.answered > 0 ? "No aplica: sin horario público" : NO_CONFIG}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">{d.firstResponseClock.median !== null ? formatMinutes(d.firstResponseClock.median) : "Sin respondidas"}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-gray-900">
                   {d.pendingAtClose ? `${nf.format(d.pendingAtClose.pending)} de ${nf.format(d.pendingAtClose.leftBotInHours)}` : "—"}
                 </td>

@@ -225,6 +225,8 @@ export interface ProgressSide {
   /** Recibieron la primera respuesta de una persona, y siguen sin ella, vistas a esa hora. */
   answered: number;
   pending: number;
+  /** De las que siguen sin respuesta, las que ya tienen la meta vencida. null si la meta no aplica o no hay configuración. */
+  pendingOverdue: number | null;
   /** Mediana de la espera real (de reloj) hasta la primera respuesta, entre las respondidas. null si no hay. */
   medianClockMinutes: number | null;
 }

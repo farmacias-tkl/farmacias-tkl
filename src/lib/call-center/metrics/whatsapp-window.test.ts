@@ -4,7 +4,7 @@
  *   npx tsx src/lib/call-center/metrics/whatsapp-window.test.ts
  */
 import assert from "node:assert/strict";
-import { WHATSAPP_WINDOW_HOURS, windowClosedUnanswered, windowClosesAt, windowMinutesLeft, windowState } from "./whatsapp-window";
+import { WHATSAPP_WINDOW_HOURS, windowClosedUnanswered, windowExpiredBeforeResponse, windowClosesAt, windowMinutesLeft, windowState } from "./whatsapp-window";
 import { DEFAULT_WINDOW_WARNING_HOURS, parseConfigData, windowWarningHoursOf } from "./config-schema";
 import { toNowPayload, type NowExtras } from "./now";
 import { buildQueueSnapshot, type WaitingRow } from "./queue";
@@ -48,6 +48,12 @@ test("ventana cerrada sin respuesta: sin respuesta a las 24 horas, o con una res
   const last = at("2026-03-03T10:00");
   assert.equal(windowClosedUnanswered(last, null, at("2026-03-04T09:00")), false, "todavía se puede responder");
   assert.equal(windowClosedUnanswered(last, null, at("2026-03-04T10:01")), true);
+  assert.equal(windowClosedUnanswered(last, null, at("2026-03-04T10:00")), windowState(last, at("2026-03-04T10:00"), 4) === "CERRADA", "la misma regla que el estado de Ahora");
+  // Venció alguna vez: por un silencio anterior de 24 horas o más, aunque ahora esté abierta.
+  assert.equal(windowExpiredBeforeResponse(24 * 60, last, null, at("2026-03-03T12:00")), true);
+  assert.equal(windowExpiredBeforeResponse(24 * 60 - 1, last, null, at("2026-03-03T12:00")), false);
+  assert.equal(windowExpiredBeforeResponse(null, last, null, at("2026-03-04T10:00")), true, "sin la medición vale el último mensaje");
+  assert.equal(windowExpiredBeforeResponse(null, null, null, at("2026-03-04T10:00")), false);
   assert.equal(windowClosedUnanswered(last, at("2026-03-04T09:30"), at("2026-03-10T10:00")), false, "respondida dentro de la ventana");
   assert.equal(windowClosedUnanswered(last, at("2026-03-04T11:00"), at("2026-03-10T10:00")), true, "la respuesta llegó con la ventana cerrada");
 });
@@ -112,8 +118,8 @@ test("Ahora: los antiguos y las cerradas sin responder marcan si su ventana est�
   ], { ...NONE, closed });
   assert.deepEqual(p.stale.items.map((i) => [i.conversationId, i.windowClosed]), [["antigua", true], ["antigua-insistio", false]]);
   assert.deepEqual(p.closedUnanswered!.items.map((i) => [i.conversationId, i.windowClosed]), [["c-reciente", false], ["c-vieja", true]]);
-  // El posible pendiente antiguo con la ventana cerrada cuenta también en la alerta de ventana cerrada.
-  assert.deepEqual([p.window.staleClosed, p.window.closedUnansweredClosed, p.window.closed], [1, 1, 1]);
+  // La alerta de ventana cerrada es de atención actual: el posible pendiente antiguo se cuenta aparte.
+  assert.deepEqual([p.window.staleClosed, p.window.closedUnansweredClosed, p.window.closed], [1, 1, 0]);
   // Sin las cerradas calculadas: null, no cero.
   assert.equal(payload([]).window.closedUnansweredClosed, null);
 });
@@ -152,7 +158,7 @@ test("semáforo: feriado con 2 horas reales conserva el color por minutos hábil
   assert.deepEqual([q.list[0].level, q.list[0].businessMinutes], ["DEMORADO", 30]);
 });
 
-test("orden de casos: primero los de ventana cerrada, del que más espera real al que menos; después el resto como venía", () => {
+test("orden de casos sin configuración: los de ventana cerrada, del que más espera al que menos; después el resto", () => {
   const p = payload([
     open("abierta-vieja", { waitStart: hoursAgo(40), lastCustomerAt: hoursAgo(2) }),
     open("cerrada-30", { waitStart: hoursAgo(30), lastCustomerAt: hoursAgo(30) }),
@@ -160,7 +166,7 @@ test("orden de casos: primero los de ventana cerrada, del que más espera real a
     open("cerrada-26", { waitStart: hoursAgo(70), lastCustomerAt: hoursAgo(26) }),
     open("abierta-nueva", { waitStart: hoursAgo(1), lastCustomerAt: hoursAgo(1) }),
   ]);
-  assert.deepEqual(p.list.map((i) => i.conversationId), ["cerrada-50", "cerrada-30", "cerrada-26", "abierta-vieja", "abierta-nueva"]);
+  assert.deepEqual(p.list.map((i) => i.conversationId), ["cerrada-26", "cerrada-50", "cerrada-30", "abierta-vieja", "abierta-nueva"]);
   // Sin configuración no hay semáforo, salvo los críticos por ventana cerrada.
   assert.deepEqual(p.list.map((i) => i.level), ["CRITICO", "CRITICO", "CRITICO", null, null]);
   assert.equal(p.waiting.critical, 3);

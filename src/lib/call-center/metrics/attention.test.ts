@@ -322,6 +322,55 @@ test("ventana de WhatsApp cerrada sin respuesta: 24 horas de reloj desde el últ
   const r = report(rows, "2026-03-04T10:00");
   assert.equal(r.total.windowClosed, 2);
   assert.equal(r.days[0].windowClosed, 2);
+  // De las dos, una se retomó; la otra sigue sin respuesta y con la ventana cerrada ahora.
+  assert.deepEqual([r.total.windowClosedAnsweredLater, r.total.windowClosedNow], [1, 1]);
+});
+
+test("ventana de WhatsApp: la misma regla en todos lados (24 horas justas ya es cerrada) y 'venció alguna vez' no es 'cerrada ahora'", () => {
+  const last = at("2026-03-02T11:00");
+  // Justo a las 24 horas, sin respuesta: cerrada. Un minuto antes, no.
+  assert.equal(report([row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: last })], "2026-03-03T11:00").total.windowClosedNow, 1);
+  assert.equal(report([row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: last })], "2026-03-03T10:59").total.windowClosedNow, 0);
+  // Respondida justo a las 24 horas: ya hizo falta plantilla.
+  assert.equal(report([row("2026-03-02T11:00", { answered: "2026-03-03T11:00", lastCustomerBeforeResponseAt: last })], "2026-03-05T10:00").total.windowClosed, 1);
+
+  const rows = [
+    // Escribió, pasaron 30 horas, volvió a escribir hace 2 horas y sigue sin respuesta:
+    // venció alguna vez, pero ahora la ventana está abierta de nuevo.
+    row("2026-03-02T11:00", { lastCustomerBeforeResponseAt: at("2026-03-03T17:00"), maxCustomerSilenceMinutes: 30 * 60 }),
+    // Lo mismo, y después le respondieron a la hora: venció alguna vez y se retomó.
+    row("2026-03-02T11:00", { answered: "2026-03-03T18:00", lastCustomerBeforeResponseAt: at("2026-03-03T17:00"), maxCustomerSilenceMinutes: 30 * 60 }),
+    // Silencios cortos: nunca venció.
+    row("2026-03-02T11:00", { answered: "2026-03-02T15:00", lastCustomerBeforeResponseAt: at("2026-03-02T12:00"), maxCustomerSilenceMinutes: 180 }),
+  ];
+  const t = report(rows, "2026-03-03T19:00").total;
+  assert.deepEqual([t.windowClosed, t.windowClosedAnsweredLater, t.windowClosedNow], [2, 1, 0]);
+});
+
+test("recorrido: el tiempo en el bot suma todas las vías con salida registrada", () => {
+  const t = report([
+    row("2026-03-02T11:00", { exit: "2026-03-02T11:04", answered: "2026-03-02T11:30" }),
+    row("2026-03-02T12:00", { exit: "2026-03-02T12:10" }),
+    row("2026-03-02T13:00", { exit: null }),
+  ], "2026-03-02T18:00").total;
+  assert.deepEqual([t.botTime.n, t.botTime.median], [2, 7]);
+});
+
+test("por tipo de día: el calendario trae todos los días hasta el corte y las horas se separan en laborables, sábados y sin horario público", () => {
+  // 02/03 lunes, 07/03 sábado, 08/03 domingo. Período 02 al 10; el corte es el 09.
+  const r = buildAttentionReport([
+    row("2026-03-02T10:20", { answered: "2026-03-02T10:50" }),
+    row("2026-03-02T10:40", { answered: "2026-03-02T11:50" }),
+    row("2026-03-03T10:10"),
+    row("2026-03-07T10:00", { answered: "2026-03-07T10:10" }),
+    row("2026-03-08T20:00"),
+  ], { now: at("2026-03-09T09:00"), from: "2026-03-02", to: "2026-03-10", versions });
+  assert.deepEqual(r.calendar.map((c) => c.kind), ["LABORABLE", "LABORABLE", "LABORABLE", "LABORABLE", "LABORABLE", "SABADO", "SIN_HORARIO", "LABORABLE"]);
+  assert.deepEqual(r.byHourKind.map((g) => [g.kind, g.days, g.entries]), [["LABORABLE", 6, 3], ["SABADO", 1, 1], ["SIN_HORARIO", 1, 1]]);
+  const lab = r.byHourKind[0].hours[10];
+  assert.deepEqual(lab, { entries: 3, answered: 2, medianClockMinutes: 48, unansweredSameDay: 1 });
+  assert.equal(r.byHourKind[2].hours[20].unansweredSameDay, 1);
+  assert.deepEqual(r.days.map((d) => d.kind), ["LABORABLE", "LABORABLE", "SABADO", "SIN_HORARIO"]);
 });
 
 test("ventana de WhatsApp: corre el fin de semana, cuando el reloj hábil está pausado", () => {

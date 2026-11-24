@@ -20,7 +20,8 @@ const MS_HOUR = 3_600_000;
 const MS_MIN = 60_000;
 
 /**
- *  - CERRADA: pasaron más de 24 horas desde el último mensaje del cliente; requiere plantilla.
+ *  - CERRADA: pasaron 24 horas o más desde el último mensaje del cliente; requiere plantilla.
+ *    Es la MISMA regla en "Ahora" y en el historial: a las 24 horas justas ya está cerrada.
  *  - POR_VENCER: todavía se puede responder y falta menos que el aviso configurado.
  *  - ABIERTA: se puede responder libremente.
  */
@@ -48,5 +49,21 @@ export function windowState(lastCustomerAt: Date, now: Date, warningHours: numbe
  * horas ya necesitó una plantilla: la ventana se había cerrado.
  */
 export function windowClosedUnanswered(lastCustomerAt: Date, answeredAt: Date | null, now: Date): boolean {
-  return (answeredAt ?? now).getTime() > windowClosesAt(lastCustomerAt).getTime();
+  return (answeredAt ?? now).getTime() >= windowClosesAt(lastCustomerAt).getTime();
+}
+
+/**
+ * ¿La ventana VENCIÓ ALGUNA VEZ antes de la primera respuesta? Es un hecho histórico, distinto
+ * de "está cerrada ahora": el cliente pudo volver a escribir y abrirla de nuevo.
+ *
+ *  - `maxSilenceMinutes`: el mayor tiempo entre un mensaje del cliente anterior a la primera
+ *    respuesta y lo que siguió (otro mensaje suyo, o esa primera respuesta). null si no se midió.
+ *  - `lastCustomerAt`: su último mensaje anterior a la primera respuesta. Si todavía no hay
+ *    respuesta, ese silencio sigue corriendo hasta `now`.
+ */
+export function windowExpiredBeforeResponse(
+  maxSilenceMinutes: number | null, lastCustomerAt: Date | null, answeredAt: Date | null, now: Date,
+): boolean {
+  if (maxSilenceMinutes !== null && maxSilenceMinutes >= WHATSAPP_WINDOW_HOURS * 60) return true;
+  return lastCustomerAt !== null && windowClosedUnanswered(lastCustomerAt, answeredAt, now);
 }
