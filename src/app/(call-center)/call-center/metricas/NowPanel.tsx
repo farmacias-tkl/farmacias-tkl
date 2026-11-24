@@ -6,7 +6,7 @@ import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
 import type { ClosedReason, NowListItem, NowOwnerRow, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
 import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
-import { comparisonNote, comparisonVerdict, sameSchedule } from "@/lib/call-center/metrics/comparison";
+import { comparisonNote, comparisonVerdict, scheduleNote } from "@/lib/call-center/metrics/comparison";
 import { coverStatus } from "@/lib/call-center/metrics/cover";
 import { useNowData } from "./useNowData";
 
@@ -730,7 +730,9 @@ function ProgressCard({ d }: { d: NowPayload }) {
   const verdict = comparisonVerdict(today, previous);
   const interpret = verdict.kind === "OK";
   const note = comparisonNote(verdict);
-  const answeredLabel = `${nf.format(today.answered)} ${today.answered === 1 ? "conversación respondida" : "conversaciones respondidas"}`;
+  // La mediana siempre lleva al lado sobre cuántas respondidas se calculó y de cuántas entradas.
+  const answeredLabel = `${nf.format(today.answered)} ${today.answered === 1 ? "respondida" : "respondidas"} de ${nf.format(today.entries)}`;
+  const windowNote = scheduleNote(today, previous);
   const pendingNow = d.waiting.total;
   const critical = d.waiting.critical;
   return (
@@ -829,6 +831,12 @@ function ProgressCard({ d }: { d: NowPayload }) {
             <dt>Siguen sin primera respuesta</dt>
             <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(today.pending)} de {nf.format(today.entries)} <span className="font-normal text-gray-600">· antes {nf.format(previous.pending)} de {nf.format(previous.entries)}</span></dd>
           </div>
+          {today.pendingOverdue !== null && (
+            <div className="flex items-baseline justify-between gap-3">
+              <dt>De esas, con la meta ya vencida</dt>
+              <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(today.pendingOverdue)}{previous.pendingOverdue !== null ? <span className="font-normal text-gray-600"> · antes {nf.format(previous.pendingOverdue)}</span> : null}</dd>
+            </div>
+          )}
           {note && <p className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-800">{note}</p>}
         </dl>
       )}
@@ -839,11 +847,11 @@ function ProgressCard({ d }: { d: NowPayload }) {
             <span>Conversaciones cuya ventana se cerró sin respuesta, hoy</span>
             <span className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(p.windowClosed.today)} <span className="font-normal text-gray-600">· antes {nf.format(p.windowClosed.previous)}</span></span>
           </div>
-          {sameSchedule(today, previous) ? (
+          {windowNote === null ? (
             <Trend better={p.windowClosed.today < p.windowClosed.previous} same={p.windowClosed.today === p.windowClosed.previous}
               text={`${nf.format(Math.abs(p.windowClosed.today - p.windowClosed.previous))} ${p.windowClosed.today < p.windowClosed.previous ? "menos" : "más"}`} />
           ) : (
-            <span className="text-xs text-gray-700">Los dos días no son comparables: uno tiene horario público y el otro no.</span>
+            <span className="text-xs text-gray-700">{windowNote}</span>
           )}
         </div>
       ) : (
@@ -855,7 +863,7 @@ function ProgressCard({ d }: { d: NowPayload }) {
         {" "}Pendientes al empezar el turno: conversaciones abiertas, con el último mensaje del cliente y hasta {d.windowHours} horas de espera, a la hora en que empieza el
         horario de operadores. La comparación toma lo que había entrado y lo que se había respondido el mismo día de la semana pasada a esta misma hora
         ({nf.format(today.entries)} entradas hoy, {nf.format(previous.entries)} ese día). Las medianas describen solo las conversaciones ya respondidas. La flecha de mejor o peor
-        aparece solo si cada día tiene al menos 20 respondidas y más de la mitad de sus entradas respondidas, y si los dos días tienen la misma condición de horario público. &quot;Sin datos&quot; quiere decir que no hay con qué calcularlo, no que sea cero.
+        aparece solo si cada día tiene al menos 20 respondidas y más de la mitad de sus entradas respondidas, y si se sabe que los dos días tienen la misma condición de horario público (sin configuración de alguno de los dos, no hay flecha). &quot;Sin datos&quot; quiere decir que no hay con qué calcularlo, no que sea cero.
       </More>
       <Evidence level="MEDIDO" />
     </div>

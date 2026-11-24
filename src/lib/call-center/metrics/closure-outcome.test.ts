@@ -5,7 +5,8 @@
  */
 import assert from "node:assert/strict";
 import { closureMapOf, closureOutcomeOf } from "./closure-outcome";
-import { buildAccountsReport, type ClosureAttribution, type OperatorMessageRow } from "./accounts";
+import { buildAccountsReport, type PeriodClosureRow, type OperatorMessageRow } from "./accounts";
+import type { ConfigVersion } from "./config";
 import { closureLabelOf } from "../ingest";
 
 let passed = 0;
@@ -53,28 +54,45 @@ test("ingesta: la etiqueta de cierre se decide por diferencia contra las etiquet
   assert.equal(closureLabelOf(["solo_consulta", "venta_concretada", "dr_app"], set, ["solo_consulta", "venta_concretada"]), null);
 });
 
-test("Operadores: el cierre se atribuye a la cuenta asignada al resolver, una sola vez por conversación", () => {
+test("Operadores: cierres del período por la fila de cierre del historial, con el mapa vigente ese día, el tipo de asignado y la cobertura", () => {
   const at = (s: string) => new Date(`${s}:00.000-03:00`);
   const msg = (account: string, conversationId: string): OperatorMessageRow => ({ account, conversationId, sentAt: at("2026-03-03T11:00"), isPrivate: false });
-  const messages = [msg("9001", "c1"), msg("9001", "c2"), msg("9001", "c3"), msg("9002", "c1")];
-  // c1: escribieron 9001 y 9002, la cerró 9002. c2: la cerró 9001. c3: se resolvió sin asignado.
-  // c4: la cerró 9003, que no escribió en el período. c9: sin mensajes de operador en el período, no entra.
-  const outcomes = new Map<string, ClosureAttribution>([
-    ["c1", { outcome: "VENTA", account: "9002" }], ["c2", { outcome: "CONSULTA", account: "9001" }],
-    ["c3", { outcome: "SIN_STOCK", account: null }], ["c4", { outcome: "VENTA", account: "9003" }],
-    ["c9", { outcome: "VENTA", account: "9001" }],
-  ]);
-  const r = buildAccountsReport({ messages: [...messages, msg("9001", "c4")], followups: [], facts: [], outcomes }, { now: at("2026-03-04T12:00"), versions: [] });
-  const by = Object.fromEntries(r.accounts.map((a) => [a.account, a.closures]));
-  assert.deepEqual([by["9001"]!.VENTA, by["9001"]!.CONSULTA, by["9001"]!.SIN_STOCK], [0, 1, 0], "escribir en una conversación no es cerrarla");
-  assert.deepEqual([by["9002"]!.VENTA, by["9002"]!.CONSULTA], [1, 0]);
-  assert.deepEqual([by["9003"]!.VENTA, r.accounts.find((a) => a.account === "9003")!.conversations], [1, 0], "la cuenta que cerró aparece aunque no haya escrito");
-  assert.deepEqual([r.closuresWithoutAccount!.SIN_STOCK, r.closuresWithoutAccount!.VENTA], [1, 0], "resuelta sin asignado: no se atribuye a nadie");
-  const total = r.accounts.reduce((n, a) => n + Object.values(a.closures!).reduce((x, y) => x + y, 0), 0);
-  assert.equal(total, 3, "cada conversación cuenta una sola vez");
-  // Sin etiquetas de cierre en la configuración: sin dato, no cero.
+  const messages = [msg("9001", "c1"), msg("9001", "c2"), msg("9002", "c1")];
+  const week = { "1": [], "2": [], "3": [], "4": [], "5": [], "6": [], "7": [] };
+  const data = (closureLabels: Array<{ label: string; outcome: "VENTA" | "CONSULTA" | "SIN_STOCK" }>) =>
+    ({ schemaVersion: 1 as const, publicHours: week, operatorHours: week, firstResponseGoalMinutes: 15, accounts: [], callCenterVendors: [], closureLabels });
+  // Hasta el 02/03 "cierre_x" quería decir consulta; desde el 03/03, venta.
+  const versions = [
+    { id: "v1", validFrom: "2026-03-01", createdAt: new Date("2026-02-28T00:00:00Z"), data: data([{ label: "cierre_x", outcome: "CONSULTA" }, { label: "cierre_stock", outcome: "SIN_STOCK" }]) },
+    { id: "v2", validFrom: "2026-03-03", createdAt: new Date("2026-03-02T00:00:00Z"), data: data([{ label: "cierre_x", outcome: "VENTA" }, { label: "cierre_stock", outcome: "SIN_STOCK" }]) },
+  ] as unknown as ConfigVersion[];
+  const row = (conversationId: string, closed: string, over: Partial<PeriodClosureRow> = {}): PeriodClosureRow =>
+    ({ conversationId, closedAt: at(closed), closureTypeName: "cierre_x", labelsSeen: ["cierre_x"], account: "9001", assigneeType: "USER", ...over });
+  const closures = [
+    row("c1", "2026-03-02T12:00", { account: "9002" }),               // mapa del 02/03: consulta. Escribieron 9001 y 9002; la cerró 9002.
+    row("c2", "2026-03-03T12:00"),                                     // mapa del 03/03: venta.
+    row("c3", "2026-03-03T13:00", { account: null, assigneeType: null }), // sin asignado.
+    row("c4", "2026-03-03T14:00", { account: "9003" }),               // 9003 no escribió en el período.
+    row("c5", "2026-03-03T15:00", { account: "37", assigneeType: "AGENT_BOT" }), // la tenía un bot: nadie la tomó.
+    row("c6", "2026-03-03T16:00", { closureTypeName: null, labelsSeen: [] }),    // sin tipo.
+    row("c7", "2026-03-03T17:00", { closureTypeName: null, labelsSeen: ["cierre_x", "cierre_stock"] }), // dos resultados: ambiguo.
+    row("c8", "2026-03-03T18:00", { closureTypeName: null, labelsSeen: ["otra", "cierre_stock"] }),     // un solo resultado entre las vistas.
+    // Dos cierres de la misma conversación: vale el último del período.
+    row("c9", "2026-03-03T09:00", { closureTypeName: "cierre_stock" }), row("c9", "2026-03-03T19:00"),
+  ];
+  const r = buildAccountsReport({ messages, followups: [], facts: [], closures }, { now: at("2026-03-04T12:00"), versions });
+  const of = (a: string) => r.accounts.find((x) => x.account === a)!;
+  assert.deepEqual([of("9002").closures!.closed, of("9002").closures!.byOutcome.CONSULTA, of("9002").closures!.byOutcome.VENTA], [1, 1, 0], "el resultado es el del mapa vigente el día del cierre");
+  const c1 = of("9001").closures!;
+  assert.deepEqual([c1.closed, c1.byOutcome.VENTA, c1.byOutcome.SIN_STOCK, c1.untyped, c1.ambiguous], [5, 2, 1, 1, 1], "escribir en una conversación no es cerrarla");
+  assert.deepEqual([of("9003").closures!.byOutcome.VENTA, of("9003").conversations], [1, 0], "la cuenta que cerró aparece aunque no haya escrito");
+  const t = r.closures!;
+  assert.deepEqual([t.total.closed, t.withoutAccount.closed, t.byBot.closed], [9, 1, 1], "cada conversación una sola vez; sin asignado y con bot no se atribuyen a una persona");
+  assert.equal(r.accounts.some((a) => a.account === "37"), false, "el bot no aparece como cuenta");
+  assert.equal(t.coverage, 7 / 9);
+  // Sin los cierres cargados: sin dato, no cero.
   const sin = buildAccountsReport({ messages, followups: [], facts: [] }, { now: at("2026-03-04T12:00"), versions: [] });
-  assert.deepEqual([sin.accounts[0].closures, sin.closuresWithoutAccount], [null, null]);
+  assert.deepEqual([sin.accounts[0].closures, sin.closures], [null, null]);
 });
 
 console.log(`\nmetrics/closure-outcome: ${passed} ok, ${failures.length} fail`);

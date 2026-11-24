@@ -17,7 +17,7 @@ export const COMPARISON_MIN_ANSWERED_SHARE = 0.5;
 export interface ComparisonSide {
   entries: number;
   answered: number;
-  /** ¿El día tiene horario público? null si no se sabe. */
+  /** ¿El día tiene horario público? null o ausente: no se sabe (falta configuración). */
   hasPublicHours?: boolean | null;
 }
 
@@ -25,7 +25,9 @@ export type ComparisonVerdict =
   | { kind: "OK" }
   /** `side` dice qué lado tiene la muestra chica: el de hoy manda en el texto. */
   | { kind: "SMALL_SAMPLE"; side: "today" | "previous"; answered: number; entries: number }
-  | { kind: "DIFFERENT_SCHEDULE" };
+  | { kind: "DIFFERENT_SCHEDULE" }
+  /** No se conoce el horario de alguno de los dos días: no se puede decir que sean comparables. */
+  | { kind: "UNKNOWN_SCHEDULE" };
 
 const small = (s: ComparisonSide) =>
   s.answered < COMPARISON_MIN_ANSWERED || s.entries <= 0 || s.answered / s.entries < COMPARISON_MIN_ANSWERED_SHARE;
@@ -37,20 +39,37 @@ const small = (s: ComparisonSide) =>
 export function comparisonVerdict(today: ComparisonSide, previous: ComparisonSide): ComparisonVerdict {
   if (small(today)) return { kind: "SMALL_SAMPLE", side: "today", answered: today.answered, entries: today.entries };
   if (small(previous)) return { kind: "SMALL_SAMPLE", side: "previous", answered: previous.answered, entries: previous.entries };
-  if (!sameSchedule(today, previous)) return { kind: "DIFFERENT_SCHEDULE" };
+  const schedule = scheduleRelation(today, previous);
+  if (schedule === "UNKNOWN") return { kind: "UNKNOWN_SCHEDULE" };
+  if (schedule === "DIFFERENT") return { kind: "DIFFERENT_SCHEDULE" };
   return { kind: "OK" };
 }
 
-/** ¿Los dos días tienen la misma condición de horario público? Sin dato de alguno, se asume que sí. */
+/** Relación entre los horarios públicos de los dos días. Sin dato de alguno: no se sabe. */
+export function scheduleRelation(today: ComparisonSide, previous: ComparisonSide): "SAME" | "DIFFERENT" | "UNKNOWN" {
+  if (today.hasPublicHours == null || previous.hasPublicHours == null) return "UNKNOWN";
+  return today.hasPublicHours === previous.hasPublicHours ? "SAME" : "DIFFERENT";
+}
+
+/** ¿Se sabe que los dos días tienen la misma condición de horario público? Sin dato, no. */
 export function sameSchedule(today: ComparisonSide, previous: ComparisonSide): boolean {
-  if (today.hasPublicHours == null || previous.hasPublicHours == null) return true;
-  return today.hasPublicHours === previous.hasPublicHours;
+  return scheduleRelation(today, previous) === "SAME";
+}
+
+const DIFFERENT_NOTE = "Los dos días no son comparables: uno tiene horario público y el otro no. Se muestran los números sin interpretarlos.";
+const UNKNOWN_NOTE = "No se conoce el horario público de alguno de los dos días (falta configuración). Se muestran los números sin interpretarlos.";
+
+/** Aviso por el horario, para comparaciones que no dependen de la muestra. null si son comparables. */
+export function scheduleNote(today: ComparisonSide, previous: ComparisonSide): string | null {
+  const r = scheduleRelation(today, previous);
+  return r === "SAME" ? null : r === "UNKNOWN" ? UNKNOWN_NOTE : DIFFERENT_NOTE;
 }
 
 /** Texto del aviso que reemplaza a la flecha. null cuando la comparación se puede interpretar. */
 export function comparisonNote(v: ComparisonVerdict): string | null {
   if (v.kind === "OK") return null;
-  if (v.kind === "DIFFERENT_SCHEDULE") return "Los dos días no son comparables: uno tiene horario público y el otro no. Se muestran los números sin interpretarlos.";
+  if (v.kind === "DIFFERENT_SCHEDULE") return DIFFERENT_NOTE;
+  if (v.kind === "UNKNOWN_SCHEDULE") return UNKNOWN_NOTE;
   const n = `${v.answered} ${v.answered === 1 ? "conversación respondida" : "conversaciones respondidas"} de ${v.entries}`;
   return v.side === "today"
     ? `Muestra pequeña: ${n}. No permite concluir una mejora general.`

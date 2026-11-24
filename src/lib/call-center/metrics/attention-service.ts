@@ -27,8 +27,16 @@ export async function getAttentionPayload(from: string, to: string, now: Date = 
   const hit = cache.get(key);
   if (hit && now.getTime() - hit.at < ttl) return hit.payload;
 
-  const [{ versions }, rows, activity] = await Promise.all([loadConfigVersions(), loadEntryRows(from, to), loadActivityReport(from, to)]);
+  // Tiempos por parte, para saber dónde se va la carga antes de proponer índices. Sin datos de clientes.
+  const t0 = Date.now();
+  const ms: Record<string, number> = {};
+  const timed = async <T,>(name: string, p: Promise<T>): Promise<T> => { const r = await p; ms[name] = Date.now() - t0; return r; };
+  const [{ versions }, rows, activity] = await Promise.all([
+    timed("config", loadConfigVersions()), timed("entradas", loadEntryRows(from, to)), timed("actividad", loadActivityReport(from, to)),
+  ]);
+  const t1 = Date.now();
   const payload = toAttentionPayload(buildAttentionReport(rows, { now, from, to, versions }), activity);
+  console.log("[call-center/metrics/attention] ms", JSON.stringify({ ...ms, calculo: Date.now() - t1, total: Date.now() - t0, filas: rows.length, dias: payload.calendar.length }));
 
   if (cache.size >= CACHE_MAX_ENTRIES) {
     for (const [k, v] of cache) if (now.getTime() - v.at >= ttl) cache.delete(k);

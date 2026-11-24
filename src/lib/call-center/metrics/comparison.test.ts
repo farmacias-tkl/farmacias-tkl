@@ -4,7 +4,7 @@
  *   npx tsx src/lib/call-center/metrics/comparison.test.ts
  */
 import assert from "node:assert/strict";
-import { comparisonNote, comparisonVerdict, sameSchedule } from "./comparison";
+import { comparisonNote, comparisonVerdict, sameSchedule, scheduleNote } from "./comparison";
 
 let passed = 0;
 const failures: string[] = [];
@@ -40,8 +40,13 @@ test("un día sin horario público contra uno con atención: se muestran los nú
   assert.equal(v.kind, "DIFFERENT_SCHEDULE");
   assert.match(comparisonNote(v)!, /no son comparables/);
   assert.equal(comparisonVerdict(side(60, 80, false), side(70, 90, false)).kind, "OK");
-  // Sin dato de horario no se puede decir que sean distintos.
-  assert.equal(sameSchedule(side(1, 1, null), side(1, 1, true)), true);
+  // Sin dato de horario no se sabe si son comparables: los números se muestran, sin flecha.
+  assert.equal(sameSchedule(side(1, 1, null), side(1, 1, true)), false);
+  const u = comparisonVerdict(side(60, 80, null), side(70, 90, true));
+  assert.equal(u.kind, "UNKNOWN_SCHEDULE");
+  assert.match(comparisonNote(u)!, /No se conoce el horario público/);
+  assert.equal(scheduleNote(side(1, 1, true), side(1, 1, true)), null);
+  assert.match(scheduleNote(side(1, 1, true), side(1, 1, false))!, /no son comparables/);
   assert.equal(comparisonNote({ kind: "OK" }), null);
 });
 

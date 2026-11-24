@@ -90,6 +90,8 @@ export function cutEntryRowsAt(rows: readonly EntryRow[], cutoff: Date): EntryRo
       firstHumanAccount: r.firstHumanAt && r.firstHumanAt.getTime() <= t ? r.firstHumanAccount : null,
       // Un mensaje del cliente posterior al corte todavía no existía: sin el dato no se evalúa la ventana.
       lastCustomerBeforeResponseAt: r.lastCustomerBeforeResponseAt && r.lastCustomerBeforeResponseAt.getTime() <= t ? r.lastCustomerBeforeResponseAt : null,
+      // Medido con todo lo que pasó después del corte: no vale para esa hora.
+      maxCustomerSilenceMinutes: null,
     }));
 }
 
@@ -104,6 +106,7 @@ export function progressSide(rows: readonly EntryRow[], day: string, at: Date, v
     hasPublicHours: configForDay(versions, day) ? publicHours(versions)(day).length > 0 : null,
     answered: total.answered,
     pending: total.pending.total,
+    pendingOverdue: total.goal?.pendingOverdue ?? null,
     medianClockMinutes: total.firstResponseClock.median,
   };
 }
@@ -157,7 +160,7 @@ export interface WindowRow {
 export function countWindowClosures(rows: readonly WindowRow[], from: Date, to: Date): number {
   return rows.filter((r) => {
     const closes = windowClosesAt(r.lastCustomerAt).getTime();
-    return !r.onlyGreeting && closes >= from.getTime() && closes < to.getTime() && (r.firstHumanAt === null || r.firstHumanAt.getTime() > closes);
+    return !r.onlyGreeting && closes >= from.getTime() && closes < to.getTime() && (r.firstHumanAt === null || r.firstHumanAt.getTime() >= closes);
   }).length;
 }
 

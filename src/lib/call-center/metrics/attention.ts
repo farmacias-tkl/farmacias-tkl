@@ -26,7 +26,8 @@ import {
 } from "./business-time";
 import { configForDay, type ConfigVersion } from "./config";
 import { publicHours } from "./schedule";
-import { windowClosedUnanswered } from "./whatsapp-window";
+import { windowClosedUnanswered, windowExpiredBeforeResponse } from "./whatsapp-window";
+import { addDaysISO } from "./period";
 import { BOT_BUTTONS, EMPTY_MESSAGE } from "./kinds-patterns";
 import { BOT_ORDER_COMPLETE_LIKE, THANKS_CANDIDATE, isThanksCandidate } from "./patterns";
 import {
@@ -51,6 +52,12 @@ export interface EntryRow {
    * respuesta): desde acá corre la ventana de 24 horas de WhatsApp. Ausente o null: no se evalúa.
    */
   lastCustomerBeforeResponseAt?: Date | null;
+  /**
+   * Mayor silencio, en minutos, entre un mensaje del cliente anterior a la primera respuesta y
+   * lo que siguió (otro mensaje suyo o esa respuesta). Con esto se sabe si la ventana de
+   * WhatsApp venció alguna vez, aunque después el cliente la haya reabierto. Ausente o null: no se midió.
+   */
+  maxCustomerSilenceMinutes?: number | null;
   /**
    * Todo lo que escribió el cliente son saludos, agradecimientos o botones del bot, sin
    * adjuntos (el mismo criterio de "Saludo / agradecimiento" de Tipos). No pedía una
@@ -92,12 +99,17 @@ export interface EntryFact extends EntryRow {
    */
   outsidePublicHours: boolean;
   /**
-   * La ventana de 24 horas de WhatsApp se cerró sin la primera respuesta: pasaron más de 24
-   * horas de reloj desde el último mensaje del cliente y nadie había respondido (o la primera
-   * respuesta llegó después). Para retomarla hizo falta una plantilla. No cuentan las
-   * conversaciones en las que el cliente solo saludó o agradeció.
+   * La ventana de 24 horas de WhatsApp VENCIÓ ALGUNA VEZ antes de la primera respuesta: en algún
+   * momento pasaron 24 horas de reloj o más desde un mensaje del cliente sin que nadie hubiera
+   * respondido. Es un hecho histórico. No cuentan las conversaciones en las que el cliente
+   * solo saludó o agradeció.
    */
-  windowClosed: boolean;
+  windowExpired: boolean;
+  /**
+   * Sigue sin primera respuesta y la ventana está CERRADA AHORA (al corte): pasaron 24 horas o
+   * más desde el último mensaje del cliente. La misma regla que usa "Ahora".
+   */
+  windowClosedNow: boolean;
   answeredSameDay: boolean;
   enteredInPublicHours: boolean | null;
 }
@@ -179,10 +191,36 @@ export interface AttentionSummary {
    * respuesta: la meta no aplica. Con su espera de reloj, que es la espera real del cliente.
    */
   outsidePublicHours: { answered: number; clock: Distribution };
-  /** Conversaciones cuya ventana de WhatsApp se cerró sin la primera respuesta. */
+  /** Conversaciones cuya ventana de WhatsApp venció alguna vez antes de la primera respuesta. */
   windowClosed: number;
   /** De esas, las que después sí recibieron una primera respuesta (se retomaron). El resto sigue sin ella al corte. */
   windowClosedAnsweredLater: number;
+  /** Siguen sin primera respuesta y tienen la ventana cerrada al corte. Es parte de las que no se retomaron. */
+  windowClosedNow: number;
+  /** Tiempo en el bot de todas las que tienen la salida registrada, por cualquier vía. */
+  botTime: Distribution;
+}
+
+/** Tipo de día, para leer las horas: no es lo mismo un martes que un sábado o un feriado. */
+export type DayKind = "LABORABLE" | "SABADO" | "SIN_HORARIO" | "SIN_CONFIG";
+
+/** Una hora de entrada (hora de Buenos Aires), sumando los días de un mismo tipo. */
+export interface HourStat {
+  entries: number;
+  answered: number;
+  /** Mediana de la espera real hasta la primera respuesta, entre las respondidas que entraron a esa hora. */
+  medianClockMinutes: number | null;
+  /** No recibieron la primera respuesta el día de entrada. */
+  unansweredSameDay: number;
+}
+
+export interface HourGroup {
+  kind: DayKind;
+  /** Días del período de este tipo, hayan tenido entradas o no. */
+  days: number;
+  entries: number;
+  /** 24 posiciones. */
+  hours: HourStat[];
 }
 
 export interface AttentionDay extends AttentionSummary {
@@ -196,6 +234,7 @@ export interface AttentionDay extends AttentionSummary {
   pendingAtClose: { leftBotInHours: number; pending: number } | null;
   /** Entradas por hora de Buenos Aires (24 posiciones). */
   byHour: number[];
+  kind: DayKind;
 }
 
 export interface AttentionReport {
@@ -206,6 +245,17 @@ export interface AttentionReport {
   days: AttentionDay[];
   /** Hay al menos una versión de configuración vigente en el período. */
   hasConfig: boolean;
+  /** Todos los días del período hasta el corte, con su tipo: también los que no tuvieron entradas. */
+  calendar: Array<{ day: string; kind: DayKind }>;
+  /** Entradas, demora y falta de respuesta por hora de entrada, separadas por tipo de día. Solo los tipos con días en el período. */
+  byHourKind: HourGroup[];
+}
+
+/** Tipo de un día de Buenos Aires según la configuración vigente ese día. PURO. */
+export function dayKindOf(day: string, versions: readonly ConfigVersion[], pub: DayRanges): DayKind {
+  if (!configForDay(versions, day)) return "SIN_CONFIG";
+  if (pub(day).length === 0) return "SIN_HORARIO";
+  return new Date(`${day}T00:00:00.000Z`).getUTCDay() === 6 ? "SABADO" : "LABORABLE";
 }
 
 /** Clasifica una fila: tipo de gestión, vía de salida, demoras y grupo de la meta. PURO. */
@@ -238,8 +288,10 @@ export function toEntryFact(row: EntryRow, now: Date, versions: readonly ConfigV
       : null,
     botMinutes: row.botExitAt ? Math.max(0, (row.botExitAt.getTime() - row.createdAt.getTime()) / MS_MIN) : null,
     outsidePublicHours,
-    windowClosed: row.lastCustomerBeforeResponseAt && !row.customerOnlyGreeting
-      ? windowClosedUnanswered(row.lastCustomerBeforeResponseAt, answered, now) : false,
+    windowExpired: row.lastCustomerBeforeResponseAt && !row.customerOnlyGreeting
+      ? windowExpiredBeforeResponse(row.maxCustomerSilenceMinutes ?? null, row.lastCustomerBeforeResponseAt, answered, now) : false,
+    windowClosedNow: answered === null && !!row.lastCustomerBeforeResponseAt && !row.customerOnlyGreeting
+      && windowClosedUnanswered(row.lastCustomerBeforeResponseAt, null, now),
     goal: version && !outsidePublicHours
       ? {
           ...classifyAgainstGoal(clockStart, answered, now, version.data.firstResponseGoalMinutes, pub),
@@ -274,9 +326,13 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
   const late = { total: 0, answeredSameDay: 0 };
   const offHoursClock: number[] = [];
   let windowClosed = 0;
+  let windowClosedNow = 0;
+  const allBotTimes: number[] = [];
 
   for (const f of facts) {
-    if (f.windowClosed) { windowClosed++; if (f.firstHumanAt) windowClosedAnsweredLater++; }
+    if (f.windowExpired) { windowClosed++; if (f.firstHumanAt) windowClosedAnsweredLater++; }
+    if (f.windowClosedNow) windowClosedNow++;
+    if (f.botMinutes !== null) allBotTimes.push(f.botMinutes);
     byManagementType[f.managementType]++;
     byPath[f.botExitPath].conversations++;
     if (f.botMinutes !== null) botTimes[f.botExitPath].push(f.botMinutes);
@@ -357,7 +413,33 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
     outsidePublicHours: { answered: offHoursClock.length, clock: distribution(offHoursClock) },
     windowClosed,
     windowClosedAnsweredLater,
+    windowClosedNow,
+    botTime: distribution(allBotTimes),
   };
+}
+
+const DAY_KINDS: DayKind[] = ["LABORABLE", "SABADO", "SIN_HORARIO", "SIN_CONFIG"];
+
+/** Horas de entrada por tipo de día. PURO. */
+export function buildHourGroups(facts: readonly EntryFact[], calendar: ReadonlyArray<{ day: string; kind: DayKind }>): HourGroup[] {
+  const kindOfDay = new Map(calendar.map((c) => [c.day, c.kind]));
+  return DAY_KINDS.flatMap((kind) => {
+    const days = calendar.filter((c) => c.kind === kind).length;
+    if (days === 0) return [];
+    const cells = Array.from({ length: 24 }, () => ({ entries: 0, unansweredSameDay: 0, waits: [] as number[] }));
+    let entries = 0;
+    for (const f of facts) {
+      if (kindOfDay.get(f.day) !== kind) continue;
+      const c = cells[f.hour];
+      c.entries++; entries++;
+      if (!f.answeredSameDay) c.unansweredSameDay++;
+      if (f.clockMinutes !== null) c.waits.push(f.clockMinutes);
+    }
+    return [{
+      kind, days, entries,
+      hours: cells.map((c) => ({ entries: c.entries, answered: c.waits.length, medianClockMinutes: percentile(c.waits, 0.5), unansweredSameDay: c.unansweredSameDay })),
+    }];
+  });
 }
 
 /** Cierre del horario público de un día: fin de su última franja. null si ese día no hay atención. */
@@ -396,8 +478,13 @@ export function buildAttentionReport(
         pending: leftInHours.filter((f) => !f.firstHumanAt || f.firstHumanAt.getTime() > close.getTime()).length,
       };
     }
-    return { day, inProgress: day >= today, pendingAtClose, byHour, ...summarize(list, opts.now) };
+    return { day, inProgress: day >= today, pendingAtClose, byHour, kind: dayKindOf(day, opts.versions, pub), ...summarize(list, opts.now) };
   });
+
+  // Calendario del período hasta el corte: los días sin entradas también existen.
+  const calendar: AttentionReport["calendar"] = [];
+  const last = opts.to < today ? opts.to : today;
+  for (let day = opts.from; day <= last; day = addDaysISO(day, 1)) calendar.push({ day, kind: dayKindOf(day, opts.versions, pub) });
 
   return {
     generatedAt: opts.now,
@@ -406,6 +493,8 @@ export function buildAttentionReport(
     total: summarize(facts, opts.now),
     days,
     hasConfig: facts.some((f) => f.goal !== null || f.outsidePublicHours),
+    calendar,
+    byHourKind: buildHourGroups(facts, calendar),
   };
 }
 
@@ -418,6 +507,7 @@ interface RawEntryRow {
   firstHumanAt: Date | null;
   firstHumanAccount: string | null;
   lastCustBeforeOp: Date | null;
+  maxSilence: number | null;
   orderFlow: boolean | null;
   meducar: boolean | null;
   custChars: number | null;
@@ -440,7 +530,13 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
   // Texto libre del cliente: lo que escribió, sin los botones del bot.
   const free = Prisma.sql`m.author = 'CUSTOMER' AND m.body IS NOT NULL AND m.body NOT IN (${Prisma.join([...BOT_BUTTONS])})`;
 
-  const rows = await prisma.$queryRaw<RawEntryRow[]>(Prisma.sql`
+  const rows = await prisma.$queryRaw<RawEntryRow[]>(entryRowsQuery(from, to, prevHours, free));
+  return rows.map(toEntryRow);
+}
+
+/** La consulta de loadEntryRows, aparte para poder medirla. */
+export function entryRowsQuery(from: Date, to: Date, prevHours: string, free: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
     WITH scope AS (
       SELECT c.id, c."customerId", c."createdAt"
       FROM "Conversation" c
@@ -456,9 +552,18 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
         bool_or(m.author = 'CUSTOMER' AND (m.body IS NULL OR m."mediaType" IS NOT NULL)) AS cust_media,
         bool_or(m.author = 'CUSTOMER' AND m.body ~* 'https?://') AS cust_link,
         (count(*) FILTER (WHERE ${free}))::int AS free_n,
-        (count(*) FILTER (WHERE ${free} AND m.body ~* ${EMPTY_MESSAGE}))::int AS empty_n
-      FROM "ConversationMessage" m
-      JOIN scope s ON s.id = m."conversationId"
+        (count(*) FILTER (WHERE ${free} AND m.body ~* ${EMPTY_MESSAGE}))::int AS empty_n,
+        -- Mayor silencio tras un mensaje del cliente anterior a la primera respuesta: hasta su
+        -- mensaje siguiente o hasta esa respuesta, lo que haya pasado primero.
+        (max(extract(epoch FROM (least(m.next_same, m.first_op_w) - m."sentAt")) / 60)
+          FILTER (WHERE m.author = 'CUSTOMER' AND (m.first_op_w IS NULL OR m."sentAt" < m.first_op_w)))::float8 AS max_silence
+      FROM (
+        SELECT x."conversationId", x.author, x.body, x."mediaType", x."isPrivate", x."sentAt",
+          lead(x."sentAt") OVER (PARTITION BY x."conversationId", x.author ORDER BY x."sentAt", x.id) AS next_same,
+          min(x."sentAt") FILTER (WHERE x.author = 'OPERATOR' AND NOT x."isPrivate") OVER (PARTITION BY x."conversationId") AS first_op_w
+        FROM "ConversationMessage" x
+        JOIN scope s ON s.id = x."conversationId"
+      ) m
       GROUP BY 1
     )
     SELECT
@@ -476,6 +581,7 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       (SELECT max(m."sentAt") FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'CUSTOMER'
           AND (a.first_op IS NULL OR m."sentAt" < a.first_op)) AS "lastCustBeforeOp",
+      a.max_silence AS "maxSilence",
       a.order_flow AS "orderFlow",
       (SELECT (m.author = 'CUSTOMER' AND m.body ~* ${MEDUCAR_LINK_REGEX} AND m.body ~* ${MEDUCAR_PHRASE_REGEX})
         FROM "ConversationMessage" m
@@ -495,9 +601,11 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
       ) AS "prevResolved"
     FROM scope s
     LEFT JOIN agg a ON a.cid = s.id
-  `);
+  `;
+}
 
-  return rows.map((r) => ({
+function toEntryRow(r: RawEntryRow): EntryRow {
+  return {
     conversationId: r.id,
     createdAt: r.createdAt,
     firstCustomerAt: r.firstCustomerAt,
@@ -506,6 +614,7 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
     firstHumanAt: r.firstHumanAt,
     firstHumanAccount: r.firstHumanAccount,
     lastCustomerBeforeResponseAt: r.lastCustBeforeOp,
+    maxCustomerSilenceMinutes: r.maxSilence === null ? null : Number(r.maxSilence),
     orderFlow: r.orderFlow === true,
     firstCustomerMessageIsMeducar: r.meducar === true,
     customerChars: Number(r.custChars ?? 0),
@@ -513,5 +622,5 @@ export async function loadEntryRows(fromDay: string, toDayInclusive: string): Pr
     customerSentLink: r.custLink === true,
     customerOnlyGreeting: r.custMedia !== true && Number(r.freeMessages ?? 0) === Number(r.emptyMessages ?? 0),
     previousResolvedRecently: r.prevResolved,
-  }));
+  };
 }
