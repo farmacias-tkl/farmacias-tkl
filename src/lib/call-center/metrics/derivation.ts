@@ -113,12 +113,19 @@ export async function loadDerivationRows(fromDay: string, toDayInclusive: string
       FROM "Conversation" c
       WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp AND c."createdAt" < ${utcTimestampParam(to)}::timestamp
     ), d AS (
-      SELECT DISTINCT ON (m."conversationId") m."conversationId" AS cid, m."sentAt" AS at, m.body
-      FROM "ConversationMessage" m
-      JOIN scope s ON s.id = m."conversationId"
-      WHERE ${op} AND m.body ~* ${OPERATOR_DERIVED}
-        AND NOT (m.body ~* ${OPERATOR_NO_COVERAGE} AND m.body ~* ${OPERATOR_OFFERS_PICKUP})
-      ORDER BY m."conversationId", m."sentAt", m.id
+      -- Por conversación y con LIMIT 1, no con un JOIN: así Postgres entra por el índice de
+      -- conversationId. Con el JOIN recorría la tabla de mensajes ENTERA aplicando la
+      -- expresión (5,6 s el 24/11, sin importar el período); así tarda 0,45 s con 30 días.
+      SELECT s.id AS cid, x.at, x.body
+      FROM scope s
+      JOIN LATERAL (
+        SELECT m."sentAt" AS at, m.body
+        FROM "ConversationMessage" m
+        WHERE m."conversationId" = s.id AND ${op} AND m.body ~* ${OPERATOR_DERIVED}
+          AND NOT (m.body ~* ${OPERATOR_NO_COVERAGE} AND m.body ~* ${OPERATOR_OFFERS_PICKUP})
+        ORDER BY m."sentAt", m.id
+        LIMIT 1
+      ) x ON true
     )
     SELECT s.id AS "conversationId", s."createdAt" AS "createdAt", (s.status <> 'RESUELTA') AS "open",
       d.at AS "at",
