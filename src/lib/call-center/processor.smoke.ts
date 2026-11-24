@@ -573,6 +573,41 @@ async function main() {
       assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType], [null, null]);
     });
 
+    // 5y. Orden de los eventos que fijan el asignado (datos inventados).
+    const ORD = 39860;
+    const T = (s: number) => ({ updated_at: new Date(Date.UTC(2026, 5, 20, 12, 0, s)).toISOString() });
+    const rawOrd = (event: string, status: string, assignee: { id: number; type?: string } | null, extra: Record<string, unknown> = {}) => {
+      const base = rawConvCreated(ORD, "+5491100000012", "Cliente Ficticio Orden", status, [], null, event);
+      return { ...base, meta: { ...base.meta, assignee: assignee ? { id: assignee.id } : null, ...(assignee?.type ? { assignee_type: assignee.type } : {}) }, ...extra };
+    };
+    const convOrd = () => prisma.conversation.findUnique({ where: { externalConversationId: String(ORD) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] } } });
+    await check("5y. el cambio de estado que llega DESPUÉS de la desasignación, pero es anterior, no vuelve a pegar el asignado", async () => {
+      await run(rawOrd("conversation_created", "pending", { id: 37, type: "AgentBot" }, T(0)));
+      // Emozion: sale de pendiente con el bot (segundo 10) y enseguida lo desasigna (segundo 11).
+      // Llegan al revés.
+      await run(rawOrd("conversation_updated", "open", null, T(11)));
+      assert.equal((await convOrd())!.externalAssigneeId, null);
+      await run(rawOrd("conversation_status_changed", "open", { id: 37, type: "AgentBot" }, T(10)));
+      let c = await convOrd();
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.externalAssigneeType], ["SIN_ASIGNAR", null, null], "el asignado guardado es el del evento más nuevo");
+      const row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([row.toStatus, row.externalAssigneeId, row.externalAssigneeType], ["SIN_ASIGNAR", "37", "AGENT_BOT"], "la fila lleva el asignado de su propio evento");
+      // Un conversation_updated atrasado tampoco lo pisa.
+      await run(rawOrd("conversation_updated", "open", { id: 37, type: "AgentBot" }, T(9)));
+      assert.equal((await convOrd())!.externalAssigneeId, null);
+      // Uno más nuevo sí: toma el caso una persona.
+      await run(rawOrd("conversation_updated", "open", { id: 80, type: "User" }, T(30)));
+      c = await convOrd();
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType, c!.externalAssigneeAt?.toISOString()], ["80", "USER", T(30).updated_at]);
+      // La misma hora no es "anterior": se aplica (no se puede ordenar).
+      await run(rawOrd("conversation_updated", "open", null, T(30)));
+      assert.equal((await convOrd())!.externalAssigneeId, null);
+      // Sin hora en el evento se aplica, como antes de tener este dato, y no mueve la hora guardada.
+      await run(rawOrd("conversation_updated", "open", { id: 81, type: "User" }));
+      c = await convOrd();
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeAt?.toISOString()], ["81", T(30).updated_at]);
+    });
+
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)
     await check("6. fallo de dominio → ERROR persiste; dominio rolled back", async () => {
       // status inválido (no producible por el mapper) → fuerza error de Prisma DENTRO de la tx.

@@ -100,7 +100,7 @@ export function isDomainIdempotencyUniqueViolation(e: unknown): boolean {
 const toDate = (v: unknown): Date | null => (v ? new Date(v as string) : null);
 function hydrateConversation(c: any): NormalizedConversation {
   if (!c || typeof c !== "object") throw new ProcessError("error", "CONVERSATION_PAYLOAD_INVALID");
-  return { ...c, firstResponseAt: toDate(c.firstResponseAt), closedAt: toDate(c.closedAt), externalCreatedAt: toDate(c.externalCreatedAt) };
+  return { ...c, firstResponseAt: toDate(c.firstResponseAt), closedAt: toDate(c.closedAt), externalCreatedAt: toDate(c.externalCreatedAt), assigneeEventAt: toDate(c.assigneeEventAt) };
 }
 function hydrateMessage(m: any): NormalizedMessage {
   if (!m || typeof m !== "object") throw new ProcessError("error", "MESSAGE_PAYLOAD_INVALID");
@@ -108,7 +108,7 @@ function hydrateMessage(m: any): NormalizedMessage {
 }
 function hydrateStatusEvent(s: any): NormalizedStatusEvent {
   if (!s || typeof s !== "object") throw new ProcessError("error", "STATUS_PAYLOAD_INVALID");
-  return { ...s, closedAt: toDate(s.closedAt) };
+  return { ...s, closedAt: toDate(s.closedAt), assigneeEventAt: toDate(s.assigneeEventAt) };
 }
 
 function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
@@ -122,6 +122,7 @@ function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
     closureTypeId: typeof u.closureTypeId === "string" ? u.closureTypeId : null,
     closureTypeName: typeof u.closureTypeName === "string" ? u.closureTypeName : null,
     eventAt: toDate(u.eventAt),
+    assigneeEventAt: toDate(u.assigneeEventAt),
     labels: Array.isArray(u.labels) ? u.labels.filter((l: unknown): l is string => typeof l === "string") : null,
   };
 }

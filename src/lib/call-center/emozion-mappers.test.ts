@@ -306,6 +306,20 @@ test("asignado. abierta con un BOT asignado es SIN_ASIGNAR: nadie la tomó; con 
   assert.deepEqual([bot?.externalAssigneeId, bot?.externalAssigneeType], ["9", "AGENT_BOT"]);
 });
 
+test("asignado. hora del evento: solo updated_at (no cae en resolved_at); los tres eventos la exponen", () => {
+  const conv = { id: 631, status: "resolved", updated_at: "2026-06-20T12:00:10.000Z", resolved_at: "2026-06-19T10:00:00.000Z", meta: { sender: { phone_number: "+5491100000013" }, assignee: null } };
+  const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
+  assert.equal(iso(normalizeConversation(conv).data?.assigneeEventAt), "2026-06-20T12:00:10.000Z");
+  assert.equal(iso(normalizeStatusEvent(conv).data?.assigneeEventAt), "2026-06-20T12:00:10.000Z");
+  assert.equal(iso(normalizeUpdateEvent(conv).data?.assigneeEventAt), "2026-06-20T12:00:10.000Z");
+  const sinHora = { ...conv, updated_at: undefined };
+  assert.equal(normalizeUpdateEvent(sinHora).data?.assigneeEventAt, null);
+  assert.equal(iso(normalizeUpdateEvent(sinHora).data?.eventAt), "2026-06-19T10:00:00.000Z", "eventAt sí cae en resolved_at");
+  // meta.assignee null (con la clave) es una desasignación; sin la clave no se toca.
+  assert.deepEqual([normalizeUpdateEvent(conv).data?.assigneePresent, normalizeUpdateEvent(conv).data?.externalAssigneeId], [true, null]);
+  assert.equal(normalizeUpdateEvent({ id: 631, status: "open", meta: {} }).data?.assigneePresent, false);
+});
+
 test("asignado. normalizeConversation lo expone y no cambia el mapeo de estado", () => {
   const sender = { phone_number: "+5491100000002" };
   const con = normalizeConversation({ id: 601, status: "open", meta: { sender, assignee: { id: 5 } } });
@@ -327,7 +341,7 @@ test("updated. está en la lista de eventos y lee SOLO tipo de cierre, asignado 
   } as never);
   assert.equal(r.outcome, "processed");
   assert.deepEqual(r.data, {
-    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", externalAssigneeType: null, closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null, labels: ["etiqueta"],
+    externalConversationId: "701", resolved: true, assigneePresent: true, externalAssigneeId: "12", externalAssigneeType: null, assigneeEventAt: null, closureTypeId: "9", closureTypeName: "Tipo inventado C", eventAt: null, labels: ["etiqueta"],
   });
   // Hora del evento: updated_at (ISO o epoch) o, si no viene, resolved_at.
   assert.equal(normalizeUpdateEvent({ id: 707, updated_at: ISO2, resolved_at: ISO }).data?.eventAt?.toISOString(), new Date(ISO2).toISOString());
