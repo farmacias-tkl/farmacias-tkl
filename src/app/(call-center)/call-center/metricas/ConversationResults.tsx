@@ -103,6 +103,16 @@ function Results({ data }: { data: KindsPayload }) {
         El resto de las conversaciones ({nf.format(n - t.PEDIDO - notCompleted - t.COMPRO_TKL)}) no tiene un resultado comercial detectado: consultas, seguimientos, reclamos, saludos y casos sin motivo claro.
         Una conversación con reclamo cuenta como reclamo, más abajo, y no acá.
       </p>
+      {data.motives && (
+        <p className="mt-2 text-sm text-gray-800">
+          Reclamos como motivo principal: <span className="font-semibold tabular-nums">{nf.format(data.motives.total.RECLAMO)}</span>
+          {" · "}con un reclamo durante la conversación: <span className="font-semibold tabular-nums">{nf.format(data.motives.extra.RECLAMO)}</span>
+          <span className="block text-xs text-gray-600">
+            Es la misma regla en todo el tablero: el cliente habla de un problema propio con un pedido, un pago, una entrega o la atención.
+            Los primeros escribieron por el reclamo; los segundos escribieron por otra cosa (un pedido, una consulta) y el reclamo apareció después.
+          </span>
+        </p>
+      )}
 
       {data.operator && (
         <Group title="Resultado de cierre registrado por el operador" value={`${nf.format(data.operator.confirmed)} de ${nf.format(n)}`}

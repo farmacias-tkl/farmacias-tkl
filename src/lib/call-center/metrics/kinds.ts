@@ -40,7 +40,7 @@ import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, arHour, utcTimestampParam } from "./business-time";
 import { periodCacheMs } from "./period";
 import { BOT_ORDER_COMPLETE_LIKE, PRESCRIPTION_LINK_REGEX } from "./patterns";
-import { claimsOf, loadDetectedRows, messageMatches } from "./detected";
+import { messageMatches } from "./detected";
 import { OWN_PROBLEM_CLAIM_PATTERNS, branchNamesRegex, type MessagePattern } from "./detected-patterns";
 import { BOT_ORDER_FLOW_LIKE } from "./management-type";
 import { buildMotivesReport, selectMotiveCases, type MotiveFlags } from "./motives";
@@ -71,7 +71,7 @@ export interface KindRow {
   resolved: boolean;
   closureTypeName: string | null;
   labels: string[];
-  /** Tiene algún motivo de reclamo (de detected.ts). */
+  /** Tiene un reclamo en algún mensaje escrito por el cliente: la misma regla que "Motivos de contacto". */
   claim: boolean;
   /** Mandó el mensaje armado de una receta digital para pedir. */
   prescription: boolean;
@@ -252,9 +252,8 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const branchRegex = branchNamesRegex(branches.map((b) => b.name));
   const tkl = branchRegex ? `${BOUGHT_AT_TKL}|\\m(${branchRegex})\\M` : BOUGHT_AT_TKL;
 
-  const [parts, detected, derivations] = await Promise.all([
+  const [parts, derivations] = await Promise.all([
     Promise.all(KIND_ROWS_PARTS.map((part) => prisma.$queryRaw<Array<Partial<RawKindRow> & { conversationId: string }>>(kindRowsQuery(from, to, tkl, part)))),
-    loadDetectedRows(fromDay, toDayInclusive),
     getDerivations(fromDay, toDayInclusive),
   ]);
   // Las tres partes traen las mismas conversaciones: se unen por id sobre la primera.
@@ -266,10 +265,10 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   });
   const derivationOf = new Map(derivations.map((d) => [d.conversationId, d.timing]));
 
-  const withClaim = new Set(detected.rows.filter((r) => claimsOf(r).length > 0).map((r) => r.conversationId));
   return rows.map(({ freeMessages, emptyMessages, customerMessages, ...r }) => ({
     ...r,
-    claim: withClaim.has(r.conversationId),
+    // Reclamo durante la conversación o como motivo principal (el principal siempre tiene la marca).
+    claim: r.strictClaim,
     operatorDerived: derivationOf.has(r.conversationId),
     derivation: derivationOf.get(r.conversationId) ?? null,
     hasFreeText: freeMessages > 0,

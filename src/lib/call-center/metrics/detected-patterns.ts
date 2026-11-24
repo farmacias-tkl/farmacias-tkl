@@ -62,18 +62,38 @@ export function saleBoughtAtTkl(branchRegex: string): readonly MessagePattern[] 
 
 // ── Reclamos ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * UNA sola regla de reclamo para todo el tablero ("Reclamos y pérdidas", "Ahora", "Resultado
+ * de las conversaciones" y "Motivos de contacto"): el cliente habla de un problema PROPIO con
+ * un pedido, un pago, una entrega o la atención. No son reclamos, y por eso no están acá:
+ * "en falta" o "no tienen stock" (es una consulta de stock), "reintegro", "descuento" o
+ * "cobertura" dentro de una pregunta de precio, ni "demora" o "tarda" sueltos (preguntar
+ * cuánto tarda es seguimiento). Hasta el 24/11 "Reclamos y pérdidas" usaba una regla más
+ * amplia, de palabras de queja sueltas: marcaba 157 conversaciones en 30 días donde esta
+ * regla marca 73.
+ */
 export const CLAIM_PATTERNS = {
   // Call Center
-  DEMORA: [{ all: ["\\m(demora(n|ron)?|tarda(n|ron)?|sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden))\\M"] }],
+  // Espera sin respuesta, dicha como queja.
+  DEMORA: [{ all: ["sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden)"] }],
   // Solo cuando el cliente dice que no tiene novedades. Preguntar cuándo llega, o dónde está el
-  // pedido, es seguimiento y no reclamo (la misma regla que "Motivos de contacto").
+  // pedido, es seguimiento y no reclamo.
   SIN_NOVEDADES: [{ all: ["sin novedad|no tengo novedad|pedido[^|]{0,40}novedad"] }],
-  INCORRECTO: [{ all: ["\\m(equivocad[oa]s?|incorrect[oa]s?|vencid[oa]s?)\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)"] }],
-  STOCK: [{ all: ["no (hay|tienen|ten[ií]an|queda) stock|sin stock|\\men falta\\M|no (lo|la|los|las) tienen"] }],
+  INCORRECTO: [
+    // Lo que llegó está mal o incompleto.
+    { all: ["\\mincorrect[oa]s?\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)|se olvidaron|falta[^|]{0,30}en (el|mi) pedido"] },
+    // "Equivocado" cuenta salvo que el error sea del propio cliente ("me había equivocado").
+    { all: ["\\mequivocad[oa]s?\\M"], none: ["\\mme (hab[ií]a |he )?equivo(qu|c)|\\m(estaba|estoy|estuve) equivocad|\\mmi error\\M"] },
+    // "Vencido" cuenta como producto recibido en mal estado: no si es una pregunta, ni si se
+    // habla de una receta, una orden o un descuento (ahí es una consulta).
+    { all: ["\\mvencid[oa]s?\\M"], none: ["\\?", "\\m(recetas?|[oó]rden(es)?|descuentos?|cup[oó]n|promo|promoci[oó]n|autorizaci[oó]n)\\M"] },
+  ],
   // Factura: solo si viene con una queja. Un pedido común de factura no es un reclamo.
   FACTURA: [{ all: ["\\mfactura", "no me lleg|todav[ií]a|sigo esperando|\\mfalta\\M|novedad|a[uú]n no|nunca"] }],
-  PRECIO: [{ all: ["me cobraron (de )?m[aá]s|m[aá]s caro|no me (hicieron|aplicaron|tomaron) el descuento|no (me )?(lo |la )?cubre|\\mcobertura\\M[^|]{0,40}(100|no |deber)|deber[ií]a (ser|salir|tener)"] }],
-  PAGO: [{ all: ["\\m(devoluci[oó]n|devolver|devuelvan|reintegro|reembolso|debitaron)\\M"] }],
+  // Le cobraron de más o no le aplicaron el descuento. Preguntar por un precio o una cobertura no cuenta.
+  PRECIO: [{ all: ["me cobraron (de )?m[aá]s|me cobraron mal|no me (hicieron|aplicaron|tomaron) el descuento"] }],
+  // Cobro doble o devolución que no llega. Pedir una devolución o preguntar por un reintegro no cuenta.
+  PAGO: [{ all: ["cobraron dos veces|doble cobro|no me (lleg[oóa]|hicieron|devolvieron|acreditaron) (la |el )?(devoluci[oó]n|reintegro|reembolso|plata|dinero)|me debitaron"] }],
   TRATO: [{ all: ["mala atenci[oó]n|maltrat|mal trato|falta de respeto|verg[uü]enza|p[eé]sim|desastre|inacept|una burla"] }],
   OTROS: [{ all: ["\\m(reclamo|queja|denuncia|defensa del consumidor|libro de quejas)\\M"] }],
   // Envíos: solo con queja. Mandar una moto propia o coordinar un horario no es un reclamo.
@@ -125,7 +145,7 @@ export type ClaimMotive = keyof typeof CLAIM_PATTERNS;
 export type ClaimGroup = "CALL_CENTER" | "ENVIOS" | "TIENDA_ONLINE";
 
 export const CLAIM_GROUP_OF: Record<ClaimMotive, ClaimGroup> = {
-  DEMORA: "CALL_CENTER", SIN_NOVEDADES: "CALL_CENTER", INCORRECTO: "CALL_CENTER", STOCK: "CALL_CENTER", FACTURA: "CALL_CENTER",
+  DEMORA: "CALL_CENTER", SIN_NOVEDADES: "CALL_CENTER", INCORRECTO: "CALL_CENTER", FACTURA: "CALL_CENTER",
   PRECIO: "CALL_CENTER", PAGO: "CALL_CENTER", TRATO: "CALL_CENTER", OTROS: "CALL_CENTER",
   ENVIO_NO_LLEGO: "ENVIOS", ENVIO_ENTREGA: "ENVIOS",
   WEB_SIN_CONFIRMACION: "TIENDA_ONLINE", WEB_PAGINA: "TIENDA_ONLINE",
@@ -135,13 +155,12 @@ export const CLAIM_MOTIVES = Object.keys(CLAIM_PATTERNS) as ClaimMotive[];
 
 /** Texto de cada motivo de reclamo. */
 export const CLAIM_LABELS: Record<ClaimMotive, string> = {
-  DEMORA: "Demora",
+  DEMORA: "Espera sin respuesta",
   SIN_NOVEDADES: "Pedido sin novedades",
   INCORRECTO: "Producto o cantidad incorrectos",
-  STOCK: "Stock",
   FACTURA: "Factura",
-  PRECIO: "Precio o cobertura",
-  PAGO: "Pago o devolución",
+  PRECIO: "Cobro de más o descuento no aplicado",
+  PAGO: "Cobro doble o devolución que no llega",
   TRATO: "Trato",
   OTROS: "Otros",
   ENVIO_NO_LLEGO: "No llegó el pedido",
@@ -151,31 +170,10 @@ export const CLAIM_LABELS: Record<ClaimMotive, string> = {
 };
 
 /**
- * Reclamo como MOTIVO DE CONTACTO: el cliente habla de un problema con un pedido, un pago, una
- * entrega o la atención PROPIOS. Es más estricto que los motivos de arriba, que buscan casos
- * para revisar: acá no cuentan "en falta" o "falta de stock" (es una consulta de stock),
- * "reintegro", "descuento" o "cobertura" dentro de una pregunta de precio, ni "demora" o
- * "tarda" sueltos (preguntar cuánto tarda es seguimiento).
+ * Todos los patrones de reclamo juntos, más "no me llegó nada": lo que usa "Motivos de
+ * contacto" para saber si una conversación tiene un reclamo. Es la misma regla de arriba.
  */
 export const OWN_PROBLEM_CLAIM_PATTERNS: readonly MessagePattern[] = [
-  // Espera sin respuesta, dicha como queja.
-  { all: ["sigo esperando|hace (rato|horas|d[ií]as) (que )?(espero|escrib|mand)|nadie (me )?(responde|contesta|atiende)|no me (responden|contestan|respondieron|contestaron|atienden)"] },
-  { all: ["sin novedad|no tengo novedad|pedido[^|]{0,40}novedad"] },
-  // Lo que llegó está mal o incompleto.
-  { all: ["\\mincorrect[oa]s?\\M|me (mandaron|enviaron|trajeron|dieron) (otro|otra|mal|de menos)|no es (lo|el|la) que ped[ií]|\\mfalt[oó] (un|una|el|la|los|las)\\M|vino (mal|otro|otra|rot)|se olvidaron|falta[^|]{0,30}en (el|mi) pedido"] },
-  // "Equivocado" cuenta salvo que el error sea del propio cliente ("me había equivocado").
-  { all: ["\\mequivocad[oa]s?\\M"], none: ["\\mme (hab[ií]a |he )?equivo(qu|c)|\\m(estaba|estoy|estuve) equivocad|\\mmi error\\M"] },
-  // "Vencido" cuenta como producto recibido en mal estado: no si es una pregunta, ni si se
-  // habla de una receta, una orden o un descuento (ahí es una consulta).
-  { all: ["\\mvencid[oa]s?\\M"], none: ["\\?", "\\m(recetas?|[oó]rden(es)?|descuentos?|cup[oó]n|promo|promoci[oó]n|autorizaci[oó]n)\\M"] },
-  // Cobro o devolución con problema.
-  { all: ["me cobraron (de )?m[aá]s|me cobraron mal|cobraron dos veces|doble cobro|no me (hicieron|aplicaron|tomaron) el descuento|no me (lleg[oó]|hicieron|devolvieron|acreditaron) (la |el )?(devoluci[oó]n|reintegro|reembolso|plata|dinero)|me debitaron"] },
-  ...CLAIM_PATTERNS.FACTURA,
-  ...CLAIM_PATTERNS.TRATO,
-  ...CLAIM_PATTERNS.OTROS,
-  ...CLAIM_PATTERNS.ENVIO_NO_LLEGO,
-  ...CLAIM_PATTERNS.ENVIO_ENTREGA,
-  ...CLAIM_PATTERNS.WEB_SIN_CONFIRMACION,
-  ...CLAIM_PATTERNS.WEB_PAGINA,
+  ...(Object.values(CLAIM_PATTERNS) as ReadonlyArray<readonly MessagePattern[]>).flat(),
   ...NOTHING_ARRIVED,
 ];

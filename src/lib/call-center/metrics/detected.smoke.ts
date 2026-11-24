@@ -63,6 +63,7 @@ async function main() {
     await add("noLlegoAPasar", ["Gracias, hoy no llego a pasar por la farmacia"]);
     await add("incorrecto", ["Me mandaron otro producto, no es lo que pedí"]);
     await add("stock", ["Me dijeron que no tienen stock"]);
+    await add("cuantoDemora", ["¿Cuánto demora el envío? ¿Tardan mucho?"]);
     await add("facturaQueja", ["Todavía no me llegó la factura"]);
     await add("facturaComun", ["Necesito factura A, por favor"]);
     await add("precio", ["Me cobraron de más, no me aplicaron el descuento"]);
@@ -120,8 +121,10 @@ async function main() {
       assert.equal(sale("puedoRetirar"), null);
     });
     await check("reclamos del Call Center: un motivo por caso", () => {
-      assert.deepEqual([claims("demora"), claims("novedades"), claims("incorrecto"), claims("stock")], [["DEMORA"], ["SIN_NOVEDADES"], ["INCORRECTO"], ["STOCK"]]);
-      assert.deepEqual([claims("precio"), claims("devolucion"), claims("trato"), claims("otros")], [["PRECIO"], ["PAGO"], ["TRATO"], ["OTROS"]]);
+      assert.deepEqual([claims("demora"), claims("novedades"), claims("incorrecto")], [["DEMORA"], ["SIN_NOVEDADES"], ["INCORRECTO"]]);
+      // Avisar que no hay stock, pedir una devolución o preguntar cuánto demora no es un reclamo.
+      assert.deepEqual([claims("stock"), claims("devolucion"), claims("cuantoDemora")], [[], [], []]);
+      assert.deepEqual([claims("precio"), claims("trato"), claims("otros")], [["PRECIO"], ["TRATO"], ["OTROS"]]);
     });
     await check("factura: solo con una queja; un pedido común de factura no es reclamo", () => {
       assert.deepEqual([claims("facturaQueja"), claims("facturaComun")], [["FACTURA"], []]);
