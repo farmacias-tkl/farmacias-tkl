@@ -219,6 +219,14 @@ export function toNowPayload(
       historical: historical.length,
       ordersUntaken: current.filter((it) => !it.hasHumanResponse && it.orderRequest).length,
       queriesUnanswered: current.filter((it) => !it.hasHumanResponse && !it.orderRequest).length,
+      awaitingNextCurrent: current.filter((it) => it.hasHumanResponse).length,
+      criticalByType: criticalKnown
+        ? {
+            orders: current.filter((it) => it.level === "CRITICO" && !it.hasHumanResponse && it.orderRequest).length,
+            queries: current.filter((it) => it.level === "CRITICO" && !it.hasHumanResponse && !it.orderRequest).length,
+            awaitingNext: current.filter((it) => it.level === "CRITICO" && it.hasHumanResponse).length,
+          }
+        : null,
       criticalCurrent: criticalKnown ? current.filter((it) => it.level === "CRITICO").length : null,
       criticalHistorical: criticalKnown ? historical.filter((it) => it.level === "CRITICO").length : null,
       // Las alertas de acción cuentan la atención actual: son las que abre la lista operativa.

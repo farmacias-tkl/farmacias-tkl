@@ -38,7 +38,7 @@ test("clientes esperando: recientes hasta 72 horas; las más viejas son posibles
     row("cerrada", { waitStart: hoursAgo(10) }),
   ]);
   // En estas filas el cliente volvió a escribir hace 5 horas: las antiguas son de atención actual.
-  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, current: 4, historical: 0, ordersUntaken: 0, queriesUnanswered: 3, criticalCurrent: null, criticalHistorical: null, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0, claims: null });
+  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, current: 4, historical: 0, ordersUntaken: 0, queriesUnanswered: 3, awaitingNextCurrent: 1, criticalByType: null, criticalCurrent: null, criticalHistorical: null, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0, claims: null });
   assert.deepEqual(p.list.map((i) => [i.conversationId, i.oldPending, i.historical]), [["mas-vieja", true, false], ["vieja", true, false], ["otra", false, false], ["reciente", false, false]]);
   assert.deepEqual([p.listTotal, p.historicalTotal], [4, 0]);
   // Sin un mensaje nuevo del cliente, las antiguas son históricos por verificar: aparte, no encabezan la lista.
@@ -95,6 +95,10 @@ test("portada: pedidos sin tomar son los que parecen un pedido y siguen sin prim
     row("cerrada", { botOrderComplete: true }),
   ]);
   assert.deepEqual([p.waiting.ordersUntaken, p.waiting.queriesUnanswered], [3, 1]);
+  // Los tres grupos de la portada suman los que esperan, y sus críticos suman los críticos.
+  assert.equal(p.waiting.ordersUntaken + p.waiting.queriesUnanswered + p.waiting.awaitingNextCurrent, p.waiting.current);
+  const cb = p.waiting.criticalByType;
+  if (cb) assert.equal(cb.orders + cb.queries + cb.awaitingNext, p.waiting.criticalCurrent);
   assert.deepEqual(Object.fromEntries(p.list.map((i) => [i.conversationId, i.orderRequest])), { "bot-completo": true, receta: true, "frase-pedido": true, consulta: false, "pedido-ya-respondido": true });
   assert.equal(p.todayClosures, null, "sin el dato queda null, no cero");
 });
@@ -109,7 +113,7 @@ test("los conteos completos de la cola no cambian: quedan en calidad de datos", 
 
 test("sin nadie esperando: cero y sin espera más larga", () => {
   const p = payload([row("cerrada")]);
-  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, current: 0, historical: 0, ordersUntaken: 0, queriesUnanswered: 0, criticalCurrent: null, criticalHistorical: null, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0, claims: null });
+  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, current: 0, historical: 0, ordersUntaken: 0, queriesUnanswered: 0, awaitingNextCurrent: 0, criticalByType: null, criticalCurrent: null, criticalHistorical: null, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0, claims: null });
   assert.deepEqual([p.list.length, p.stale.total, p.stale.oldestWaitStart], [0, 0, null]);
 });
 
