@@ -395,9 +395,13 @@ async function main() {
       c = await convUpd();
       assert.equal(c!.externalAssigneeId, "80");
     });
-    await check("5m. conversación inexistente: se procesa sin crear nada; el comentario de cierre no llega a ninguna tabla", async () => {
+    await check("5m. conversación inexistente: no crea nada y NO queda como procesado (pendiente, con su contenido); el comentario de cierre no llega a ninguna tabla", async () => {
       const raw = { ...rawConvCreated(39699, "+5491100000006", "Cliente Ficticio Sin Conversación", "resolved", [], 1, "conversation_updated"), ...CIERRE };
-      await run(raw);
+      const { id } = await fromRaw(raw);
+      const r = await processWebhookEvent(id);
+      assert.deepEqual([r.status, r.outcome], ["ERROR", "needsRetry"]);
+      const ev = await prisma.webhookEvent.findUnique({ where: { id } });
+      assert.ok(ev!.error!.includes("UPDATE_OUT_OF_ORDER") && ev!.payload !== null, "queda pendiente y conserva el contenido para el reintento");
       assert.equal(await prisma.conversation.count({ where: { externalConversationId: "39699" } }), 0);
       const dump = JSON.stringify([await convUpd(), await prisma.webhookEvent.findMany({ where: { externalConversationId: { in: [String(UPD), "39699"] } } })]);
       assert.ok(!dump.includes("SENTINEL_UPDATED_COMMENT"), "closure_comment no llega a ninguna tabla");
@@ -528,7 +532,7 @@ async function main() {
       // Un evento atrasado, anterior a la reapertura, no suma la sucursal del pedido viejo.
       await run(rawSeen("conversation_updated", "open", ["solo_consulta", "sucursal_ficticia_a"], { updated_at: ISO2 }));
       c = await convSeen();
-      assert.deepEqual([c!.externalLabels, c!.externalLabelsSeen], [["solo_consulta", "sucursal_ficticia_a"], ["solo_consulta"]]);
+      assert.deepEqual([c!.externalLabels, c!.externalLabelsSeen], [["solo_consulta"], ["solo_consulta"]], "ni la lista actual ni las vistas toman las del evento atrasado");
       // Pedido nuevo en otra sucursal.
       await run(rawSeen("conversation_updated", "open", ["solo_consulta", "sucursal_ficticia_b", "envio_a_domicilio"], later(4000)));
       assert.deepEqual((await convSeen())!.externalLabelsSeen, ["solo_consulta", "sucursal_ficticia_b", "envio_a_domicilio"]);
@@ -606,6 +610,74 @@ async function main() {
       await run(rawOrd("conversation_updated", "open", { id: 81, type: "User" }));
       c = await convOrd();
       assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeAt?.toISOString()], ["81", T(30).updated_at]);
+    });
+
+    // 5z. Confiabilidad: un evento solo queda PROCESSED si su efecto quedó aplicado.
+    const { retryPendingEvents } = await import("./processor");
+    const U = (sec: number) => ({ updated_at: new Date(Date.UTC(2026, 5, 21, 12, 0, sec)).toISOString() });
+    await check("5z1. dos primeros mensajes DISTINTOS del mismo chat, a la vez: quedan los dos, una sola vez, y una sola conversación", async () => {
+      const A = 39871;
+      const a = await fromRaw(rawMsg({ convId: A, msgId: 987101, sourceId: "wamid.FICTICIO-A1", mt: "incoming", content: "primer mensaje inventado", senderId: 501, senderType: "contact", phone: "+5491100000021" }));
+      const b = await fromRaw(rawMsg({ convId: A, msgId: 987102, sourceId: "wamid.FICTICIO-A2", mt: "incoming", content: "segundo mensaje inventado", senderId: 501, senderType: "contact", phone: "+5491100000021" }));
+      const [ra, rb] = await Promise.all([processWebhookEvent(a.id), processWebhookEvent(b.id)]);
+      assert.deepEqual([ra.status, rb.status], ["PROCESSED", "PROCESSED"]);
+      const conv = await prisma.conversation.findMany({ where: { externalConversationId: String(A) }, include: { messages: true } });
+      assert.equal(conv.length, 1);
+      assert.deepEqual(conv[0].messages.map((m) => m.externalMessageId).sort(), ["wamid.FICTICIO-A1", "wamid.FICTICIO-A2"]);
+    });
+    await check("5z2. reenvío idéntico: el mensaje queda una sola vez y el segundo evento se da por procesado porque el efecto existe", async () => {
+      const A = 39871;
+      const again = await fromRaw(rawMsg({ convId: A, msgId: 987101, sourceId: "wamid.FICTICIO-A1", mt: "incoming", content: "primer mensaje inventado", senderId: 501, senderType: "contact", phone: "+5491100000021" }));
+      assert.equal((await processWebhookEvent(again.id)).status, "PROCESSED");
+      assert.equal(await prisma.conversationMessage.count({ where: { externalMessageId: "wamid.FICTICIO-A1" } }), 1);
+    });
+    await check("5z3. cambio de asignado ANTERIOR al alta: queda pendiente y se aplica cuando la conversación existe, respetando el orden", async () => {
+      const B = 39872;
+      const rawB = (event: string, status: string, assignee: { id: number; type?: string } | null, extra: Record<string, unknown> = {}) => {
+        const base = rawConvCreated(B, "+5491100000022", "Cliente Ficticio Alta", status, [], null, event);
+        return { ...base, meta: { ...base.meta, assignee: assignee ? { id: assignee.id } : null, ...(assignee?.type ? { assignee_type: assignee.type } : {}) }, ...extra };
+      };
+      // Emozion: alta (segundo 0, con el bot), después toma el caso una persona (segundo 5). Llegan al revés.
+      const upd = await fromRaw(rawB("conversation_updated", "open", { id: 80, type: "User" }, { ...U(5), labels: ["sucursal_ficticia_c"] }));
+      assert.equal((await processWebhookEvent(upd.id)).status, "ERROR");
+      assert.equal(await prisma.conversation.count({ where: { externalConversationId: String(B) } }), 0);
+      const alta = await fromRaw(rawB("conversation_created", "open", { id: 37, type: "AgentBot" }, U(0)));
+      assert.equal((await processWebhookEvent(alta.id)).status, "PROCESSED");
+      // Lo que hace el webhook después de procesar bien un evento de la conversación.
+      assert.deepEqual(await retryPendingEvents(String(B), alta.id), { retried: 1, processed: 1 });
+      const c = await prisma.conversation.findUnique({ where: { externalConversationId: String(B) } });
+      assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeType, c!.externalLabels, c!.externalLabelsSeen], ["80", "USER", ["sucursal_ficticia_c"], ["sucursal_ficticia_c"]]);
+      assert.equal((await prisma.webhookEvent.findUnique({ where: { id: upd.id } }))!.status, "PROCESSED");
+      // Nada más pendiente: un segundo barrido no hace nada.
+      assert.deepEqual(await retryPendingEvents(String(B)), { retried: 0, processed: 0 });
+    });
+    await check("5z4. cierre ATRASADO después de una reapertura: no vuelve a cerrar la conversación; el cierre queda en el historial con su hora", async () => {
+      const D = 39873;
+      const rawD = (event: string, status: string, labels: string[], extra: Record<string, unknown> = {}) =>
+        ({ ...rawConvCreated(D, "+5491100000023", "Cliente Ficticio Atrasado", status, labels, null, event), ...extra });
+      await run(rawD("conversation_created", "open", [], U(0)));
+      // Emozion: se resuelve con venta (segundo 20) y el cliente la reabre (segundo 30). Llega primero la reapertura.
+      await run(rawD("conversation_status_changed", "open", ["venta_concretada"], U(30)));
+      await run(rawD("conversation_status_changed", "resolved", ["sucursal_ficticia_d", "venta_concretada"], U(20)));
+      const c = await prisma.conversation.findUnique({ where: { externalConversationId: String(D) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] } } });
+      assert.deepEqual([c!.status, c!.closureTypeName, c!.externalLabels], ["SIN_ASIGNAR", null, ["venta_concretada"]], "sigue abierta, sin cierre vigente y con las etiquetas del evento más nuevo");
+      const late = c!.stateHistory.find((h) => h.toStatus === "RESUELTA");
+      assert.ok(late, "el cierre no se pierde");
+      assert.deepEqual([late!.changedAt.toISOString(), late!.closureTypeName, late!.externalLabelsSeen], [U(20).updated_at, "venta_concretada", ["sucursal_ficticia_d", "venta_concretada"]]);
+      // Repetido: no agrega otra fila.
+      await run(rawD("conversation_status_changed", "resolved", ["sucursal_ficticia_d", "venta_concretada"], U(20)));
+      assert.equal(await prisma.conversationStateHistory.count({ where: { conversationId: c!.id, toStatus: "RESUELTA" } }), 1);
+      // Un cambio de estado más nuevo sí se aplica.
+      await run(rawD("conversation_status_changed", "resolved", ["venta_concretada"], U(40)));
+      assert.equal((await prisma.conversation.findUnique({ where: { externalConversationId: String(D) } }))!.status, "RESUELTA");
+    });
+    await check("5z5. el reintento no toca errores que no son de orden ni los que agotaron los intentos", async () => {
+      const E = "39874";
+      const mk = (error: string, attempts: number) => prisma.webhookEvent.create({ data: { source: "EMOZION", eventType: "conversation_updated", accountId: 22, externalConversationId: E, payload: { event: "conversation_updated", updateEvent: { externalConversationId: E } }, status: "ERROR", attempts, error } });
+      await mk("processor.tx|ProcessError|CONVERSATION_PAYLOAD_INVALID|", 1);
+      await mk("texto de error de otro formato", 1);
+      await mk("processor.tx|ProcessError|UPDATE_OUT_OF_ORDER|", 5);
+      assert.deepEqual(await retryPendingEvents(E), { retried: 0, processed: 0 });
     });
 
     // 6. fallo de dominio → WebhookEvent ERROR + SyncLog ERROR persisten (rollback del dominio)

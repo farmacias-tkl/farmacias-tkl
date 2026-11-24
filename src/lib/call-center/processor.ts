@@ -43,6 +43,8 @@ type ProcessErrorCode =
   | "UPDATE_PAYLOAD_INVALID"
   | "MESSAGE_OUT_OF_ORDER"
   | "STATUS_OUT_OF_ORDER"
+  | "UPDATE_OUT_OF_ORDER"
+  | "CONCURRENT_DUPLICATE"
   | "EVENT_TYPE_UNSUPPORTED";
 
 class ProcessError extends Error {
@@ -127,6 +129,48 @@ function hydrateUpdateEvent(u: any): NormalizedUpdateEvent {
   };
 }
 
+/** Veces que se corre la transacción de un evento cuando choca con otro simultáneo. */
+const TX_ATTEMPTS = 3;
+
+/**
+ * Eventos que quedaron PENDIENTES y se pueden reintentar: llegaron antes que el alta de su
+ * conversación, o chocaron con otro simultáneo. Conservan su contenido. No entran acá los
+ * errores viejos de otro formato, ni los que fallaron por otra causa.
+ */
+export const RETRYABLE_ERROR_CODES = ["MESSAGE_OUT_OF_ORDER", "STATUS_OUT_OF_ORDER", "UPDATE_OUT_OF_ORDER", "CONCURRENT_DUPLICATE"] as const;
+export const RETRY_MAX_ATTEMPTS = 5;
+export const RETRY_WINDOW_HOURS = 48;
+
+/**
+ * Reintenta los eventos pendientes de UNA conversación, del más viejo al más nuevo. Se llama
+ * después de procesar bien otro evento de esa conversación (que pudo haberla creado). Cada
+ * dato respeta el orden de los eventos, así que aplicar tarde uno viejo no pisa lo nuevo.
+ *
+ * Solo repara datos de la ingesta: no envía nada a Emozion ni dispara ninguna acción.
+ * Pasados RETRY_MAX_ATTEMPTS intentos o RETRY_WINDOW_HOURS horas, el evento queda en ERROR.
+ */
+export async function retryPendingEvents(externalConversationId: string, excludeId: string | null = null, now: Date = new Date()): Promise<{ retried: number; processed: number }> {
+  const pending = await prisma.webhookEvent.findMany({
+    where: {
+      externalConversationId,
+      status: "ERROR",
+      attempts: { lt: RETRY_MAX_ATTEMPTS },
+      receivedAt: { gte: new Date(now.getTime() - RETRY_WINDOW_HOURS * 3_600_000) },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      OR: RETRYABLE_ERROR_CODES.map((code) => ({ error: { contains: code } })),
+    },
+    orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+    take: 20,
+    select: { id: true },
+  });
+  let processed = 0;
+  for (const ev of pending) {
+    const r = await processWebhookEvent(ev.id);
+    if (r.status === "PROCESSED") processed++;
+  }
+  return { retried: pending.length, processed };
+}
+
 export async function processWebhookEvent(webhookEventId: string): Promise<ProcessResult> {
   const ev = await prisma.webhookEvent.findUnique({
     where: { id: webhookEventId },
@@ -144,6 +188,13 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
   let errorMsg: string | null = null;
 
   // ── (1) Transacción de dominio SOLO ──────────────────────────────────────────────
+  // Una colisión de un @unique de dominio revierte TODA la transacción: no alcanza para dar
+  // el evento por procesado, porque otro evento pudo crear la conversación y este traía un
+  // mensaje distinto. Se vuelve a correr: ahora encuentra lo que el otro creó y aplica lo
+  // suyo. Las operaciones son idempotentes, así que repetir no duplica.
+  for (let attempt = 1; attempt <= TX_ATTEMPTS && !domainOk; attempt++) {
+  warnings.length = 0;
+  errorMsg = null;
   try {
     await prisma.$transaction(async (tx) => {
       const payload = ev.payload as any;
@@ -193,6 +244,8 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
           // Solo tipo de cierre, asignado y etiquetas: sin mensajes, sin cambio de estado, sin filas nuevas.
           const r = await applyConversationUpdatedFromEmozion(tx, hydrateUpdateEvent(payload.updateEvent), closureLabels);
           warnings.push(...r.warnings);
+          // Llegó antes que el alta de la conversación: queda pendiente, no se da por procesado.
+          if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", "UPDATE_OUT_OF_ORDER");
           break;
         }
         default:
@@ -201,13 +254,16 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
     });
     domainOk = true;
     outcome = "processed";
+    if (attempt > 1) warnings.push("reintentado tras una colisión con otro evento simultáneo: el efecto quedó aplicado");
   } catch (e) {
+    // Cualquier colisión de un @unique (también la del teléfono del cliente, cuando dos eventos
+    // crean al mismo cliente a la vez) es una carrera con otro evento: se reintenta.
+    if (getUniqueViolationTarget(e) !== null && attempt < TX_ATTEMPTS) continue;
     if (isDomainIdempotencyUniqueViolation(e)) {
-      // Concurrencia / repetición del MISMO evento: el @unique de dominio
-      // (externalConversationId/externalMessageId/sourceExternalId) ganó en uno; el otro es idempotente.
-      domainOk = true;
-      outcome = "processed";
-      warnings.push("idempotente: unique violation de dominio (externalConversationId/externalMessageId/sourceExternalId) tratada como ya-procesado");
+      // Sigue chocando después de los intentos: NO se marca procesado. Queda pendiente con su
+      // contenido y se reintenta con el próximo evento de la conversación.
+      outcome = "needsRetry";
+      errorMsg = safeErrorCode(new ProcessError("needsRetry", "CONCURRENT_DUPLICATE"), "processor.tx");
     } else if (getUniqueViolationTarget(e) !== null) {
       // P2002 de OTRO constraint (p.ej. Customer.phone — carrera de cliente recurrente) o
       // sin target → NO idempotente. NO se marca PROCESSED: fluye como ERROR por la misma
@@ -223,6 +279,8 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
       outcome = "error";
       errorMsg = safeErrorCode(e, "processor.tx");
     }
+    break;
+  }
   }
 
   // ── (2) FUERA de la transacción de dominio: marca (+ SyncLog solo en fallo) ──

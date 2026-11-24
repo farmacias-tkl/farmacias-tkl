@@ -25,7 +25,7 @@ import {
   conversationExternalId,
   SUPPORTED_EVENTS,
 } from "@/lib/call-center/emozion-mappers";
-import { processWebhookEvent } from "@/lib/call-center/processor";
+import { processWebhookEvent, retryPendingEvents } from "@/lib/call-center/processor";
 import { buildAttachmentCapture } from "@/lib/call-center/attachment-debug";
 import {
   resolveCaptureMode,
@@ -288,6 +288,12 @@ export async function POST(req: NextRequest, { params }: { params: { secret: str
     try {
       const result = await processWebhookEvent(eventId);
       console.log("[emozion-webhook] processed", JSON.stringify({ eventId, eventType, status: result.status, outcome: result.outcome }));
+      // Eventos de esta conversación que habían quedado pendientes (llegaron antes que el alta,
+      // o chocaron con otro simultáneo): se reintentan ahora. Solo repara datos de la ingesta.
+      if (result.status === "PROCESSED" && externalConversationId) {
+        const retry = await retryPendingEvents(externalConversationId, eventId);
+        if (retry.retried > 0) console.log("[emozion-webhook] retry", JSON.stringify({ eventId, retried: retry.retried, processed: retry.processed }));
+      }
     } catch (e) {
       console.error("[emozion-webhook] processor threw:", JSON.stringify({ eventId, code: safeErrorCode(e, "route.process") }));
     }
