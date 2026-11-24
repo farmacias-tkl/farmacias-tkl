@@ -117,6 +117,26 @@ test("actividad observada: dentro del horario público, solo en el de operadores
   assert.equal(a.lastMessageAt?.toISOString(), at("2026-03-03T11:00").toISOString());
 });
 
+test("evolución por cuenta: por día, mensajes a clientes, conversaciones y respuestas posteriores por el día en que empezó el bloque", () => {
+  const r = build({
+    messages: [
+      msg("9001", "c1", "2026-03-02T10:00"), msg("9001", "c1", "2026-03-02T10:30"), msg("9001", "c2", "2026-03-02T11:00"),
+      { ...msg("9001", "c2", "2026-03-02T11:05"), isPrivate: true },
+      msg("9001", "c3", "2026-03-04T11:00"),
+    ],
+    followups: [
+      // Empezó el 02/03 a la noche y se respondió el 03/03: cuenta en el 02/03.
+      { conversationId: "c1", startedAt: at("2026-03-02T23:00"), respondedAt: at("2026-03-03T10:00"), account: "9001" },
+      { conversationId: "c2", startedAt: at("2026-03-02T11:10"), respondedAt: at("2026-03-02T11:20"), account: "9001" },
+      { conversationId: "c3", startedAt: at("2026-03-04T11:10"), respondedAt: null, account: null },
+    ],
+  });
+  assert.deepEqual(of(r, "9001").daily, [
+    { day: "2026-03-02", publicMessages: 3, conversations: 2, followups: 2, followupMedian: 335 },
+    { day: "2026-03-04", publicMessages: 1, conversations: 1, followups: 0, followupMedian: null },
+  ]);
+});
+
 test("sin horario configurado: la actividad por horario queda no disponible, no en cero", () => {
   const r = build({ messages: [msg("9001", "c1", "2026-03-02T10:00")] }, []);
   const a = of(r, "9001").activity;

@@ -77,6 +77,12 @@ export interface AccountReportRow {
   closures: AccountClosures | null;
   /** Primeras respuestas que dio a conversaciones que habían entrado un día anterior. */
   firstResponsesLaterDay: number;
+  /**
+   * Evolución por día de Buenos Aires, solo los días con algo: mensajes a clientes,
+   * conversaciones atendidas y respuestas posteriores (por el día en que empezó el bloque del
+   * cliente). Sirve para ver si una demora fue puntual o se repite. No es un ranking.
+   */
+  daily: AccountDay[];
   publicMessages: number;
   privateNotes: number;
   /** Demora de reloj de los casos que tomó, desde la salida del bot. Es demora de la cola. */
@@ -131,9 +137,19 @@ interface Acc {
   hoursKnown: boolean;
   firstResponses: number[];
   followups: number[];
+  byDay: Map<string, { publicMessages: number; conversations: Set<string>; waits: number[] }>;
 }
 
 const KEY_NULL = "\u0000sin-remitente";
+
+export interface AccountDay {
+  day: string;
+  publicMessages: number;
+  conversations: number;
+  /** Respuestas posteriores a bloques que empezaron ese día: cantidad y mediana de reloj. */
+  followups: number;
+  followupMedian: number | null;
+}
 
 /** Cierres de una cuenta o de un grupo: por resultado, más los que no se pueden leer. */
 export interface AccountClosures {
@@ -231,7 +247,7 @@ export function buildAccountsReport(
     if (!a) {
       a = {
         conversations: new Set(), days: new Set(), publicMessages: 0, privateNotes: 0, first: null, last: null,
-        inPublic: 0, inOperatorOnly: 0, outside: 0, hoursKnown: true, firstResponses: [], followups: [],
+        inPublic: 0, inOperatorOnly: 0, outside: 0, hoursKnown: true, firstResponses: [], followups: [], byDay: new Map(),
       };
       byKey.set(key, a);
     }
@@ -252,6 +268,11 @@ export function buildAccountsReport(
   /** Fuera de los totales del equipo: cuentas de sistema y de supervisión. */
   const outsideTeam = (account: string | null) => isSystem(account) || isSupervision(account);
 
+  const dayOf = (a: Acc, day: string) => {
+    let d = a.byDay.get(day);
+    if (!d) { d = { publicMessages: 0, conversations: new Set(), waits: [] }; a.byDay.set(day, d); }
+    return d;
+  };
   const accountsByConversation = new Map<string, Set<string>>();
   let teamNotes = 0;
 
@@ -266,6 +287,9 @@ export function buildAccountsReport(
     else {
       a.publicMessages++;
       a.conversations.add(m.conversationId);
+      const d = dayOf(a, day);
+      d.publicMessages++;
+      d.conversations.add(m.conversationId);
       // Actividad por horario, solo de los mensajes a clientes, con el horario vigente ese día.
       if (!configForDay(opts.versions, day)) a.hoursKnown = false;
       else if (isWithinHours(m.sentAt, pub)) a.inPublic++;
@@ -299,7 +323,9 @@ export function buildAccountsReport(
     if (!b.respondedAt) { followupsUnanswered++; continue; }
     const minutes = Math.max(0, (b.respondedAt.getTime() - b.startedAt.getTime()) / MS_MIN);
     if (!outsideTeam(b.account)) teamFollowups.push(minutes);
-    get(b.account).followups.push(minutes);
+    const acc = get(b.account);
+    acc.followups.push(minutes);
+    dayOf(acc, arDayISO(b.startedAt)).waits.push(minutes);
   }
 
   // Cuentas con actividad en el período, antes de sumar las que solo aparecen por un cierre.
@@ -323,6 +349,10 @@ export function buildAccountsReport(
       conversations: a.conversations.size,
       closures: closuresOf(account),
       firstResponsesLaterDay: laterDay.get(key) ?? 0,
+      daily: [...a.byDay.keys()].sort().map((day) => {
+        const d = a.byDay.get(day)!;
+        return { day, publicMessages: d.publicMessages, conversations: d.conversations.size, followups: d.waits.length, followupMedian: distribution(d.waits).median };
+      }),
       publicMessages: a.publicMessages,
       privateNotes: a.privateNotes,
       firstResponses: distribution(a.firstResponses),

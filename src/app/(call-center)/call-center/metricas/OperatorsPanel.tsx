@@ -5,8 +5,8 @@ import Link from "next/link";
 import { EVIDENCE_LABELS, POPULATION_LABELS } from "@/lib/call-center/metrics/indicators";
 import type { AccountsPayload, OperatorCase, OperatorCaseKind, OperatorCasesPayload } from "@/lib/call-center/metrics/accounts-types";
 import { COMPARISON_MIN_ANSWERED } from "@/lib/call-center/metrics/comparison";
-import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
-import { formatMinutes, formatMinutesOrMissing, formatRatio } from "@/lib/call-center/metrics/format";
+import { PERIOD_MAX_DAYS, addDaysISO } from "@/lib/call-center/metrics/period";
+import { formatMinutes, formatMinutesOrMissing, formatRatio, formatShortDay } from "@/lib/call-center/metrics/format";
 import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -81,17 +81,21 @@ export default function OperatorsPanel({ today }: { today: string }) {
           <button type="button" onClick={() => load(period)} className="font-medium underline">Reintentar</button>
         </div>
       )}
-      {state.status === "ready" && <Report key={`${period.from}|${period.to}`} data={state.data} period={period} />}
+      {state.status === "ready" && <Report key={`${period.from}|${period.to}`} data={state.data} period={period} today={today} />}
     </section>
   );
 }
 
-function Report({ data, period }: { data: AccountsPayload; period: Period }) {
+function Report({ data, period, today }: { data: AccountsPayload; period: Period; today: string }) {
   const t = data.team;
   // Se cierra solo al cambiar de período (el informe se vuelve a montar).
   const [picked, setPicked] = useState<Picked | null>(null);
   const open = (kind: OperatorCaseKind, account: string | null = null, name: string | null = null) =>
     setPicked(picked && picked.kind === kind && picked.account === account ? null : { kind, account, name });
+  // Días del período hasta el corte, para el eje de la evolución por cuenta.
+  const days: string[] = [];
+  const lastDay = data.period.to < today ? data.period.to : today;
+  for (let d = data.period.from; d <= lastDay; d = addDaysISO(d, 1)) days.push(d);
   return (
     <>
       <p className="mt-4 text-xs text-gray-600">Corte: {cutFmt.format(new Date(data.generatedAt))}.</p>
@@ -143,7 +147,7 @@ function Report({ data, period }: { data: AccountsPayload; period: Period }) {
       {data.accounts.length === 0 ? (
         <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">Ninguna cuenta escribió en el período.</p>
       ) : (
-        <AccountsTable accounts={data.accounts} lookbackDays={data.lookbackDays} onOpen={open} />
+        <AccountsTable accounts={data.accounts} days={days} onOpen={open} />
       )}
       <p className="mt-2 text-xs text-gray-600">
         Cómo leer la tabla: dos cuentas pueden tener la misma mediana y un 90% muy distinto. Esa diferencia sirve para buscar casos puntuales, no para concluir que una atiende mejor.
@@ -155,7 +159,7 @@ function Report({ data, period }: { data: AccountsPayload; period: Period }) {
           <h2 className="mt-6 text-sm font-semibold text-gray-800">
             Supervisión<span className="ml-2 text-xs font-normal text-gray-600">no son operadores y no suman en el equipo</span>
           </h2>
-          <AccountsTable accounts={data.supervisionAccounts} lookbackDays={data.lookbackDays} onOpen={open} />
+          <AccountsTable accounts={data.supervisionAccounts} days={days} onOpen={open} />
         </>
       )}
 
@@ -164,7 +168,7 @@ function Report({ data, period }: { data: AccountsPayload; period: Period }) {
           <h2 className="mt-6 text-sm font-semibold text-gray-800">
             Cuentas del sistema<span className="ml-2 text-xs font-normal text-gray-600">no son operadores y no suman en el equipo</span>
           </h2>
-          <AccountsTable accounts={data.systemAccounts} lookbackDays={data.lookbackDays} onOpen={open} system />
+          <AccountsTable accounts={data.systemAccounts} days={days} onOpen={open} system />
         </>
       )}
 
@@ -187,8 +191,8 @@ function Report({ data, period }: { data: AccountsPayload; period: Period }) {
 const COLS = "md:grid md:grid-cols-[minmax(0,2.2fr)_repeat(6,minmax(0,1fr))] md:items-center md:gap-3";
 
 /** Una fila por cuenta para comparar; el resto queda en "Ver detalle". En el celular, tarjetas cortas. */
-function AccountsTable({ accounts, lookbackDays, onOpen, system }: {
-  accounts: Account[]; lookbackDays: number; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
+function AccountsTable({ accounts, days, onOpen, system }: {
+  accounts: Account[]; days: string[]; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
 }) {
   const head = "text-right text-[11px] font-medium leading-tight text-gray-600";
   return (
@@ -203,7 +207,7 @@ function AccountsTable({ accounts, lookbackDays, onOpen, system }: {
         <span className={head}>Días con actividad</span>
       </div>
       <ul>
-        {accounts.map((a) => <AccountRow key={a.account ?? "sin-cuenta"} a={a} lookbackDays={lookbackDays} onOpen={onOpen} system={system} />)}
+        {accounts.map((a) => <AccountRow key={a.account ?? "sin-cuenta"} a={a} days={days} onOpen={onOpen} system={system} />)}
       </ul>
     </div>
   );
@@ -218,8 +222,8 @@ function Cell({ label, value, small }: { label: string; value: string; small?: b
   );
 }
 
-function AccountRow({ a, onOpen, system }: {
-  a: Account; lookbackDays: number; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
+function AccountRow({ a, days, onOpen, system }: {
+  a: Account; days: string[]; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
 }) {
   const act = a.activity;
   const hours = act.inPublicHours !== null && act.inOperatorHoursOnly !== null && act.outsideAllHours !== null;
@@ -245,8 +249,9 @@ function AccountRow({ a, onOpen, system }: {
         </div>
       </div>
       <details className="mt-1">
-        <summary className="inline-flex min-h-[32px] cursor-pointer items-center text-xs font-medium text-[#1E2D5A]">Ver detalle</summary>
-        <div className="grid gap-x-8 gap-y-3 pb-2 pt-1 md:grid-cols-2">
+        <summary className="inline-flex min-h-[32px] cursor-pointer items-center text-xs font-medium text-[#1E2D5A]">Ver detalle y evolución</summary>
+        <AccountEvolution a={a} days={days} />
+        <div className="grid gap-x-8 gap-y-3 pb-2 pt-3 md:grid-cols-2">
           <div className="space-y-1">
             <h4 className="text-xs font-semibold text-gray-700">Mensajes</h4>
             <Line label="Mensajes a clientes" value={nf.format(a.publicMessages)} />
@@ -299,6 +304,89 @@ function AccountRow({ a, onOpen, system }: {
         </div>
       </details>
     </li>
+  );
+}
+
+/** Con menos respuestas posteriores en un día, la mediana de ese día describe muy pocos casos. */
+const DAY_MIN_FOLLOWUPS = 5;
+
+/**
+ * Evolución de una cuenta: actividad por día y sus respuestas posteriores. Para ver si una
+ * demora fue puntual o se repite. Dos gráficos, cada uno con su escala.
+ */
+function AccountEvolution({ a, days }: { a: Account; days: string[] }) {
+  const byDay = new Map(a.daily.map((d) => [d.day, d]));
+  const lastWithData = [...days].reverse().find((d) => byDay.has(d)) ?? null;
+  const [picked, setPicked] = useState<string | null>(null);
+  if (days.length < 2 || a.daily.length === 0) return null;
+  const shown = picked ?? lastWithData ?? days[days.length - 1];
+  const s = byDay.get(shown);
+  const topMessages = Math.max(1, ...a.daily.map((d) => d.publicMessages));
+  const topMedian = Math.max(1, ...a.daily.map((d) => d.followupMedian ?? 0));
+  const step = Math.max(1, Math.ceil(days.length / 6));
+  const pick = (day: string) => ({ onClick: () => setPicked(day), onMouseEnter: () => setPicked(day), onFocus: () => setPicked(day) });
+  const axis = (
+    <div className="ml-14 mt-1 flex gap-[2px] text-[10px] tabular-nums text-gray-600" aria-hidden>
+      {days.map((d, i) => <span key={d} className="relative min-w-0 flex-1">{i % step === 0 ? <span className="absolute left-0 whitespace-nowrap">{formatShortDay(d)}</span> : null}</span>)}
+    </div>
+  );
+  const scale = (top: string, mid: string) => (
+    <div className="flex w-14 shrink-0 flex-col justify-between pr-1 text-right text-[10px] tabular-nums leading-none text-gray-600" aria-hidden>
+      <span>{top}</span><span>{mid}</span><span>0</span>
+    </div>
+  );
+  return (
+    <div className="mt-1 rounded-md border border-gray-200 p-2">
+      <h4 className="text-xs font-semibold text-gray-700">Evolución por día</h4>
+      <p className="mt-1 min-h-[36px] text-xs text-gray-900" aria-live="polite">
+        <span className="font-semibold">{formatShortDay(shown)}:</span>{" "}
+        {!s ? "sin actividad."
+          : <>{nf.format(s.publicMessages)} mensajes a clientes en {nf.format(s.conversations)} {s.conversations === 1 ? "conversación" : "conversaciones"} ·{" "}
+              {s.followups === 0 ? "sin respuestas posteriores"
+                : <>respuestas posteriores: mediana {formatMinutesOrMissing(s.followupMedian)} sobre {cases(s.followups)}{s.followups < DAY_MIN_FOLLOWUPS ? " (muestra pequeña)" : ""}</>}.</>}
+      </p>
+      <p className="mt-1 text-[11px] font-medium text-gray-700">Mensajes a clientes</p>
+      <div className="mt-1 flex h-16">
+        {scale(nf.format(topMessages), nf.format(Math.round(topMessages / 2)))}
+        <div className="flex flex-1 items-end gap-[2px] border-b border-l border-gray-300" role="group" aria-label="Mensajes a clientes por día">
+          {days.map((d) => {
+            const v = byDay.get(d)?.publicMessages ?? 0;
+            const label = `${formatShortDay(d)}: ${nf.format(v)} mensajes a clientes`;
+            return (
+              <button key={d} type="button" title={label} aria-label={label} {...pick(d)} className={`flex h-full min-w-0 flex-1 items-end ${d === shown ? "bg-gray-100" : ""}`}>
+                {v > 0 && <span className={`block w-full rounded-t-[3px] ${d === shown ? "bg-[#1E2D5A]" : "bg-[#8E9BC4]"}`} style={{ height: `${Math.max(3, (v / topMessages) * 100)}%` }} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {axis}
+      <p className="mt-5 text-[11px] font-medium text-gray-700">Respuestas posteriores: mediana del día</p>
+      <div className="mt-1 flex h-20">
+        {scale(formatMinutes(topMedian), formatMinutes(topMedian / 2))}
+        <div className="relative flex flex-1 gap-[2px] border-b border-l border-gray-300" role="group" aria-label="Mediana de las respuestas posteriores por día">
+          <span className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-gray-200" aria-hidden />
+          {days.map((d) => {
+            const x = byDay.get(d);
+            const v = x && x.followups > 0 ? x.followupMedian : null;
+            const label = `${formatShortDay(d)}: ${v == null ? "sin respuestas posteriores" : `mediana ${formatMinutes(v)} sobre ${x!.followups}`}`;
+            return (
+              <button key={d} type="button" title={label} aria-label={label} {...pick(d)} className={`relative h-full min-w-0 flex-1 ${d === shown ? "bg-gray-100" : ""}`}>
+                {v != null && (
+                  <span className={`absolute left-1/2 h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-[#1E2D5A] ${x!.followups < DAY_MIN_FOLLOWUPS ? "bg-white" : "bg-[#1E2D5A]"}`}
+                    style={{ bottom: `${Math.min(100, (v / topMedian) * 100)}%` }} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {axis}
+      <p className="mt-5 text-[11px] text-gray-600">
+        Cada punto es la mediana de las respuestas a los bloques del cliente que empezaron ese día; los puntos sin relleno tienen menos de {DAY_MIN_FOLLOWUPS} casos.
+        Un punto alto aislado es una demora puntual; varios seguidos, una que se repite. No se calcula productividad por hora: entre el primer y el último mensaje no hay tiempo trabajado medido.
+      </p>
+    </div>
   );
 }
 
