@@ -347,12 +347,14 @@ const COVER_LEVELS = {
 } as const;
 
 /** Un número de la portada con su rótulo. */
-function CoverFigure({ value, label, tag }: { value: string; label: string; tag?: string }) {
+function CoverFigure({ value, label, tag, note }: { value: string; label: string; tag?: string; note?: string | null }) {
   return (
     <div className="flex items-baseline gap-2">
-      <dd className="w-16 shrink-0 text-right text-2xl font-semibold tabular-nums text-gray-900">{value}</dd>
+      {/* Una sola línea siempre: "2 d 21 h" no se parte en el celular. */}
+      <dd className="min-w-16 shrink-0 whitespace-nowrap text-right text-2xl font-semibold tabular-nums text-gray-900">{value}</dd>
       <dt className="text-sm leading-tight text-gray-800">
         {label}
+        {note ? <span className="text-gray-700"> ({note})</span> : null}
         {tag ? <span className="ml-1.5 rounded border border-gray-300 px-1 text-[11px] font-semibold text-gray-700">{tag}</span> : null}
       </dt>
     </div>
@@ -366,7 +368,10 @@ function CoverFigure({ value, label, tag }: { value: string; label: string; tag?
  */
 function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; refreshing: boolean }) {
   const w = d.waiting;
-  const status = coverStatus({ criticalCurrent: w.criticalCurrent, urgent: w.urgent, closing: d.window.closing, completedOrders: w.completedOrders, insisting: w.insisting });
+  const status = coverStatus({ criticalCurrent: w.criticalCurrent, urgent: w.urgent, closing: d.window.closing, ordersUntaken: w.ordersUntaken, current: w.current, insisting: w.insisting });
+  // Críticos de cada grupo: los tres suman los de la línea principal. Sin configuración no hay dato.
+  const cb = w.criticalByType;
+  const crit = (n: number | undefined, one: string, many: string) => (n === undefined ? null : `${nf.format(n)} ${n === 1 ? one : many}`);
   const lv = COVER_LEVELS[status.level];
   const paused = d.schedule !== null && !d.schedule.inPublicHours;
   const fr = d.progress?.firstResponse.today ?? null;
@@ -380,7 +385,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
           <span aria-hidden className={`h-3 w-3 shrink-0 rounded-full ${lv.dot}`} />
           <span>{lv.label}</span>
           <span className="text-sm font-medium">
-            {status.reasons.length > 0 ? status.reasons.join(" · ") : "Sin demoras críticas, posibles urgencias, ventanas por vencer ni pedidos completos sin respuesta."}
+            {status.reasons.length > 0 ? status.reasons.join(" · ") : "Sin demoras críticas, posibles urgencias, ventanas por vencer ni pedidos sin tomar."}
           </span>
         </p>
         <p className="mt-0.5 text-xs text-gray-700">
@@ -396,16 +401,23 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
 
       <div className="px-3 py-2">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Ahora</h2>
-        <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
-          <CoverFigure value={nf.format(w.ordersUntaken)} label="pedidos sin tomar" tag="Detectado" />
-          <CoverFigure value={nf.format(w.queriesUnanswered)} label="consultas sin responder" tag="Detectado" />
-          <CoverFigure value={w.claims === null ? (d.partial ? "…" : "—") : nf.format(w.claims)} label="posibles reclamos abiertos" tag="Detectado por palabras" />
-          <CoverFigure value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} label="mayor espera entre los recientes" />
-        </dl>
-        <p className="mt-1.5 text-sm text-gray-800">
-          <span className="font-semibold tabular-nums">{nf.format(w.current)}</span> {w.current === 1 ? "pendiente reciente" : "pendientes recientes"}
-          {w.historical > 0 ? <> + <span className="font-semibold tabular-nums">{nf.format(w.historical)}</span> {w.historical === 1 ? "antiguo" : "antiguos"} por verificar</> : null}
+        <p className="mt-1 text-lg font-semibold leading-snug text-gray-900">
+          <span className="tabular-nums">{nf.format(w.current)}</span> esperando
+          {w.criticalCurrent !== null ? <> · <span className="tabular-nums">{nf.format(w.criticalCurrent)}</span> en demora crítica</> : null}
         </p>
+        <p className="text-xs text-gray-700">
+          Por tipo; los tres grupos suman {nf.format(w.current)}.
+          {w.historical > 0 ? <> Aparte, <span className="font-semibold tabular-nums">{nf.format(w.historical)}</span> {w.historical === 1 ? "antiguo" : "antiguos"} por verificar.</> : null}
+        </p>
+        <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-3">
+          <CoverFigure value={nf.format(w.ordersUntaken)} label="pedidos sin tomar" note={crit(cb?.orders, "crítico", "críticos")} tag="Detectado" />
+          <CoverFigure value={nf.format(w.queriesUnanswered)} label="consultas sin responder" note={crit(cb?.queries, "crítica", "críticas")} tag="Detectado" />
+          <CoverFigure value={nf.format(w.awaitingNextCurrent ?? w.current - w.ordersUntaken - w.queriesUnanswered)} label="esperando otra respuesta" note={crit(cb?.awaitingNext, "crítico", "críticos")} />
+        </dl>
+        <dl className="mt-2 grid gap-x-4 gap-y-1 border-t border-gray-100 pt-2 sm:grid-cols-2">
+          <CoverFigure value={w.claims === null ? (d.partial ? "…" : "—") : nf.format(w.claims)} label="posibles reclamos abiertos" tag="Detectado por palabras" />
+          <CoverFigure value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)).replace(/ /g, "\u00a0") : "—"} label="mayor espera entre los recientes" />
+        </dl>
         <p className="mt-0.5 text-sm text-gray-800">
           Primera respuesta hoy:{" "}
           {d.partial ? "cargando…" : !fr || !d.schedule ? "sin datos"
@@ -428,7 +440,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
             </dl>
             <p className="mt-1 text-xs text-gray-700">
               No concretadas: {nf.format(tc.notCompleted.customerLeft)} el cliente no siguió · {nf.format(tc.notCompleted.noStockOrNotCarried)} sin stock o no lo trabajamos.
-              {tc.other > 0 ? ` Otros cierres con tipo: ${nf.format(tc.other)}.` : ""}
+              {tc.other > 0 ? ` Otros cierres con tipo: ${[(tc.otherBy?.botOnly ?? 0) > 0 ? `${nf.format((tc.otherBy?.botOnly ?? 0))} solo bot` : null, (tc.otherBy?.otherType ?? tc.other) > 0 ? `${nf.format((tc.otherBy?.otherType ?? tc.other))} de otro tipo` : null].filter(Boolean).join(" · ")}.` : ""}
             </p>
             <p className="mt-0.5 text-xs text-gray-700">
               {nf.format(tc.typed)} de {nf.format(tc.closed)} cierres con tipo.
@@ -446,8 +458,11 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
       )}
       <div className="border-t border-gray-100 px-3 pb-2">
         <More>
-          El color resume la atención actual: rojo si hay demoras críticas o posibles urgencias; naranja si hay ventanas de WhatsApp por vencer, pedidos completos sin
-          primera respuesta o clientes insistiendo; verde si no hay nada de eso. Los antiguos por verificar no cambian el color.
+          El color resume la atención actual: rojo si hay demoras críticas o posibles urgencias; naranja si hay ventanas de WhatsApp por vencer, pedidos sin
+          tomar o clientes insistiendo; verde si no hay nada de eso. Los antiguos por verificar no cambian el color.
+          {" "}Los que esperan se reparten en tres grupos que suman el total: pedidos sin tomar y consultas sin responder (todavía sin primera respuesta) y los que ya
+          tuvieron una respuesta y esperan otra. Entre paréntesis, cuántos de cada grupo están en demora crítica.
+          {w.ordersUntaken > 0 ? ` De los ${nf.format(w.ordersUntaken)} pedidos sin tomar, ${nf.format(w.completedOrders)} completaron el recorrido de pedido del bot; el resto mandó una receta electrónica o la frase de pedido.` : ""}
           {" "}Pedidos sin tomar: pendientes recientes sin primera respuesta que completaron el recorrido del bot, mandaron el link de una receta electrónica o
           escribieron la frase con la que llega un pedido. Consultas sin responder: el resto de los pendientes recientes sin primera respuesta. Los dos son detectados,
           no medidos; no se leen nombres de productos.

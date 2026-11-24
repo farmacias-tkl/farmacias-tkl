@@ -12,9 +12,12 @@ export type CoverLevel = "ATENCION" | "REVISAR" | "AL_DIA";
 /** Los conteos de atención actual que deciden el estado. null = no se pudo calcular. */
 export interface CoverInput {
   criticalCurrent: number | null;
+  /** Todos los que esperan en atención actual: el total del que salen los críticos. */
+  current: number;
   urgent: number;
   closing: number;
-  completedOrders: number;
+  /** Pedidos sin tomar: la misma cifra que muestra el bloque "Ahora". */
+  ordersUntaken: number;
   insisting: number;
 }
 
@@ -28,15 +31,16 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /**
  * Rojo: hay demoras críticas de atención actual o posibles urgencias. Naranja: ventanas por
- * vencer, pedidos completos sin primera respuesta o clientes insistiendo. Verde: nada de eso.
- * Si hay rojo, los motivos naranjas se listan después.
+ * vencer, pedidos sin tomar o clientes insistiendo. Verde: nada de eso.
+ * Si hay rojo, los motivos naranjas se listan después. Las cifras son las mismas que muestra
+ * el bloque "Ahora" (críticos sobre el total que espera, pedidos sin tomar): no otro corte.
  */
 export function coverStatus(c: CoverInput): CoverStatus {
   const red: string[] = [];
   const orange: string[] = [];
-  if (c.criticalCurrent) red.push(plural(c.criticalCurrent, "caso en demora crítica", "casos en demora crítica"));
+  if (c.criticalCurrent) red.push(`${c.criticalCurrent} de ${c.current} en demora crítica`);
   if (c.urgent) red.push(plural(c.urgent, "posible urgencia", "posibles urgencias"));
-  if (c.completedOrders) orange.push(plural(c.completedOrders, "pedido completo sin primera respuesta", "pedidos completos sin primera respuesta"));
+  if (c.ordersUntaken) orange.push(plural(c.ordersUntaken, "pedido sin tomar", "pedidos sin tomar"));
   if (c.closing) orange.push(plural(c.closing, "ventana de WhatsApp por vencer", "ventanas de WhatsApp por vencer"));
   if (c.insisting) orange.push(plural(c.insisting, "cliente insistiendo", "clientes insistiendo"));
   if (red.length) return { level: "ATENCION", reasons: [...red, ...orange] };
@@ -59,6 +63,8 @@ export interface TodayClosures {
   notCompleted: { customerLeft: number; noStockOrNotCarried: number };
   /** Con tipo, pero de otro resultado (solo bot, otro). */
   other: number;
+  /** El desglose de `other`: botOnly + otherType = other. */
+  otherBy: { botOnly: number; otherType: number };
   /** typed / closed es menor que TODAY_CLOSURES_MIN_COVERAGE: dato parcial. false sin cierres. */
   lowCoverage: boolean;
 }
@@ -83,6 +89,7 @@ export function buildTodayClosures(rows: readonly TodayClosureRow[], map: Closur
     queries: n("CONSULTA"),
     notCompleted: { customerLeft: n("PEDIDO_NO_CONCRETADO"), noStockOrNotCarried: n("SIN_STOCK") + n("NO_LO_TRABAJAMOS") },
     other: n("SOLO_BOT") + n("OTRO"),
+    otherBy: { botOnly: n("SOLO_BOT"), otherType: n("OTRO") },
     lowCoverage: rows.length > 0 && typed / rows.length < TODAY_CLOSURES_MIN_COVERAGE,
   };
 }

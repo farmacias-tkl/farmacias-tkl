@@ -311,6 +311,13 @@ export interface NowPayload {
      */
     ordersUntaken: number;
     queriesUnanswered: number;
+    /**
+     * De atención actual, los que ya tuvieron una respuesta y esperan otra.
+     * ordersUntaken + queriesUnanswered + awaitingNextCurrent = current.
+     */
+    awaitingNextCurrent: number;
+    /** Críticos de cada uno de esos tres grupos: suman criticalCurrent. null si `critical` es null. */
+    criticalByType: { orders: number; queries: number; awaitingNext: number } | null;
     /** Críticos de atención actual y críticos entre los históricos. null si `critical` es null. */
     criticalCurrent: number | null;
     criticalHistorical: number | null;
