@@ -269,42 +269,51 @@ let historyCache: { at: number; before: number; value: ClosedUnansweredHistory }
 export async function getNowPayload(now: Date = new Date()): Promise<NowPayload> {
   if (nowCache && now.getTime() - nowCache.at < NOW_CACHE_SECONDS * 1000) return nowCache.payload;
 
+  // Cada parte informa cuánto tardó (solo milisegundos, sin datos) para poder ver en el log
+  // dónde se va el tiempo.
+  const ms: Record<string, number> = {};
+  const timed = <T,>(name: string, p: Promise<T>): Promise<T> => {
+    const t0 = Date.now();
+    return p.finally(() => { ms[name] = Date.now() - t0; });
+  };
+  const t0 = Date.now();
+
+  // Tanda 1: lo que no depende de nada.
   const [snapshot, freshness, today, openBlocks, versions, openOwners] = await Promise.all([
-    getQueueSnapshot(now), loadFreshness(), loadToday(now).catch(() => null), loadOpenBlockRows().catch(() => null),
-    loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[]),
-    loadOpenOwnerRows().catch(() => null),
+    timed("cola", getQueueSnapshot(now)), timed("frescura", loadFreshness()), timed("hoy", loadToday(now).catch(() => null)),
+    timed("bloques", loadOpenBlockRows().catch(() => null)),
+    timed("config", loadConfigVersions().then((r) => r.versions).catch(() => [] as ConfigVersion[])),
+    timed("asignados", loadOpenOwnerRows().catch(() => null)),
   ]);
   const wait = waitContext(versions, now);
   const current = configForDay(versions, arDayISO(now));
   const accounts = current?.data.accounts ?? [];
-  const checks = await loadQualityChecks(now, current ? accounts : null).catch(() => null);
-  const progress = await loadProgress(now, versions, wait?.ops ?? null).catch(() => null);
   // Actividad observada: desde el inicio del turno de operadores de hoy o, si no hay, desde el comienzo del día.
   const shiftStart = wait ? shiftStartOf(now, wait.ops) : null;
   const observedSince = shiftStart ?? arDayStartUTC(arDayISO(now));
-  const observed = await loadObservedRows(observedSince, now)
-    .then((rows) => ({ rows, since: observedSince, sinceIsShift: shiftStart !== null }))
-    .catch(() => null);
-  // Reclamos detectados: solo en las abiertas que esperan respuesta.
-  const claims = await loadClaimMotives(snapshot.items.filter((it) => it.open).map((it) => it.conversationId)).catch(() => null);
-  // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
-  const trend = await getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null);
 
+  // Tanda 2: dependen de la cola o de la configuración, pero no entre sí. Van juntas.
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
-  const closed = await getClosedUnanswered(now, snapshot.closedSince).catch(() => null);
-
-  // Histórico: se recalcula como mucho una vez por hora.
-  let history: ClosedUnansweredHistory | null = null;
-  if (historyCache && now.getTime() - historyCache.at < HISTORY_CACHE_SECONDS * 1000) {
-    history = historyCache.value;
-  } else {
-    try {
-      history = await countClosedUnansweredBefore(snapshot.closedSince);
-      historyCache = { at: now.getTime(), before: snapshot.closedSince.getTime(), value: history };
-    } catch {
-      history = null;
-    }
-  }
+  const historyFresh = historyCache && now.getTime() - historyCache.at < HISTORY_CACHE_SECONDS * 1000 ? historyCache.value : undefined;
+  const [checks, progress, observed, claims, trend, closed, history] = await Promise.all([
+    timed("calidad", loadQualityChecks(now, current ? accounts : null).catch(() => null)),
+    timed("avance", loadProgress(now, versions, wait?.ops ?? null).catch(() => null)),
+    timed("actividad", loadObservedRows(observedSince, now)
+      .then((rows) => ({ rows, since: observedSince, sinceIsShift: shiftStart !== null }))
+      .catch(() => null)),
+    // Reclamos detectados: solo en las abiertas que esperan respuesta.
+    timed("reclamos", loadClaimMotives(snapshot.items.filter((it) => it.open).map((it) => it.conversationId)).catch(() => null)),
+    // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
+    timed("evolucion", getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null)),
+    timed("cerradas", getClosedUnanswered(now, snapshot.closedSince).catch(() => null)),
+    // Histórico: se recalcula como mucho una vez por hora.
+    historyFresh !== undefined
+      ? Promise.resolve(historyFresh)
+      : timed("historico", countClosedUnansweredBefore(snapshot.closedSince)
+          .then((value) => { historyCache = { at: now.getTime(), before: snapshot.closedSince.getTime(), value }; return value as ClosedUnansweredHistory | null; })
+          .catch(() => null)),
+  ]);
+  console.log("[call-center/metrics/now] ms", JSON.stringify({ total: Date.now() - t0, ...ms }));
 
   const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims }, freshness);
   nowCache = { at: now.getTime(), payload };
