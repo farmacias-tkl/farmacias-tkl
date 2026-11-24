@@ -38,9 +38,12 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { arDayISO, arDayStartUTC, arHour, utcTimestampParam } from "./business-time";
-import { BOT_ORDER_COMPLETE_LIKE } from "./patterns";
-import { claimsOf, loadDetectedRows } from "./detected";
-import { branchNamesRegex } from "./detected-patterns";
+import { BOT_ORDER_COMPLETE_LIKE, PRESCRIPTION_LINK_REGEX } from "./patterns";
+import { claimsOf, loadDetectedRows, messageMatches } from "./detected";
+import { CLAIM_MOTIVES, CLAIM_PATTERNS, NOTHING_ARRIVED, branchNamesRegex, type MessagePattern } from "./detected-patterns";
+import { BOT_ORDER_FLOW_LIKE } from "./management-type";
+import { buildMotivesReport, selectMotiveCases, type MotiveFlags } from "./motives";
+import type { Motive, MotiveCasesPayload } from "./motives-types";
 import { getDerivations, type DerivationTiming } from "./derivation";
 import { closureMapOf, closureOutcomeOf, type ClosureMap } from "./closure-outcome";
 import { configForDay, loadConfigVersions } from "./config";
@@ -49,6 +52,7 @@ import {
   CONSULT_COVERAGE, CONSULT_HOURS, CONSULT_ONLINE_STORE, CONSULT_PAYMENT, CONSULT_PRICE, CONSULT_SERVICES, CONSULT_STOCK,
   BOUGHT_AT_TKL, CUSTOMER_DECLINED, CUSTOMER_GOES_TO_BRANCH, EMPTY_MESSAGE, NOT_A_LOSS, OPERATOR_OFFERED_STOCK, OPERATOR_CANCELLED, OPERATOR_POSTPONED, OPERATOR_WAITING, ORDER_CLOSING_OPERATOR, ORDER_STRONG_OPERATOR, SALE_LOST_PROBABLE, FOLLOW_UP_CUSTOMER, OPERATOR_IN_PERSON_ONLY, OPERATOR_NO_STOCK,
   ORDER_CONFIRMED_OPERATOR, PAYMENT_CUSTOMER, PRESCRIPTION_ORDER, SALE_LOST_CUSTOMER, SALE_LOST_ELSEWHERE, THANKS_MESSAGE,
+  BUTTON_ADVISOR, BUTTON_HOURS, BUTTON_ONLINE_STORE, BUTTON_ORDER, CLAIM_NO_NEWS_STRICT, FOLLOW_UP_ARRIVAL, ORDER_FREE_TEXT, PRESCRIPTION_PLATFORM_CAPTURE,
 } from "./kinds-patterns";
 import {
   CLOSURE_OUTCOME_LIST, CONSULT_KINDS, LOST_KINDS, MAIN_KINDS, NO_TAKE_KINDS, ORDER_KINDS, OUTCOME_MATCHES,
@@ -119,6 +123,19 @@ export interface KindRow {
 }
 
 type Flags = Omit<KindRow, "conversationId" | "createdAt" | "resolved" | "closureTypeName" | "labels">;
+
+/** Una conversación con las marcas de las dos clasificaciones: la de tipos y la de motivos de contacto. */
+export type KindMotiveRow = KindRow & MotiveFlags;
+
+/**
+ * Reclamo con la regla de "Motivos de contacto": los motivos de "Reclamos y pérdidas", salvo
+ * que preguntar cuándo llega un pedido es seguimiento y no reclamo.
+ */
+export const STRICT_CLAIM_PATTERNS: readonly MessagePattern[] = [
+  ...CLAIM_MOTIVES.filter((m) => m !== "SIN_NOVEDADES").flatMap((m) => CLAIM_PATTERNS[m] as readonly MessagePattern[]),
+  { all: [CLAIM_NO_NEWS_STRICT] },
+  ...NOTHING_ARRIVED,
+];
 
 function consultKind(r: Flags): ConsultKind {
   if (r.services) return "SERVICIOS";
@@ -228,12 +245,40 @@ export function buildKindsReport(rows: readonly KindRow[], opts: { now: Date; fr
   };
 }
 
-type RawKindRow = Omit<KindRow, "claim" | "hasFreeText" | "onlyEmptyText" | "operatorDerived" | "derivation"> & { freeMessages: number; emptyMessages: number };
+type RawKindRow = Omit<KindMotiveRow, "claim" | "hasFreeText" | "onlyEmptyText" | "operatorDerived" | "derivation" | "hasCustomerMessage"> & {
+  freeMessages: number; emptyMessages: number; customerMessages: number;
+};
 
 /** Conversaciones creadas entre dos días de Buenos Aires, inclusive, con sus marcas. Solo lectura. */
-export async function loadKindRows(fromDay: string, toDayInclusive: string): Promise<KindRow[]> {
+export async function loadKindRows(fromDay: string, toDayInclusive: string): Promise<KindMotiveRow[]> {
   const from = arDayStartUTC(fromDay);
   const to = new Date(arDayStartUTC(toDayInclusive).getTime() + MS_DAY);
+  // Los nombres de las sucursales salen de la tabla, no del código.
+  const branches = await prisma.branch.findMany({ select: { name: true } });
+  const branchRegex = branchNamesRegex(branches.map((b) => b.name));
+  const tkl = branchRegex ? `${BOUGHT_AT_TKL}|\\m(${branchRegex})\\M` : BOUGHT_AT_TKL;
+
+  const [rows, detected, derivations] = await Promise.all([
+    prisma.$queryRaw<RawKindRow[]>(kindRowsQuery(from, to, tkl)),
+    loadDetectedRows(fromDay, toDayInclusive),
+    getDerivations(fromDay, toDayInclusive),
+  ]);
+  const derivationOf = new Map(derivations.map((d) => [d.conversationId, d.timing]));
+
+  const withClaim = new Set(detected.rows.filter((r) => claimsOf(r).length > 0).map((r) => r.conversationId));
+  return rows.map(({ freeMessages, emptyMessages, customerMessages, ...r }) => ({
+    ...r,
+    claim: withClaim.has(r.conversationId),
+    operatorDerived: derivationOf.has(r.conversationId),
+    derivation: derivationOf.get(r.conversationId) ?? null,
+    hasFreeText: freeMessages > 0,
+    onlyEmptyText: freeMessages > 0 && emptyMessages === freeMessages,
+    hasCustomerMessage: customerMessages > 0,
+  }));
+}
+
+/** La consulta de loadKindRows, aparte para poder medirla. `tkl`: expresión que reconoce a TKL y sus sucursales. */
+export function kindRowsQuery(from: Date, to: Date, tkl: string): Prisma.Sql {
   const buttons = Prisma.join([...BOT_BUTTONS]);
   const cust = Prisma.sql`m.author = 'CUSTOMER'`;
   const op = Prisma.sql`m.author = 'OPERATOR' AND NOT m."isPrivate"`;
@@ -246,13 +291,17 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
   const strong = Prisma.sql`(${op} AND m.body ~* ${ORDER_STRONG_OPERATOR}) OR (${cust} AND m.body ~* ${PAYMENT_CUSTOMER})`;
   const evidence = Prisma.sql`${op} AND m.body ~* ${ORDER_CONFIRMED_OPERATOR}`;
   const closing = Prisma.sql`${op} AND m.body ~* ${ORDER_CLOSING_OPERATOR}`;
-  // Los nombres de las sucursales salen de la tabla, no del código.
-  const branches = await prisma.branch.findMany({ select: { name: true } });
-  const branchRegex = branchNamesRegex(branches.map((b) => b.name));
-  const tkl = branchRegex ? `${BOUGHT_AT_TKL}|\\m(${branchRegex})\\M` : BOUGHT_AT_TKL;
-
-  const [rows, detected, derivations] = await Promise.all([
-    prisma.$queryRaw<RawKindRow[]>(Prisma.sql`
+  // Primer mensaje escrito del cliente (no un botón): ¿ya es un reclamo? No cuenta si antes
+  // había empezado un pedido en el bot: ahí el contacto lo originó el pedido.
+  const firstClaim = Prisma.sql`coalesce((
+    SELECT ${messageMatches(STRICT_CLAIM_PATTERNS)} AND NOT EXISTS (
+      SELECT 1 FROM "ConversationMessage" o
+      WHERE o."conversationId" = c.id AND o."sentAt" < m."sentAt"
+        AND ((o.author = 'CUSTOMER' AND o.body = ${BUTTON_ORDER}) OR (o.author = 'BOT' AND (o.body LIKE ${BOT_ORDER_FLOW_LIKE} OR o.body LIKE ${BOT_ORDER_COMPLETE_LIKE}))))
+    FROM "ConversationMessage" m
+    WHERE m."conversationId" = c.id AND m.author = 'CUSTOMER' AND m.body IS NOT NULL AND m.body NOT IN (${buttons})
+    ORDER BY m."sentAt", m.id LIMIT 1), false)`;
+  return Prisma.sql`
       SELECT c.id AS "conversationId", c."createdAt" AS "createdAt",
         (c.status = 'RESUELTA') AS "resolved", c."closureTypeName" AS "closureTypeName", c."externalLabels" AS "labels",
         ${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_ORDER}`)} AS "prescription",
@@ -283,26 +332,23 @@ export async function loadKindRows(fromDay: string, toDayInclusive: string): Pro
         ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_HOURS}`)} AS "hours",
         ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_COVERAGE}`)} AS "coverage",
         ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_PAYMENT}`)} AS "paymentMethod",
-        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_ONLINE_STORE}`)} AS "onlineStore"
+        ${flag(Prisma.sql`${free} AND m.body ~* ${CONSULT_ONLINE_STORE}`)} AS "onlineStore",
+        ${firstClaim} AS "firstClaim",
+        ${flag(Prisma.sql`${free} AND ${messageMatches(STRICT_CLAIM_PATTERNS)}`)} AS "strictClaim",
+        ${flag(Prisma.sql`${cust} AND m.body ~* ${PRESCRIPTION_LINK_REGEX}`)} AS "prescriptionLink",
+        (min(substring(lower(m.body) from ${PRESCRIPTION_PLATFORM_CAPTURE})) FILTER (WHERE ${cust})) AS "prescriptionPlatform",
+        ${flag(Prisma.sql`(${cust} AND m.body = ${BUTTON_ORDER}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})`)} AS "orderButton",
+        ${flag(Prisma.sql`${free} AND m.body ~* ${ORDER_FREE_TEXT}`)} AS "orderText",
+        ${flag(Prisma.sql`${free} AND m.body ~* ${FOLLOW_UP_ARRIVAL}`)} AS "followUpArrival",
+        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ADVISOR}`)} AS "advisorButton",
+        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_HOURS}`)} AS "infoHours",
+        ${flag(Prisma.sql`${cust} AND m.body = ${BUTTON_ONLINE_STORE}`)} AS "infoOnline",
+        (count(*) FILTER (WHERE ${cust}))::int AS "customerMessages"
       FROM "Conversation" c
       LEFT JOIN "ConversationMessage" m ON m."conversationId" = c.id
       WHERE c."createdAt" >= ${utcTimestampParam(from)}::timestamp AND c."createdAt" < ${utcTimestampParam(to)}::timestamp
       GROUP BY c.id, c."createdAt", c.status, c."closureTypeName", c."externalLabels"
-    `),
-    loadDetectedRows(fromDay, toDayInclusive),
-    getDerivations(fromDay, toDayInclusive),
-  ]);
-  const derivationOf = new Map(derivations.map((d) => [d.conversationId, d.timing]));
-
-  const withClaim = new Set(detected.rows.filter((r) => claimsOf(r).length > 0).map((r) => r.conversationId));
-  return rows.map(({ freeMessages, emptyMessages, ...r }) => ({
-    ...r,
-    claim: withClaim.has(r.conversationId),
-    operatorDerived: derivationOf.has(r.conversationId),
-    derivation: derivationOf.get(r.conversationId) ?? null,
-    hasFreeText: freeMessages > 0,
-    onlyEmptyText: freeMessages > 0 && emptyMessages === freeMessages,
-  }));
+    `;
 }
 
 const CACHE_MAX_ENTRIES = 20;
@@ -318,7 +364,7 @@ export async function getKindsPayload(from: string, to: string, now: Date = new 
   const [rows, { versions }] = await Promise.all([loadKindRows(from, to), loadConfigVersions()]);
   // Las etiquetas de cierre son las de la configuración vigente hoy.
   const closureMap = closureMapOf(configForDay(versions, arDayISO(now))?.data);
-  const payload = buildKindsReport(rows, { now, from, to, closureMap });
+  const payload: KindsPayload = { ...buildKindsReport(rows, { now, from, to, closureMap }), motives: buildMotivesReport(rows, (r) => classifyKind(r).main) };
 
   if (cache.size >= CACHE_MAX_ENTRIES) {
     for (const [k, v] of cache) if (now.getTime() - v.at >= CACHE_MS) cache.delete(k);
@@ -326,4 +372,10 @@ export async function getKindsPayload(from: string, to: string, now: Date = new 
   }
   cache.set(key, { at: now.getTime(), payload });
   return payload;
+}
+
+/** Conversaciones de un motivo de contacto en el período. Sin caché: se pide a demanda. Solo lectura. */
+export async function getMotiveCases(from: string, to: string, motive: Motive, now: Date = new Date()): Promise<MotiveCasesPayload> {
+  const rows = await loadKindRows(from, to);
+  return { motive, from, to, generatedAt: now.toISOString(), ...selectMotiveCases(rows, motive) };
 }

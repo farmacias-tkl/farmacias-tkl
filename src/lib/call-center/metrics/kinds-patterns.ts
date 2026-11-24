@@ -139,3 +139,33 @@ export const CONSULT_SERVICES = "vacun|inyec|\\maplica(n|r|ci[oó]n|ciones)\\M|t
 /** Un mensaje que es solo un saludo, un agradecimiento o un sí/no: no tiene contenido. */
 export const EMPTY_MESSAGE =
   "^[^[:alnum:]]*((gracias+|much[ií]simas|muchas|mil|grax|gcs|genial|perfecto|listo|dale|oka?y?|okey|buen[ií]simo|b[aá]rbaro|igualmente|saludos|de acuerdo|excelente|muy amable|a vos|a ustedes|hola+|buen[oa]s?|d[ií]as?|tardes|noches|qu[eé] tal|c[oó]mo (est[aá]n?|and[aá]n?|va)|todo bien|s[ií]+|no)[^[:alnum:]]*)*$";
+
+// ── Motivos de contacto ──────────────────────────────────────────────────────────────
+
+export const BUTTON_ORDER = "Pedir medicamentos";
+export const BUTTON_ADVISOR = "Asesor";
+export const BUTTON_HOURS = "Suc. y Horarios";
+export const BUTTON_ONLINE_STORE = "Tienda online";
+
+/** El cliente pide en texto libre: quiere pedir, comprar, encargar o que le envíen o preparen algo. */
+export const ORDER_FREE_TEXT =
+  "\\m(quiero|quisiera|querr[ií]a|necesito|necesitar[ií]a|preciso)\\M[^|]{0,30}\\m(pedir|comprar|encargar|reservar|(hacer|realizar) (un|el) pedido)\\M" +
+  "|\\m(hacer|realizar|pasar|dejar) (un|el|mi) pedido\\M|\\mme (podr[ií]an?|pueden|pod[eé]s) (enviar|mandar|preparar|traer|reservar)\\M" +
+  "|\\m(les|te|le) (encargo|pido)\\M|\\mpara (encargar|pedir)\\M";
+
+/**
+ * Seguimiento de un pedido en curso: pregunta cuándo o a qué hora llega, o dónde está. Es una
+ * pregunta, no una queja: "no llegó en el horario acordado" sí es un reclamo.
+ */
+export const FOLLOW_UP_ARRIVAL =
+  "cu[aá]ndo (llega|me lo traen|lo env[ií]an|lo mandan)|a qu[eé] hora (llega|lo traen|pasan)|(saber|avisaron|avisan|avisen) si lleg[oó]" +
+  "|d[oó]nde est[aá] (mi|el) pedido|(estado|seguimiento) de(l| mi) pedido";
+
+/**
+ * "Pedido sin novedades" con la regla de esta pestaña: solo cuando el cliente dice que no
+ * tiene novedades. Preguntar cuándo llega es seguimiento.
+ */
+export const CLAIM_NO_NEWS_STRICT = "sin novedad|no tengo novedad|pedido[^|]{0,40}novedad";
+
+/** Plataforma de la receta, por el dominio del enlace. El enlace nunca se abre. */
+export const PRESCRIPTION_PLATFORM_CAPTURE = "https?://[^[:space:]/]*(qbitos|meducar|misrx|receto|drapp|rcta|osde)\\.";

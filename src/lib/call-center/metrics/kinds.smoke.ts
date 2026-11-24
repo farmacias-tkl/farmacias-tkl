@@ -98,6 +98,14 @@ async function main() {
     await add("fuera", [[C, "Cuánto sale"]], "2026-03-10T10:00");
     await add("noche", [[C, "Cuánto sale el producto"]], "2026-03-04T23:59");
 
+    // Motivos de contacto: casos propios, en otro período para no mover los conteos de arriba.
+    await add("mReclamoPrimero", [[C, "Hola, me mandaron otro producto, no es lo que pedí"], [O, "Hola, lo revisamos"]], "2026-03-20T10:00");
+    await add("mPedidoTexto", [[C, "Hola, quisiera encargar un producto inventado"]], "2026-03-20T10:10");
+    await add("mBotonYTexto", [[C, "Pedir medicamentos"], [B, FLOW], [C, "Producto inventado de 500"]], "2026-03-20T10:20");
+    await add("mCuandoLlega", [[C, "Hola, cuándo llega mi pedido?"]], "2026-03-20T10:30");
+    await add("mAsesor", [[C, "Asesor"]], "2026-03-20T10:40");
+    await add("mEnlace", [[C, "Hola, les paso https://app.qbitos.com/r/inventada"]], "2026-03-20T10:50");
+
     const rows = await loadKindRows("2026-03-02", "2026-03-04");
     const by = new Map(rows.map((r) => [r.conversationId, classifyKind(r)]));
     const k = (key: string) => { const v = by.get(ids[key]); return v ? `${v.main}${v.sub ? `/${v.sub}` : ""}` : null; };
@@ -180,10 +188,41 @@ async function main() {
       assert.deepEqual([k("derivNombra"), k("derivEnvio"), k("sinCobertura"), k("derivVendida")],
         ["NO_SE_PUDO_TOMAR/DERIVADO_PRESENCIAL", "NO_SE_PUDO_TOMAR/DERIVADO_PRESENCIAL", "PEDIDO_SIN_CONFIRMAR", "PEDIDO/RETIRO"]);
     });
+    await check("motivos de contacto: la necesidad que originó el contacto, con la receta como característica", async () => {
+      const { classifyMotive } = await import("./motives");
+      const byId = new Map(rows.map((r) => [r.conversationId, r]));
+      const m = (key: string) => classifyMotive(byId.get(ids[key])!);
+      // Empezó un pedido en el bot y después reclamó: lo originó el pedido; el reclamo queda como tema adicional.
+      assert.deepEqual([m("reclamo").main, m("reclamo").extra.includes("RECLAMO")], ["PEDIDO", true]);
+      assert.deepEqual([m("menuAbandono").main, m("menuAbandono").unknownReason], ["NO_IDENTIFICADO", "BOTON_PEDIDO"]);
+      assert.deepEqual([m("recetaMeducar").main, m("recetaMeducar").orderSignal, m("recetaMeducar").prescription.platform], ["PEDIDO", "RECETA", "meducar"]);
+      assert.deepEqual([m("recetaOtra").main, m("recetaOtra").prescription.platform], ["PEDIDO", "otra"]);
+      assert.equal(m("sinConfirmar").orderSignal, "DATOS_COMPLETOS");
+      assert.equal(m("enCamino").main, "SEGUIMIENTO");
+      assert.equal(m("seguimiento").main, "SEGUIMIENTO");
+      assert.deepEqual([m("horariosBoton").main, m("horariosBoton").consult], ["CONSULTA", "HORARIOS"]);
+      assert.equal(m("gracias").main, "SALUDO");
+      assert.deepEqual([m("adjunto").main, m("adjunto").unknownReason], ["NO_IDENTIFICADO", "ADJUNTO"]);
+
+      const extra = new Map((await loadKindRows("2026-03-20", "2026-03-20")).map((r) => [r.conversationId, classifyMotive(r)]));
+      const x = (key: string) => extra.get(ids[key])!;
+      assert.equal(x("mReclamoPrimero").main, "RECLAMO");
+      assert.deepEqual([x("mPedidoTexto").main, x("mPedidoTexto").orderSignal], ["PEDIDO", "TEXTO"]);
+      assert.deepEqual([x("mBotonYTexto").main, x("mBotonYTexto").orderSignal], ["PEDIDO", "BOTON_Y_CONTENIDO"]);
+      assert.equal(x("mCuandoLlega").main, "SEGUIMIENTO", "preguntar cuándo llega no es un reclamo");
+      assert.deepEqual([x("mAsesor").main, x("mAsesor").unknownReason], ["NO_IDENTIFICADO", "ASESOR"]);
+      assert.deepEqual([x("mEnlace").main, x("mEnlace").prescription], ["PEDIDO", { has: true, platform: "qbitos" }]);
+
+      const p = await getKindsPayload("2026-03-20", "2026-03-20", at("2026-03-21T12:00"));
+      assert.equal(Object.values(p.motives!.total).reduce((a, b) => a + b, 0), p.motives!.conversations);
+      assert.equal(p.motives!.conversations, 6);
+    });
+
     await check("período y hora: lo creado fuera no entra; las 23:59 quedan en su día de Buenos Aires", async () => {
       assert.equal(by.has(ids.fuera), false);
       const p = await getKindsPayload("2026-03-02", "2026-03-04", at("2026-03-05T12:00"));
-      assert.equal(p.conversations, Object.keys(ids).length - 1);
+      // Fuera del período: "fuera" y los seis casos de motivos del 20/03.
+      assert.equal(p.conversations, Object.keys(ids).filter((k) => k !== "fuera" && !/^m[A-Z]/.test(k)).length);
       assert.equal(p.byDay.find((d) => d.day === "2026-03-04")!.CONSULTA, 1);
       assert.equal(p.byHour[23].CONSULTA, 1);
       assert.equal(p.operator, null, "sin etiquetas de cierre en la configuración no hay dato del operador");
