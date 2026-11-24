@@ -6,7 +6,7 @@ import { arDayISO } from "@/lib/call-center/metrics/business-time";
 import NowPanel from "./NowPanel";
 import AttentionPanel from "./AttentionPanel";
 import DetectedPanel from "./DetectedPanel";
-import KindsPanel from "./KindsPanel";
+import MotivesPanel from "./MotivesPanel";
 import OperatorsPanel from "./OperatorsPanel";
 import QualityPanel from "./QualityPanel";
 import SalesPanel from "./SalesPanel";
@@ -19,7 +19,7 @@ const BLOCKS = [
   { key: "ahora", label: "Ahora" },
   { key: "atencion", label: "Atención y demoras" },
   { key: "operadores", label: "Operadores" },
-  { key: "tipos", label: "Tipos" },
+  { key: "motivos", label: "Motivos de contacto" },
   { key: "reclamos", label: "Reclamos y pérdidas" },
   { key: "ventas", label: "Ventas SIAF" },
   { key: "datos", label: "Calidad de datos" },
@@ -36,7 +36,9 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
   // Ventas SIAF tiene su propio permiso: sin él, la pestaña no existe.
   const blocks = BLOCKS.filter((b) => b.key !== "ventas" || canViewCallCenterSales(session.user));
   // Un valor desconocido, o un bloque que el usuario no puede ver, cae en "Ahora".
-  const block: BlockKey = blocks.find((b) => b.key === searchParams.bloque)?.key ?? "ahora";
+  // "tipos" es el nombre anterior de "Motivos de contacto": los enlaces guardados siguen andando.
+  const wanted = searchParams.bloque === "tipos" ? "motivos" : searchParams.bloque;
+  const block: BlockKey = blocks.find((b) => b.key === wanted)?.key ?? "ahora";
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -67,7 +69,7 @@ export default async function CallCenterMetricsPage({ searchParams }: { searchPa
       {block === "ahora" && <NowPanel />}
       {block === "atencion" && <AttentionPanel today={arDayISO(new Date())} />}
       {block === "operadores" && <OperatorsPanel today={arDayISO(new Date())} />}
-      {block === "tipos" && <KindsPanel today={arDayISO(new Date())} />}
+      {block === "motivos" && <MotivesPanel today={arDayISO(new Date())} />}
       {block === "reclamos" && <DetectedPanel today={arDayISO(new Date())} />}
       {block === "ventas" && <SalesPanel today={arDayISO(new Date())} />}
       {block === "datos" && <QualityPanel />}

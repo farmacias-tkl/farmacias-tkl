@@ -61,7 +61,7 @@ async function main() {
     ] });
     // Abierta, nunca respondida, con pedido completo en el bot.
     ids.abiertaPedido = await conv(prisma, "abierta-pedido", { phone: "+5491100000002", status: "SIN_ASIGNAR", createdH: 3, botExitH: 2.9, msgs: [
-      { author: "CUSTOMER", h: 3, body: LONG }, { author: "BOT", h: 2.9, body: "✅ ¡Listo! Mensaje final inventado." }, { author: "CUSTOMER", h: 2.5, body: "sigo acá" }, { author: "CUSTOMER", h: 1, body: "es urgente, hay alguien" },
+      { author: "CUSTOMER", h: 3, body: LONG }, { author: "BOT", h: 2.95, body: "¿Tu pedido es con cobertura médica o lo abonás de forma particular?" }, { author: "BOT", h: 2.9, body: "✅ ¡Listo! Mensaje final inventado." }, { author: "CUSTOMER", h: 2.5, body: "sigo acá" }, { author: "CUSTOMER", h: 1, body: "es urgente, hay alguien" },
     ] });
     // Abierta, respondida, el cliente volvió a escribir dos veces: espera desde el PRIMER mensaje del bloque.
     ids.abiertaSiguiente = await conv(prisma, "abierta-siguiente", { phone: "+5491100000003", status: "ASIGNADA", createdH: 10, botExitH: 9.9, msgs: [
@@ -79,9 +79,10 @@ async function main() {
     ids.graciasFoto = await conv(prisma, "gracias-foto", { phone: "+5491100000001", status: "RESUELTA", createdH: 9, botExitH: 8.8, resolvedH: 8, msgs: [
       { author: "CUSTOMER", h: 9, body: null, mediaType: "image" },
     ] });
-    // Cerrada sin respuesta, mensaje largo, sin cierre previo: pendiente común.
+    // Cerrada sin respuesta, mensaje largo, sin cierre previo: pendiente común. El bot mandó su
+    // mensaje final por el camino "Asesor" (sin recorrido de pedido): NO es un pedido completo.
     ids.cerradaSinResp = await conv(prisma, "cerrada-sin-resp", { phone: "+5491100000005", status: "RESUELTA", createdH: 100, botExitH: 99.8, resolvedH: 90, msgs: [
-      { author: "CUSTOMER", h: 100, body: LONG }, { author: "BOT", h: 99.9 },
+      { author: "CUSTOMER", h: 100.1, body: "Asesor" }, { author: "CUSTOMER", h: 100, body: LONG }, { author: "BOT", h: 99.9, body: "✅ ¡Listo! Mensaje final inventado." },
     ] });
     // La nota interna del operador NO cuenta como respuesta.
     ids.soloNota = await conv(prisma, "solo-nota", { phone: "+5491100000006", status: "RESUELTA", createdH: 6, botExitH: 5.9, resolvedH: 4, msgs: [
@@ -91,7 +92,7 @@ async function main() {
     ids.soloBot = await conv(prisma, "solo-bot", { phone: "+5491100000007", status: "SIN_ASIGNAR", createdH: 2, botExitH: 1.9, msgs: [{ author: "BOT", h: 2 }] });
     // Cerrada sin respuesta de hace 60 días: fuera de la ventana de la cola, entra en el histórico.
     ids.historica = await conv(prisma, "historica", { phone: "+5491100000008", status: "RESUELTA", createdH: 24 * 60, botExitH: 24 * 60 - 0.1, resolvedH: 24 * 59, msgs: [
-      { author: "CUSTOMER", h: 24 * 60, body: LONG }, { author: "BOT", h: 24 * 60 - 0.05, body: "✅ ¡Listo! Mensaje final inventado." },
+      { author: "CUSTOMER", h: 24 * 60, body: LONG }, { author: "BOT", h: 24 * 60 - 0.02, body: "¿Tu pedido es con cobertura médica o lo abonás de forma particular?" }, { author: "BOT", h: 24 * 60 - 0.05, body: "✅ ¡Listo! Mensaje final inventado." },
     ] });
 
     const since = hoursAgo(24 * 30);
@@ -113,6 +114,7 @@ async function main() {
       assert.equal(r.hasHumanResponse, false);
     });
     await check("pedido completo en el bot, nunca respondido", () => {
+      assert.equal(byId.get(ids.cerradaSinResp)!.botOrderComplete, false, "el mensaje final por el camino Asesor no es un pedido completo");
       const r = byId.get(ids.abiertaPedido)!;
       assert.equal(r.botOrderComplete, true);
       assert.equal(r.hasHumanResponse, false);

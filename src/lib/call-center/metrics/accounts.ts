@@ -88,6 +88,11 @@ export interface AccountReportRow {
   /** Demora de reloj de los casos que tomó, desde la salida del bot. Es demora de la cola. */
   firstResponses: Distribution;
   followups: Distribution;
+  /**
+   * Respuestas posteriores a bloques del cliente que empezaron DENTRO del horario de
+   * operadores: es la población del objetivo. null si no hay horario configurado.
+   */
+  followupsInHours: Distribution | null;
   activity: {
     firstMessageAt: Date | null;
     lastMessageAt: Date | null;
@@ -112,6 +117,7 @@ export interface AccountsReport {
     conversationsWithSeveralAccounts: number;
     firstResponses: Distribution;
     followups: Distribution;
+    followupsInHours: Distribution | null;
     /** Bloques del cliente que quedaron sin respuesta. */
     followupsUnanswered: number;
     privateNotes: number;
@@ -137,6 +143,7 @@ interface Acc {
   hoursKnown: boolean;
   firstResponses: number[];
   followups: number[];
+  followupsInHours: number[];
   byDay: Map<string, { publicMessages: number; conversations: Set<string>; waits: number[] }>;
 }
 
@@ -247,7 +254,7 @@ export function buildAccountsReport(
     if (!a) {
       a = {
         conversations: new Set(), days: new Set(), publicMessages: 0, privateNotes: 0, first: null, last: null,
-        inPublic: 0, inOperatorOnly: 0, outside: 0, hoursKnown: true, firstResponses: [], followups: [], byDay: new Map(),
+        inPublic: 0, inOperatorOnly: 0, outside: 0, hoursKnown: true, firstResponses: [], followups: [], followupsInHours: [], byDay: new Map(),
       };
       byKey.set(key, a);
     }
@@ -318,6 +325,8 @@ export function buildAccountsReport(
   }
 
   const teamFollowups: number[] = [];
+  const teamFollowupsInHours: number[] = [];
+  let hoursKnownForFollowups = true;
   let followupsUnanswered = 0;
   for (const b of input.followups) {
     if (!b.respondedAt) { followupsUnanswered++; continue; }
@@ -325,6 +334,12 @@ export function buildAccountsReport(
     if (!outsideTeam(b.account)) teamFollowups.push(minutes);
     const acc = get(b.account);
     acc.followups.push(minutes);
+    // Población del objetivo: el bloque empezó dentro del horario de operadores vigente ese día.
+    if (!configForDay(opts.versions, arDayISO(b.startedAt))) hoursKnownForFollowups = false;
+    else if (isWithinHours(b.startedAt, ops)) {
+      acc.followupsInHours.push(minutes);
+      if (!outsideTeam(b.account)) teamFollowupsInHours.push(minutes);
+    }
     dayOf(acc, arDayISO(b.startedAt)).waits.push(minutes);
   }
 
@@ -357,6 +372,7 @@ export function buildAccountsReport(
       privateNotes: a.privateNotes,
       firstResponses: distribution(a.firstResponses),
       followups: distribution(a.followups),
+      followupsInHours: hoursKnownForFollowups ? distribution(a.followupsInHours) : null,
       activity: {
         firstMessageAt: a.first,
         lastMessageAt: a.last,
@@ -389,6 +405,7 @@ export function buildAccountsReport(
       conversationsWithSeveralAccounts: [...accountsByConversation.values()].filter((s) => s.size > 1).length,
       firstResponses: distribution(teamFirst),
       followups: distribution(teamFollowups),
+      followupsInHours: hoursKnownForFollowups ? distribution(teamFollowupsInHours) : null,
       followupsUnanswered,
       privateNotes: teamNotes,
       firstResponsesLaterDay: teamLaterDay,
@@ -477,3 +494,5 @@ export async function loadFollowupBlocks(fromDay: string, toDayInclusive: string
       AND m."sentAt" < ${utcTimestampParam(to)}::timestamp
   `);
 }
+
+export { FOLLOWUP_GOAL_MIN_CASES, followupGoalStatus, type FollowupGoal } from "./accounts-types";

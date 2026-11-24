@@ -17,6 +17,8 @@ export type AccountsPayload = Jsonified<Omit<AccountsReport, "closures"> & {
   period: { from: string; to: string };
   /** Hay una versión de la configuración vigente hoy: de ahí salen alias y estado de las cuentas. */
   hasConfig: boolean;
+  /** Objetivo de las respuestas posteriores de la configuración vigente; null si no está cargado. */
+  followupGoal: FollowupGoal | null;
   /** Las conversaciones resueltas creadas más de estos días antes del período no se recorren. */
   lookbackDays: number;
 }>;
@@ -47,4 +49,19 @@ export interface OperatorCasesPayload {
   /** Casos que cuentan en el indicador, antes del tope de filas. */
   total: number;
   cases: OperatorCase[];
+}
+
+export type FollowupGoal = { medianMinutes: number; p90Minutes: number };
+/** Con menos respuestas que esto no se dice si una cuenta cumple el objetivo. */
+export const FOLLOWUP_GOAL_MIN_CASES = 20;
+
+/**
+ * ¿Cumple el objetivo de respuestas posteriores? null si no hay objetivo, no hay horario o la
+ * muestra es chica: en esos casos no se colorea ni se afirma nada. PURO.
+ */
+export function followupGoalStatus(
+  d: { n: number; median: number | null; p90: number | null } | null, goal: FollowupGoal | null | undefined,
+): { median: boolean; p90: boolean } | null {
+  if (!goal || !d || d.n < FOLLOWUP_GOAL_MIN_CASES || d.median === null || d.p90 === null) return null;
+  return { median: d.median <= goal.medianMinutes, p90: d.p90 <= goal.p90Minutes };
 }

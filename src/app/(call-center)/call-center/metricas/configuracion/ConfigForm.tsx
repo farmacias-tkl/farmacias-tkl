@@ -43,6 +43,9 @@ export default function ConfigForm({
   const [critical, setCritical] = useState(String(base ? criticalWaitMinutesOf(base.data) : DEFAULT_CRITICAL_WAIT_MINUTES));
   const [windowWarning, setWindowWarning] = useState(String(base ? windowWarningHoursOf(base.data) : DEFAULT_WINDOW_WARNING_HOURS));
   const [lastResponseWarning, setLastResponseWarning] = useState(String(base ? lastResponseWarningMinutesOf(base.data) : DEFAULT_LAST_RESPONSE_WARNING_MINUTES));
+  // Objetivo de las respuestas posteriores: opcional. Vacío = sin objetivo.
+  const [followupMedian, setFollowupMedian] = useState(base?.data.followupGoal ? String(base.data.followupGoal.medianMinutes) : "");
+  const [followupP90, setFollowupP90] = useState(base?.data.followupGoal ? String(base.data.followupGoal.p90Minutes) : "");
   const [accounts, setAccounts] = useState<ConfigAccount[]>(() => initialAccounts(base?.data ?? null, options.accounts));
   const [newAccount, setNewAccount] = useState("");
   const [vendors, setVendors] = useState<Set<string>>(
@@ -116,6 +119,11 @@ export default function ConfigForm({
     }
     const warningNumber = Number(windowWarning);
     if (!/^\d+$/.test(windowWarning.trim()) || warningNumber < 1 || warningNumber > 23) problems.push("El aviso de ventana por vencer tiene que ser un número entero de horas, entre 1 y 23.");
+    const fm = followupMedian.trim(), fp = followupP90.trim();
+    const validMinutes = (v: string) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 1440;
+    if ((fm === "") !== (fp === "")) problems.push("El objetivo de respuestas posteriores lleva los dos valores (mediana y 90%), o ninguno.");
+    else if (fm !== "" && (!validMinutes(fm) || !validMinutes(fp))) problems.push("El objetivo de respuestas posteriores tiene que ser en minutos enteros, entre 1 y 1440.");
+    else if (fm !== "" && Number(fp) < Number(fm)) problems.push("El objetivo del 90% no puede ser menor que el de la mediana.");
     const lastResponseNumber = Number(lastResponseWarning);
     if (!/^\d+$/.test(lastResponseWarning.trim()) || lastResponseNumber < 1 || lastResponseNumber > 1440) problems.push("El aviso de última respuesta tiene que ser un número entero de minutos, entre 1 y 1440.");
     if (problems.length > 0 || !pub.ok || !ops.ok) { setErrors(problems); return; }
@@ -128,6 +136,7 @@ export default function ConfigForm({
       criticalWaitMinutes: criticalNumber,
       windowWarningHours: warningNumber,
       lastResponseWarningMinutes: lastResponseNumber,
+      ...(fm !== "" && fp !== "" ? { followupGoal: { medianMinutes: Number(fm), p90Minutes: Number(fp) } } : {}),
       // Sin sucursales cargadas el campo no se guarda, como en las versiones anteriores.
       ...(branchOrderHours.length > 0 ? { branchOrderHours } : {}),
       ...(closureLabels.some((c) => c.label.trim()) ? { closureLabels: closureLabels.filter((c) => c.label.trim()).map((c) => ({ label: c.label.trim(), outcome: c.outcome })) } : {}),
@@ -245,6 +254,19 @@ export default function ConfigForm({
         <div className="mt-2 flex items-center gap-2">
           <input id="lastResponseWarning" inputMode="numeric" value={lastResponseWarning} onChange={(e) => setLastResponseWarning(e.target.value)} className={`w-24 ${input}`} />
           <span className="text-sm text-gray-600">minutos</span>
+        </div>
+
+        <p className="mt-4 block text-sm font-semibold text-gray-800">Objetivo de las respuestas posteriores (opcional)</p>
+        <p className="text-xs text-gray-500">
+          Cuando el cliente vuelve a escribir: en minutos de reloj, para los mensajes que llegan dentro del horario de operadores. Con el objetivo cargado, &quot;Operadores&quot; marca
+          qué cuentas lo cumplen. Dejá los dos campos vacíos para no usar objetivo. No es la meta de la primera respuesta.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <label htmlFor="followupMedian" className="text-sm text-gray-600">Mediana de</label>
+          <input id="followupMedian" inputMode="numeric" value={followupMedian} onChange={(e) => setFollowupMedian(e.target.value)} className={`w-20 ${input}`} />
+          <label htmlFor="followupP90" className="text-sm text-gray-600">minutos o menos, y el 90% en</label>
+          <input id="followupP90" inputMode="numeric" value={followupP90} onChange={(e) => setFollowupP90(e.target.value)} className={`w-20 ${input}`} />
+          <span className="text-sm text-gray-600">minutos o menos</span>
         </div>
       </section>
 

@@ -107,4 +107,6 @@ export interface KindsPayload {
   byDay: Array<{ day: string } & KindCounts>;
   /** Por hora de Buenos Aires de entrada: 24 posiciones. */
   byHour: KindCounts[];
+  /** "Motivos de contacto": para qué escribió el cliente. Lo agrega el servicio; el informe puro de tipos no lo trae. */
+  motives?: import("./motives-types").MotivesPayload;
 }

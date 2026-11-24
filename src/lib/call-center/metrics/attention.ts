@@ -610,7 +610,8 @@ function toEntryRow(r: RawEntryRow): EntryRow {
     createdAt: r.createdAt,
     firstCustomerAt: r.firstCustomerAt,
     botExitAt: r.botExitAt,
-    botOrderCompleteAt: r.botOrderCompleteAt,
+    // El mensaje final también cierra el camino "Asesor": sin recorrido de pedido no es un pedido completo.
+    botOrderCompleteAt: r.orderFlow === true ? r.botOrderCompleteAt : null,
     firstHumanAt: r.firstHumanAt,
     firstHumanAccount: r.firstHumanAccount,
     lastCustomerBeforeResponseAt: r.lastCustBeforeOp,

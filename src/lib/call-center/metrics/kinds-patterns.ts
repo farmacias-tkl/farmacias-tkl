@@ -133,9 +133,45 @@ export const CONSULT_STOCK = "tienen|ten[eé]s|tendr[aá]n|\\mhay\\M|stock|dispo
 export const CONSULT_HOURS = "horario|abren|cierran|abierto|direcci[oó]n|sucursal|d[oó]nde queda";
 export const CONSULT_COVERAGE = "obra social|prepaga|\\mpami\\M|\\mosde\\M|cobertura|descuento|cubre";
 export const CONSULT_PAYMENT = "tarjeta|cuotas|transferencia|mercado ?pago|efectivo|d[eé]bito|cr[eé]dito";
+/**
+ * Una disculpa suelta ("y disculpame", "perdón por la molestia"): acompaña a un agradecimiento
+ * y no tiene otro contenido. Solo para motivos de contacto.
+ */
+export const APOLOGY_MESSAGE =
+  "^[^[:alnum:]]*(y )?(disc[uú]lp[aáeé](me|nme)?|(mil )?disculpas|perd[oó]n|perd[oó]n[aáeé]me)( (por )?(la|las) molestias?)?[^[:alnum:]]*$";
+
 export const CONSULT_ONLINE_STORE = "p[aá]gina|\\mweb\\M|online";
 export const CONSULT_SERVICES = "vacun|inyec|\\maplica(n|r|ci[oó]n|ciones)\\M|tomar la presi[oó]n|\\m(test|hisopado)\\M";
 
 /** Un mensaje que es solo un saludo, un agradecimiento o un sí/no: no tiene contenido. */
 export const EMPTY_MESSAGE =
   "^[^[:alnum:]]*((gracias+|much[ií]simas|muchas|mil|grax|gcs|genial|perfecto|listo|dale|oka?y?|okey|buen[ií]simo|b[aá]rbaro|igualmente|saludos|de acuerdo|excelente|muy amable|a vos|a ustedes|hola+|buen[oa]s?|d[ií]as?|tardes|noches|qu[eé] tal|c[oó]mo (est[aá]n?|and[aá]n?|va)|todo bien|s[ií]+|no)[^[:alnum:]]*)*$";
+
+// ── Motivos de contacto ──────────────────────────────────────────────────────────────
+
+export const BUTTON_ORDER = "Pedir medicamentos";
+export const BUTTON_ADVISOR = "Asesor";
+export const BUTTON_HOURS = "Suc. y Horarios";
+export const BUTTON_ONLINE_STORE = "Tienda online";
+
+/** El cliente pide en texto libre: quiere pedir, comprar, encargar o que le envíen o preparen algo. */
+export const ORDER_FREE_TEXT =
+  "\\m(quiero|quisiera|querr[ií]a|necesito|necesitar[ií]a|preciso)\\M[^|]{0,30}\\m(pedir|comprar|encargar|reservar|(hacer|realizar) (un|el) pedido)\\M" +
+  "|\\m(hacer|realizar|pasar|dejar) (un|el|mi) pedido\\M|\\mme (podr[ií]an?|pueden|pod[eé]s) (enviar|mandar|preparar|traer|reservar)\\M" +
+  "|\\m(les|te|le) (encargo|pido)\\M|\\mpara (encargar|pedir)\\M";
+
+/**
+ * Seguimiento de un pedido en curso: pregunta cuándo o a qué hora llega, o dónde está. Es una
+ * pregunta, no una queja: "no llegó en el horario acordado" sí es un reclamo.
+ */
+export const FOLLOW_UP_ARRIVAL =
+  "cu[aá]ndo (me )?(lo |la |los |las )?(llega|traen|env[ií]an|mandan)|a qu[eé] hora (me )?(lo |la |los |las )?(llega|traen|env[ií]an|mandan|pasan)" +
+  "|(saber|avisaron|avisan|avisen) si lleg[oó]|d[oó]nde est[aá] (mi|el) pedido|(estado|seguimiento) de(l| mi) pedido" +
+  // Cuánto tarda el aviso o el pedido, y avisos al repartidor: es un pedido en curso.
+  "|cu[aá]nto (tarda|demora)[^|]{0,40}(aviso|pedido|env[ií]o|retir)|aviso para retirar|no tengo timbre|no (anda|funciona) el timbre|que me llamen? (cuando|al) lleg";
+
+/** Consulta de stock dicha en pasado o en condicional ("tenían", "tendrían"): solo para motivos. */
+export const CONSULT_STOCK_PAST = "\\mten[ií]an\\M|\\mtendr[ií]an\\M";
+
+/** Plataforma de la receta, por el dominio del enlace. El enlace nunca se abre. */
+export const PRESCRIPTION_PLATFORM_CAPTURE = "https?://[^[:space:]/]*(qbitos|meducar|misrx|receto|drapp|rcta|osde)\\.";

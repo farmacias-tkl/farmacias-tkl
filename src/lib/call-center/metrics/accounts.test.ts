@@ -6,7 +6,7 @@
  * Horario de prueba: público lunes a viernes 10–18; operadores lunes a viernes 09–19.
  */
 import assert from "node:assert/strict";
-import { buildAccountsReport, type FollowupBlockRow, type OperatorMessageRow } from "./accounts";
+import { buildAccountsReport, followupGoalStatus, type FollowupBlockRow, type OperatorMessageRow } from "./accounts";
 import { toEntryFact, type EntryRow } from "./attention";
 import { publicHours } from "./schedule";
 import type { ConfigVersion } from "./config";
@@ -135,6 +135,24 @@ test("evolución por cuenta: por día, mensajes a clientes, conversaciones y res
     { day: "2026-03-02", publicMessages: 3, conversations: 2, followups: 2, followupMedian: 335 },
     { day: "2026-03-04", publicMessages: 1, conversations: 1, followups: 0, followupMedian: null },
   ]);
+});
+
+test("objetivo de respuestas posteriores: solo bloques que empiezan en horario de operadores, y sin veredicto con muestra chica o sin objetivo", () => {
+  const blocks = (n: number, start: string, minutes: number) => Array.from({ length: n }, (_, i) =>
+    ({ conversationId: `g${start}${i}`, startedAt: at(start), respondedAt: new Date(at(start).getTime() + minutes * 60_000), account: "9001" }));
+  // 20 bloques en horario (4 minutos) y 5 de noche (300 minutos): los de noche no entran en el objetivo.
+  const r = build({ messages: [msg("9001", "c1", "2026-03-02T10:00")], followups: [...blocks(20, "2026-03-02T10:00", 4), ...blocks(5, "2026-03-02T22:00", 300)] });
+  const a = of(r, "9001");
+  assert.deepEqual([a.followups.n, a.followupsInHours!.n, a.followupsInHours!.median, a.followupsInHours!.p90], [25, 20, 4, 4]);
+  assert.equal(r.team.followupsInHours!.n, 20);
+  const goal = { medianMinutes: 5, p90Minutes: 15 };
+  assert.deepEqual(followupGoalStatus(a.followupsInHours, goal), { median: true, p90: true });
+  assert.deepEqual(followupGoalStatus({ n: 30, median: 6, p90: 12 }, goal), { median: false, p90: true });
+  assert.equal(followupGoalStatus({ n: 19, median: 1, p90: 2 }, goal), null, "muestra chica: no se afirma nada");
+  assert.equal(followupGoalStatus(a.followupsInHours, null), null, "sin objetivo cargado no hay color");
+  // Sin horario configurado no se sabe qué bloques entran.
+  const sin = build({ messages: [msg("9001", "c1", "2026-03-02T10:00")], followups: blocks(3, "2026-03-02T10:00", 4) }, []);
+  assert.equal(of(sin, "9001").followupsInHours, null);
 });
 
 test("sin horario configurado: la actividad por horario queda no disponible, no en cero", () => {

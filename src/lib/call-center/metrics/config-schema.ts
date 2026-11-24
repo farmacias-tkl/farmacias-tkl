@@ -179,6 +179,13 @@ export const callCenterMetricsConfigSchema = z
      * que criticalWaitMinutes: ausente vale DEFAULT_LAST_RESPONSE_WARNING_MINUTES.
      */
     lastResponseWarningMinutes: z.number().int().min(1).max(1440).optional(),
+    /**
+     * Objetivo de las RESPUESTAS POSTERIORES (cuando el cliente vuelve a escribir), en minutos
+     * de reloj, para los bloques que empiezan dentro del horario de operadores: mediana y
+     * tiempo del 90%. OPCIONAL y sin valor por defecto: mientras no esté cargado, "Operadores"
+     * no colorea esos tiempos. No es la meta de la primera respuesta.
+     */
+    followupGoal: z.object({ medianMinutes: z.number().int().min(1).max(1440), p90Minutes: z.number().int().min(1).max(1440) }).strict().optional(),
     accounts: z.array(accountSchema).max(100),
     callCenterVendors: z.array(vendorSchema).max(500),
     /**
@@ -220,6 +227,9 @@ export const callCenterMetricsConfigSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["closureLabels"], message: "Etiqueta de cierre repetida" });
       }
       closure.add(c.label);
+    }
+    if (cfg.followupGoal && cfg.followupGoal.p90Minutes < cfg.followupGoal.medianMinutes) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["followupGoal"], message: "El objetivo del 90% no puede ser menor que el de la mediana" });
     }
     const vendors = new Set<string>();
     for (const v of cfg.callCenterVendors) {

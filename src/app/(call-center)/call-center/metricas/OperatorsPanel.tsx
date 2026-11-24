@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { EVIDENCE_LABELS, POPULATION_LABELS } from "@/lib/call-center/metrics/indicators";
-import type { AccountsPayload, OperatorCase, OperatorCaseKind, OperatorCasesPayload } from "@/lib/call-center/metrics/accounts-types";
+import { FOLLOWUP_GOAL_MIN_CASES, followupGoalStatus, type AccountsPayload, type FollowupGoal, type OperatorCase, type OperatorCaseKind, type OperatorCasesPayload } from "@/lib/call-center/metrics/accounts-types";
 import { COMPARISON_MIN_ANSWERED } from "@/lib/call-center/metrics/comparison";
 import { PERIOD_MAX_DAYS, addDaysISO } from "@/lib/call-center/metrics/period";
 import { formatMinutes, formatMinutesOrMissing, formatRatio, formatShortDay } from "@/lib/call-center/metrics/format";
@@ -147,11 +147,13 @@ function Report({ data, period, today }: { data: AccountsPayload; period: Period
       {data.accounts.length === 0 ? (
         <p className="mt-2 rounded-lg border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">Ninguna cuenta escribió en el período.</p>
       ) : (
-        <AccountsTable accounts={data.accounts} days={days} onOpen={open} />
+        <AccountsTable accounts={data.accounts} days={days} onOpen={open} goal={data.followupGoal} />
       )}
       <p className="mt-2 text-xs text-gray-600">
         Cómo leer la tabla: dos cuentas pueden tener la misma mediana y un 90% muy distinto. Esa diferencia sirve para buscar casos puntuales, no para concluir que una atiende mejor.
-        Los tiempos de las respuestas posteriores todavía no tienen un objetivo definido: por eso no llevan color. La meta de 15 minutos es de la primera atención y no se traslada acá.
+        {" "}{data.followupGoal
+          ? <>Objetivo de las respuestas posteriores, para los bloques que empiezan dentro del horario de operadores: mediana de {data.followupGoal.medianMinutes} min o menos y el 90% en {data.followupGoal.p90Minutes} min o menos. Solo se dice si se cumple con {FOLLOWUP_GOAL_MIN_CASES} respuestas o más. No es la meta de 15 minutos de la primera atención.</>
+          : <>Los tiempos de las respuestas posteriores todavía no tienen un objetivo cargado en la configuración: por eso no llevan color. La meta de 15 minutos es de la primera atención y no se traslada acá.</>}
       </p>
 
       {data.supervisionAccounts.length > 0 && (
@@ -191,8 +193,8 @@ function Report({ data, period, today }: { data: AccountsPayload; period: Period
 const COLS = "md:grid md:grid-cols-[minmax(0,2.2fr)_repeat(6,minmax(0,1fr))] md:items-center md:gap-3";
 
 /** Una fila por cuenta para comparar; el resto queda en "Ver detalle". En el celular, tarjetas cortas. */
-function AccountsTable({ accounts, days, onOpen, system }: {
-  accounts: Account[]; days: string[]; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
+function AccountsTable({ accounts, days, onOpen, system, goal }: {
+  accounts: Account[]; days: string[]; goal?: FollowupGoal | null; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
 }) {
   const head = "text-right text-[11px] font-medium leading-tight text-gray-600";
   return (
@@ -207,7 +209,7 @@ function AccountsTable({ accounts, days, onOpen, system }: {
         <span className={head}>Días con actividad</span>
       </div>
       <ul>
-        {accounts.map((a) => <AccountRow key={a.account ?? "sin-cuenta"} a={a} days={days} onOpen={onOpen} system={system} />)}
+        {accounts.map((a) => <AccountRow key={a.account ?? "sin-cuenta"} a={a} days={days} onOpen={onOpen} system={system} goal={goal} />)}
       </ul>
     </div>
   );
@@ -222,13 +224,16 @@ function Cell({ label, value, small }: { label: string; value: string; small?: b
   );
 }
 
-function AccountRow({ a, days, onOpen, system }: {
-  a: Account; days: string[]; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
+function AccountRow({ a, days, onOpen, system, goal }: {
+  a: Account; days: string[]; goal?: FollowupGoal | null; onOpen: (kind: OperatorCaseKind, account: string | null, name: string | null) => void; system?: boolean;
 }) {
   const act = a.activity;
   const hours = act.inPublicHours !== null && act.inOperatorHoursOnly !== null && act.outsideAllHours !== null;
   const name = a.alias && a.account !== null && !system ? a.alias : accountName(a);
   const smallP90 = a.followups.n > 0 && a.followups.n < COMPARISON_MIN_ANSWERED;
+  // Solo con objetivo cargado y muestra suficiente; si no, ni color ni veredicto.
+  const status = followupGoalStatus(a.followupsInHours, goal);
+  const meets = status ? status.median && status.p90 : null;
   return (
     <li className="border-b border-gray-100 px-3 py-2 last:border-0">
       <div className={COLS}>
@@ -238,6 +243,11 @@ function AccountRow({ a, days, onOpen, system }: {
           </h3>
           <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">{STATUS_LABELS[a.status]}</span>
           {a.borrowed && <span className="rounded-full border border-gray-400 px-2 py-0.5 text-[11px] font-medium text-gray-800">Prestada</span>}
+          {meets !== null && (
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${meets ? "border-green-300 bg-green-50 text-green-900" : "border-orange-300 bg-orange-50 text-orange-900"}`}>
+              {meets ? "Respuestas posteriores: dentro del objetivo" : `Respuestas posteriores: fuera del objetivo (${!status!.median && !status!.p90 ? "mediana y 90%" : !status!.median ? "mediana" : "90%"})`}
+            </span>
+          )}
         </div>
         <div className="mt-1 space-y-0.5 md:contents">
           <Cell label="Conversaciones atendidas" value={nf.format(a.conversations)} />
@@ -271,6 +281,16 @@ function AccountRow({ a, days, onOpen, system }: {
               <Line label="Mensajes por horario" value="No disponible" />
             )}
           </div>
+          {goal && a.followupsInHours && (
+            <div className="space-y-1">
+              <h4 className="text-xs font-semibold text-gray-700">Respuestas posteriores en horario de operadores</h4>
+              <Line label="Bloques respondidos" value={nf.format(a.followupsInHours.n)} />
+              <Line label={`Mediana (objetivo: ${goal.medianMinutes} min o menos)`} value={formatMinutesOrMissing(a.followupsInHours.median)} />
+              <Line label={`El 90% en menos de (objetivo: ${goal.p90Minutes} min)`} value={p90Text(a.followupsInHours)} />
+              {status === null && a.followupsInHours.n > 0 && <p className="text-xs text-gray-600">Muestra pequeña: con menos de {FOLLOWUP_GOAL_MIN_CASES} respuestas no se dice si cumple.</p>}
+              <p className="text-xs text-gray-600">Cuenta los bloques del cliente que empezaron dentro del horario de operadores. Las columnas de la tabla incluyen también los de fuera de horario.</p>
+            </div>
+          )}
           <div className="space-y-1">
             <h4 className="text-xs font-semibold text-gray-700">Actividad observada <span className="font-normal text-gray-600">· no es jornada</span></h4>
             <Line label="Primer mensaje del período" value={act.firstMessageAt ? dateTimeFmt.format(new Date(act.firstMessageAt)) : "Sin datos"} />

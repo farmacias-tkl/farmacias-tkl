@@ -99,8 +99,8 @@ export function buildDetectedReport(
   };
 }
 
-/** ¿Algún mensaje cumple alguno de los patrones? Fragmento SQL sobre el alias `m`. */
-function anyMessage(patterns: readonly MessagePattern[]): Prisma.Sql {
+/** ¿El mensaje `m` cumple alguno de los patrones? Fragmento SQL sobre el alias `m`, sin agregar. */
+export function messageMatches(patterns: readonly MessagePattern[]): Prisma.Sql {
   const alternatives = patterns.map((p) => {
     const parts = [
       ...p.all.map((rx) => Prisma.sql`m.body ~* ${rx}`),
@@ -108,7 +108,12 @@ function anyMessage(patterns: readonly MessagePattern[]): Prisma.Sql {
     ];
     return Prisma.sql`(${Prisma.join(parts, " AND ")})`;
   });
-  return Prisma.sql`coalesce(bool_or(${Prisma.join(alternatives, " OR ")}), false)`;
+  return Prisma.sql`(${Prisma.join(alternatives, " OR ")})`;
+}
+
+/** ¿Algún mensaje cumple alguno de los patrones? Fragmento SQL sobre el alias `m`. */
+function anyMessage(patterns: readonly MessagePattern[]): Prisma.Sql {
+  return Prisma.sql`coalesce(bool_or(${messageMatches(patterns)}), false)`;
 }
 
 type RawRow = {

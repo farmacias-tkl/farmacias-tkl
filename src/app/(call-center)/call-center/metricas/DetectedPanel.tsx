@@ -7,6 +7,7 @@ import type { ClaimMotive, DetectedPayload, DetectedSection, SaleKind } from "@/
 import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
 import { PERIOD_MAX_DAYS } from "@/lib/call-center/metrics/period";
 import PeriodForm, { defaultPeriod, type Period } from "./PeriodForm";
+import ConversationResults from "./ConversationResults";
 
 const TZ = "America/Argentina/Buenos_Aires";
 const nf = new Intl.NumberFormat("es-AR");
@@ -70,6 +71,9 @@ export default function DetectedPanel({ today }: { today: string }) {
         </div>
       )}
       {state.status === "ready" && <Report data={state.data} />}
+
+      {/* Cómo terminaron las conversaciones: vino de la pestaña "Tipos", que ahora es "Motivos de contacto". */}
+      <ConversationResults period={period} />
     </section>
   );
 }

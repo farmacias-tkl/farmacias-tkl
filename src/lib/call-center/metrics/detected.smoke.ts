@@ -146,8 +146,9 @@ async function main() {
     await check("envíos: que el cliente pase otra dirección o programe el envío no es un problema con la entrega", () => {
       assert.deepEqual([claims("pasaDireccion"), claims("enviarAOtra"), claims("programar")], [[], [], []]);
     });
-    await check("'quiero saber si llegó' es pedido sin novedades; 'no me llega la devolución' es pago o devolución", () => {
-      assert.deepEqual([claims("siLlego"), claims("devolucionNoLlega")], [["SIN_NOVEDADES"], ["PAGO"]]);
+    await check("'quiero saber si llegó' es seguimiento, no reclamo; 'no me llega la devolución' es pago o devolución", () => {
+      // Preguntar por un pedido en curso no es un reclamo (la misma regla que "Motivos de contacto").
+      assert.deepEqual([by.has(ids.siLlego) ? claims("siLlego") : [], claims("devolucionNoLlega")], [[], ["PAGO"]]);
     });
     await check("tienda online: sin confirmación y problemas con la página, fuera de los reclamos del Call Center", () => {
       assert.deepEqual([claims("webMail"), claims("webNingunMail"), claims("webNumero")], [["WEB_SIN_CONFIRMACION"], ["WEB_SIN_CONFIRMACION"], ["WEB_SIN_CONFIRMACION"]]);

@@ -26,6 +26,7 @@ import { utcTimestampParam } from "./business-time";
 import type { AgeBucket, QueueGroupCounts } from "./queue-types";
 import { BOT_ACCOUNT_PREFIX } from "./account-label";
 import { ORDER_REQUEST_REGEX, PRESCRIPTION_LINK_REGEX } from "./patterns";
+import { BOT_ORDER_FLOW_LIKE, CUSTOMER_ORDER_OPTION } from "./management-type";
 import { BOT_ORDER_COMPLETE_LIKE, INSISTING, THANKS_CANDIDATE, QUEUE_LIST_DEFAULT_HOURS, URGENT_CUSTOMER_REGEX, isThanksCandidate } from "./patterns";
 
 const MS_HOUR = 3_600_000;
@@ -182,6 +183,7 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
         bool_or(m.author = 'CUSTOMER' AND m.body ~* ${PRESCRIPTION_LINK_REGEX}) AS rx_link,
         bool_or(m.author = 'CUSTOMER' AND m.body ~* ${ORDER_REQUEST_REGEX}) AS asked_order,
         bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done,
+        bool_or((m.author = 'CUSTOMER' AND m.body = ${CUSTOMER_ORDER_OPTION}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})) AS order_flow,
         min(m."sentAt") FILTER (WHERE m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done_at
       FROM "ConversationMessage" m
       JOIN scope s ON s.id = m."conversationId"
@@ -208,7 +210,9 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
       (SELECT min(h."changedAt") FROM "ConversationStateHistory" h
         WHERE h."conversationId" = s.id AND h."fromStatus" = 'PENDIENTE'
           AND h."toStatus" IN ('SIN_ASIGNAR', 'ASIGNADA')) AS "botExitAt",
-      a.done AS "done",
+      -- Pedido completo: el mensaje final del bot Y el recorrido de pedido (el mensaje solo
+      -- también cierra el camino "Asesor").
+      (a.done AND coalesce(a.order_flow, false)) AS "done",
       a.cust_chars AS "custChars",
       a.cust_media AS "custMedia",
       a.cust_link AS "custLink",
@@ -282,7 +286,8 @@ export async function countClosedUnansweredBefore(before: Date): Promise<ClosedU
       SELECT m."conversationId" AS cid,
         max(m."sentAt") FILTER (WHERE m.author = 'OPERATOR' AND NOT m."isPrivate") AS last_op,
         max(m."sentAt") FILTER (WHERE m.author = 'CUSTOMER') AS last_cust,
-        bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done
+        bool_or(m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_COMPLETE_LIKE}) AS done,
+        bool_or((m.author = 'CUSTOMER' AND m.body = ${CUSTOMER_ORDER_OPTION}) OR (m.author = 'BOT' AND m.body LIKE ${BOT_ORDER_FLOW_LIKE})) AS order_flow
       FROM "ConversationMessage" m
       JOIN "Conversation" c ON c.id = m."conversationId"
       WHERE c.status = 'RESUELTA' AND c."createdAt" < ${utcTimestampParam(before)}::timestamp
@@ -292,7 +297,7 @@ export async function countClosedUnansweredBefore(before: Date): Promise<ClosedU
       count(*)::int AS "total",
       (count(*) FILTER (WHERE last_op IS NULL))::int AS "neverHuman",
       (count(*) FILTER (WHERE last_op IS NOT NULL))::int AS "awaitingNext",
-      (count(*) FILTER (WHERE last_op IS NULL AND done))::int AS "completedOrders"
+      (count(*) FILTER (WHERE last_op IS NULL AND done AND order_flow))::int AS "completedOrders"
     FROM agg
     WHERE last_cust IS NOT NULL AND (last_op IS NULL OR last_cust > last_op)
   `);
