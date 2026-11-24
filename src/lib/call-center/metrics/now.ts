@@ -24,7 +24,7 @@ import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
 import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
 import {
-  NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress, type QualityChecks,
+  NOW_CACHE_SECONDS, type NowListItem, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress, type QualityChecks,
 } from "./now-types";
 import { loadProgress } from "./progress";
 import { loadQualityChecks } from "./quality";
@@ -92,6 +92,31 @@ export function waitContext(versions: readonly ConfigVersion[], now: Date): Wait
 }
 
 /**
+ * Prioridad de gestión dentro de atención actual. Menor es antes. PURO.
+ *  0 urgente · 1 insistiendo · 2 ventana de WhatsApp por vencer · 3 demora crítica con la
+ *  ventana todavía abierta · 4 pedido completo sin primera respuesta · 5 ventana cerrada · 6 resto.
+ * La ventana cerrada va después: ya no se puede responder libremente, así que un caso que
+ * todavía se puede contestar gana tiempo si se atiende antes.
+ */
+export function attentionRank(it: Pick<NowListItem, "alert" | "window" | "level" | "botOrderComplete" | "hasHumanResponse">): number {
+  if (it.alert === "URGENTE") return 0;
+  if (it.alert === "INSISTIENDO") return 1;
+  if (it.window === "POR_VENCER") return 2;
+  if (it.level === "CRITICO" && it.window !== "CERRADA") return 3;
+  if (it.botOrderComplete && !it.hasHumanResponse) return 4;
+  if (it.window === "CERRADA") return 5;
+  return 6;
+}
+
+/** Orden de la lista operativa: por prioridad; la ventana por vencer, la que vence antes; el resto, el que más espera. */
+export function compareAttention(a: NowListItem, b: NowListItem): number {
+  const ra = attentionRank(a), rb = attentionRank(b);
+  if (ra !== rb) return ra - rb;
+  if (ra === 2) return a.lastCustomerAt < b.lastCustomerAt ? -1 : a.lastCustomerAt > b.lastCustomerAt ? 1 : 0;
+  return b.waitMinutes - a.waitMinutes;
+}
+
+/**
  * Arma la respuesta. PURO. Reagrupa la cola ya calculada: los clientes esperando son las
  * abiertas con hasta `windowHours` de espera; las abiertas más viejas van aparte.
  */
@@ -152,13 +177,14 @@ export function toNowPayload(
     thanksCandidate: it.thanksCandidate,
     claims: extras.claims ? extras.claims.get(it.conversationId) ?? [] : null,
     oldPending: oldPendingIds.has(it.conversationId),
+    // Histórico por verificar: antiguo y sin un mensaje del cliente dentro de la ventana de la cola.
+    historical: oldPendingIds.has(it.conversationId) && now.getTime() - it.lastCustomerAt.getTime() > windowHours * 3_600_000,
     };
   });
-  // Primero los críticos por ventana cerrada, del que más espera real al que menos; después el resto, como venía.
-  const closedFirst = [
-    ...items.filter((it) => it.window === "CERRADA").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : a.lastCustomerAt > b.lastCustomerAt ? 1 : 0)),
-    ...items.filter((it) => it.window !== "CERRADA"),
-  ];
+  // Atención actual, por prioridad de gestión; los históricos van aparte y no encabezan la lista.
+  const current = items.filter((it) => !it.historical).sort(compareAttention);
+  const historical = items.filter((it) => it.historical).sort((a, b) => b.waitMinutes - a.waitMinutes);
+  const criticalKnown = wait !== null || items.some((it) => it.level === "CRITICO");
 
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
@@ -169,17 +195,24 @@ export function toNowPayload(
       oldPending: oldPending.length,
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
-      completedOrders: items.filter((it) => !it.hasHumanResponse && it.botOrderComplete).length,
+      current: current.length,
+      historical: historical.length,
+      criticalCurrent: criticalKnown ? current.filter((it) => it.level === "CRITICO").length : null,
+      criticalHistorical: criticalKnown ? historical.filter((it) => it.level === "CRITICO").length : null,
+      // Las alertas de acción cuentan la atención actual: son las que abre la lista operativa.
+      completedOrders: current.filter((it) => !it.hasHumanResponse && it.botOrderComplete).length,
       // Sin configuración solo se pueden contar los críticos por ventana cerrada: si no hay ninguno, queda sin dato.
-      critical: wait || items.some((it) => it.level === "CRITICO") ? items.filter((it) => it.level === "CRITICO").length : null,
+      critical: criticalKnown ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
-      urgent: items.filter((it) => it.alert === "URGENTE").length,
-      insisting: items.filter((it) => it.alert === "INSISTIENDO").length,
-      claims: extras.claims ? items.filter((it) => it.claims !== null && it.claims.length > 0).length : null,
+      urgent: current.filter((it) => it.alert === "URGENTE").length,
+      insisting: current.filter((it) => it.alert === "INSISTIENDO").length,
+      claims: extras.claims ? current.filter((it) => it.claims !== null && it.claims.length > 0).length : null,
     },
     today,
-    list: closedFirst.slice(0, maxRows),
-    listTotal: items.length,
+    list: current.slice(0, maxRows),
+    listTotal: current.length,
+    historicalList: historical.slice(0, maxRows),
+    historicalTotal: historical.length,
     stale: {
       total: stale.length,
       probableClose,
@@ -193,8 +226,9 @@ export function toNowPayload(
     window: {
       hours: WHATSAPP_WINDOW_HOURS,
       warningHours,
-      closed: items.filter((it) => it.window === "CERRADA").length,
-      closing: items.filter((it) => it.window === "POR_VENCER").length,
+      // De atención actual. Los históricos tienen casi todos la ventana cerrada y se cuentan aparte.
+      closed: current.filter((it) => it.window === "CERRADA").length,
+      closing: current.filter((it) => it.window === "POR_VENCER").length,
       staleClosed: staleItems.filter((it) => it.windowClosed).length,
       closedUnansweredClosed: closedItems ? closedItems.filter((it) => it.windowClosed).length : null,
     },

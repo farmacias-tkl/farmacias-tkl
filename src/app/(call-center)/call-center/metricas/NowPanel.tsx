@@ -151,11 +151,13 @@ export default function NowPanel() {
             active={filter === "closed"} onClick={() => toggle("closed")} />
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2">
-          <ActionButton label="En demora crítica" value={w.critical === null ? "—" : nf.format(w.critical)} tone={w.critical ? "critical" : "plain"}
-            active={filter === "critical"} disabled={w.critical === null} onClick={() => toggle("critical")} />
+          <ActionButton
+            label={`En demora crítica · atención actual${w.criticalHistorical ? ` (aparte, ${nf.format(w.criticalHistorical)} ${w.criticalHistorical === 1 ? "histórico" : "históricos"} por verificar)` : ""}`}
+            value={w.criticalCurrent === null ? "—" : nf.format(w.criticalCurrent)} tone={w.criticalCurrent ? "critical" : "plain"}
+            active={filter === "critical"} disabled={w.criticalCurrent === null} onClick={() => toggle("critical")} />
           <ActionButton label="Pedidos completos sin primera respuesta" value={nf.format(w.completedOrders)} tone="plain"
             active={filter === "orders"} onClick={() => toggle("orders")} />
-          <ActionButton label="Mayor espera" value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} tone="plain"
+          <ActionButton label="Mayor espera entre los recientes" value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)) : "—"} tone="plain"
             active={filter === "longest"} disabled={!w.oldestWaitStart} onClick={() => toggle("longest")} />
         </div>
         <a href="#cerradas-sin-responder"
@@ -182,7 +184,7 @@ export default function NowPanel() {
           los feriados. Pasado ese plazo la conversación solo se reabre con una plantilla aprobada. &quot;Por vencer&quot; son las que todavía se pueden responder y les
           quedan menos de {d.window.warningHours} horas. La ventana es independiente del semáforo, que mide minutos hábiles.
           {" "}Los grupos se superponen y no se suman: un pedido completo puede estar además en demora crítica.
-          {" "}Las alertas cuentan los casos recientes y los posibles pendientes antiguos. Las cerradas sin responder ya no están abiertas: son una alerta aparte y no suman al total.
+          {" "}Las alertas cuentan los casos de atención actual. Los históricos por verificar se cuentan aparte, debajo de la lista. Las cerradas sin responder ya no están abiertas: son una alerta aparte y no suman al total.
           {d.schedule ? ` En plazo es hasta ${d.schedule.goalMinutes} minutos hábiles de espera, demorado hasta ${d.schedule.criticalMinutes} y crítico más de ${d.schedule.criticalMinutes}.` : ""}
           {" "}Los minutos hábiles corren solo dentro del horario público; fuera de ese horario el reloj se pausa y el caso conserva su color. Además es crítico todo caso
           con la ventana de WhatsApp cerrada: {d.window.hours} horas o más de espera real desde el último mensaje del cliente, sume lo que sume el reloj hábil.
@@ -192,12 +194,21 @@ export default function NowPanel() {
       <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-sm font-medium text-gray-700">Total de pendientes</h2>
         <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-gray-900">
-          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.total + w.oldPending)}</span>
-          <span className="text-sm">conversaciones esperando respuesta</span>
+          <span className="text-4xl font-semibold tabular-nums">{nf.format(w.current)}</span>
+          <span className="text-sm">{w.current === 1 ? "pendiente reciente" : "pendientes recientes"}, en atención actual</span>
         </p>
+        {w.historical > 0 && (
+          <p className="mt-0.5 text-sm text-gray-800">
+            + <span className="font-semibold tabular-nums">{nf.format(w.historical)}</span> {w.historical === 1 ? "antiguo" : "antiguos"} por verificar
+            <span className="text-gray-600"> · no se sabe si siguen pendientes</span>
+          </p>
+        )}
         <dl className="mt-2 space-y-0.5 text-sm text-gray-800">
           <div className="flex justify-between gap-2"><dt>Recientes (últimas {d.windowHours} h)</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(w.total)}</dd></div>
           <div className="flex justify-between gap-2"><dt>Posibles pendientes antiguos</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(w.oldPending)}</dd></div>
+          {w.oldPending !== w.historical && (
+            <div className="flex justify-between gap-2 text-gray-700"><dt>De esos, con un mensaje nuevo del cliente (pasan a atención actual)</dt><dd className="tabular-nums">{nf.format(w.oldPending - w.historical)}</dd></div>
+          )}
           {d.stale.probableClose !== null && d.stale.probableClose > 0 && (
             <div className="flex justify-between gap-2 text-gray-600"><dt>Aparte, antiguas probablemente resueltas (por revisar)</dt><dd className="tabular-nums">{nf.format(d.stale.probableClose)}</dd></div>
           )}
@@ -213,7 +224,8 @@ export default function NowPanel() {
         <More>
           Pendiente es una conversación abierta cuyo último mensaje es del cliente. Las {d.windowHours} horas solo separan las recientes de las antiguas: ninguna se
           excluye por antigua. &quot;Posibles pendientes antiguos&quot; son las que esperan hace más de {d.windowHours} horas y cuyo último mensaje no parece un cierre;
-          la separación es por palabras, por eso &quot;posibles&quot;. Las antiguas cuyo último mensaje es un agradecimiento o un cierre no se suman: están abajo, para
+          la separación es por palabras, por eso &quot;posibles&quot;. Mientras el cliente no vuelva a escribir quedan como históricos por verificar, aparte de la lista
+          operativa; si escribe de nuevo, el caso vuelve a atención actual. Las antiguas cuyo último mensaje es un agradecimiento o un cierre no se suman: están abajo, para
           revisar y cerrar si corresponde. Nada se cierra por antigüedad.
         </More>
         <Evidence level={w.oldPending > 0 ? "DETECTADO" : "MEDIDO"} />
@@ -255,8 +267,10 @@ export default function NowPanel() {
       <OwnersCard d={d} nowMs={nowMs} selected={ownerKey} onSelect={(k) => setOwnerKey((cur) => (cur === k ? null : k))} />
 
       <h2 className="mt-6 text-sm font-semibold text-gray-800">
-        Casos{d.listTotal > 0 ? ` (${nf.format(filter === "all" && !ownerKey ? d.listTotal : shown.length)})` : ""}
-        <span className="ml-2 text-xs font-normal text-gray-600">ordenados por espera real: primero los de ventana cerrada, después del que más espera al que menos</span>
+        Atención actual{d.listTotal > 0 ? ` (${nf.format(filter === "all" && !ownerKey ? d.listTotal : shown.length)})` : ""}
+        <span className="ml-2 text-xs font-normal text-gray-600">
+          por prioridad: urgente o insistiendo, ventana por vencer, demora crítica, pedido completo, ventana cerrada y el resto
+        </span>
       </h2>
       {filter !== "all" && (
         <p className="mt-1 text-xs text-gray-700">
@@ -284,6 +298,26 @@ export default function NowPanel() {
         <ul className="mt-2 grid gap-2 lg:grid-cols-2">
           {shown.map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} schedule={d.schedule} windowHours={d.window.hours} />)}
         </ul>
+      )}
+
+      {d.historicalTotal > 0 && (
+        <details className="mt-6 rounded-lg border border-amber-200 bg-amber-50/40 p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-gray-900">
+            Históricos por verificar ({nf.format(ownerKey ? byOwner(d.historicalList).length : d.historicalTotal)})
+            <span className="ml-2 text-xs font-normal text-gray-700">posibles pendientes antiguos · no se sabe si siguen pendientes</span>
+          </summary>
+          <p className="mt-2 text-xs text-gray-700">
+            Esperan hace más de {d.windowHours} horas y el cliente no volvió a escribir. Su último mensaje no parece un cierre, por eso no se dan por resueltos,
+            pero tampoco es seguro que sigan pendientes: hay que abrirlos y decidir. No encabezan la lista operativa. Si el cliente escribe de nuevo, el caso
+            vuelve solo a atención actual.
+          </p>
+          {d.historicalTotal > d.historicalList.length && (
+            <p className="mt-1 text-xs text-gray-600">Se muestran los {nf.format(d.historicalList.length)} que más esperan.</p>
+          )}
+          <ul className="mt-2 grid gap-2 lg:grid-cols-2">
+            {byOwner(d.historicalList).map((it) => <CaseCard key={it.conversationId} it={it} nowMs={nowMs} schedule={d.schedule} windowHours={d.window.hours} />)}
+          </ul>
+        </details>
       )}
 
       <StaleCard d={d} nowMs={nowMs} />
@@ -384,8 +418,9 @@ function TrendCard({ d }: { d: NowPayload }) {
         <div className="flex justify-between gap-2"><dt>Conversaciones que recibieron una respuesta de un operador</dt><dd className="font-semibold tabular-nums text-gray-900">{nf.format(h.answered)}</dd></div>
       </dl>
       <h3 className="mt-3 text-xs font-semibold text-gray-700">
-        Pendientes {t.fromIsShift ? "desde el inicio del horario de operadores" : "desde el comienzo del día"}
+        Pendientes recientes {t.fromIsShift ? "desde el inicio del horario de operadores" : "desde el comienzo del día"}
       </h3>
+      <p className="text-xs text-gray-600">Muestra la cola reciente (hasta {d.windowHours} horas de espera). El resumen de arriba cuenta aparte los antiguos por verificar.</p>
       {t.points.length >= 2 ? <TrendChart points={t.points} /> : <p className="mt-1 text-sm text-gray-600">Todavía no hay puntos para mostrar.</p>}
       <More>
         &quot;Pendiente&quot; es, en todos los momentos, una conversación abierta cuyo último mensaje era del cliente y que esperaba hace hasta {d.windowHours} horas. No
@@ -708,6 +743,15 @@ function ConversationLink({ id }: { id: string }) {
 
 /** Etiqueta del semáforo con el tiempo destacado, en una línea. Sin configuración no hay semáforo: solo la espera real. */
 function WaitBadge({ it, schedule }: { it: NowListItem; schedule: NowPayload["schedule"] }) {
+  // Un histórico por verificar no lleva semáforo: "crítico" y "posible" son dos niveles de certeza distintos.
+  if (it.historical) {
+    return (
+      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900">Por verificar</span>
+        <span className="text-base font-semibold tabular-nums text-gray-900">Espera desde hace {formatWait(it.waitMinutes)}</span>
+      </p>
+    );
+  }
   if (it.level === null) {
     return <p className="text-base font-semibold tabular-nums text-gray-900">Espera real: {formatWait(it.waitMinutes)}</p>;
   }
