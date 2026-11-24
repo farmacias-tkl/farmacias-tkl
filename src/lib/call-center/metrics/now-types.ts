@@ -141,6 +141,11 @@ export interface NowListItem {
   level: WaitLevel | null;
   /** Minutos hábiles de espera; null sin configuración. */
   businessMinutes: number | null;
+  /**
+   * La espera empezó antes del primer día con horarios cargados (`schedule.businessSince`):
+   * los minutos hábiles cuentan solo desde ese día, no toda la espera.
+   */
+  businessPartial: boolean;
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
   thanksCandidate: boolean;
@@ -266,6 +271,12 @@ export interface NowPayload {
     operatorShiftActive: boolean;
     goalMinutes: number;
     criticalMinutes: number;
+    /** Horario de operadores de hoy: no hay, todavía no empezó, o ya empezó. */
+    operatorsToday: "NONE" | "NOT_STARTED" | "STARTED";
+    /** ISO. A qué hora empieza hoy el horario de operadores; null si hoy no hay. */
+    operatorsStartAt: string | null;
+    /** Primer día ("YYYY-MM-DD") con horarios cargados: el tiempo hábil no cuenta antes. null si no se sabe. */
+    businessSince: string | null;
   } | null;
   /**
    * Abiertas esperando. `total`, `neverHuman`, `awaitingNext` y `oldestWaitStart` son de las

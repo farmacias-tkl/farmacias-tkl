@@ -36,6 +36,12 @@ export interface WaitContext {
   windowWarningHours?: number;
   /** Minutos sin respuesta de un operador desde los que se muestra el aviso "para revisar". */
   lastResponseWarningMinutes?: number;
+  /**
+   * Primer día ("YYYY-MM-DD") con configuración de horarios. Antes de ese día no hay horario
+   * cargado y el reloj hábil no corre: el tiempo hábil de una espera que empezó antes cuenta
+   * solo desde acá.
+   */
+  coveredFrom?: string;
 }
 
 /** PURO. */

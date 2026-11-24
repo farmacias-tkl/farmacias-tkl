@@ -22,7 +22,7 @@ import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
 import { DEFAULT_LAST_RESPONSE_WARNING_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, lastResponseWarningMinutesOf, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
 import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
-import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
+import { classifyWait, scheduleState, waitClockStart, type WaitContext } from "./wait-level";
 import {
   NOW_CACHE_SECONDS, type NowListItem, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress, type QualityChecks,
 } from "./now-types";
@@ -84,6 +84,7 @@ export function waitContext(versions: readonly ConfigVersion[], now: Date): Wait
   return {
     pub: publicHours(versions),
     ops: operatorHours(versions),
+    coveredFrom: versions.reduce<string | undefined>((min, v) => (min === undefined || v.validFrom < min ? v.validFrom : min), undefined),
     goalMinutes: current.data.firstResponseGoalMinutes,
     criticalMinutes: criticalWaitMinutesOf(current.data),
     windowWarningHours: windowWarningHoursOf(current.data),
@@ -153,6 +154,11 @@ export function toNowPayload(
   const staleKind = new Map(staleItems.map((s) => [s.conversationId, s.kind]));
   const oldPending = stale.filter((it) => staleKind.get(it.conversationId) !== "PROBABLE_CLOSE");
   const oldPendingIds = new Set(oldPending.map((it) => it.conversationId));
+  // Antes del primer día con horarios cargados el reloj hábil no corre.
+  const coveredFromAt = wait?.coveredFrom ? arDayStartUTC(wait.coveredFrom).getTime() : null;
+  // Horario de operadores de hoy: para decir si no hay turno o si todavía no empezó.
+  const opsToday = wait ? wait.ops(arDayISO(now)) : [];
+  const opsStart = opsToday.length ? new Date(arDayStartUTC(arDayISO(now)).getTime() + opsToday[0].from * 60_000) : null;
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
   const items = [...oldPending, ...waiting].map((it) => {
     const window = windowOf(it.lastCustomerAt);
@@ -172,6 +178,7 @@ export function toNowPayload(
     // Con la ventana de WhatsApp cerrada el caso es crítico, sume lo que sume el reloj hábil.
     level: window === "CERRADA" ? ("CRITICO" as const) : byClock.level,
     businessMinutes: byClock.businessMinutes,
+    businessPartial: coveredFromAt !== null && waitClockStart(it).getTime() < coveredFromAt,
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
     thanksCandidate: it.thanksCandidate,
@@ -189,7 +196,14 @@ export function toNowPayload(
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
     windowHours,
-    schedule: wait ? { ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes } : null,
+    schedule: wait
+      ? {
+          ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes,
+          operatorsToday: !opsStart ? ("NONE" as const) : opsStart.getTime() <= now.getTime() ? ("STARTED" as const) : ("NOT_STARTED" as const),
+          operatorsStartAt: opsStart ? opsStart.toISOString() : null,
+          businessSince: wait.coveredFrom ?? null,
+        }
+      : null,
     waiting: {
       total: waiting.length,
       oldPending: oldPending.length,

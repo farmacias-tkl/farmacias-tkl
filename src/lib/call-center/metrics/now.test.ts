@@ -175,9 +175,30 @@ test("semáforo: sale del horario y los umbrales vigentes; sin configuración qu
   const p = payload([open("ok", { waitStart: hoursAgo(0.1), botExitAt: hoursAgo(0.1) }), open("tarde", { waitStart: hoursAgo(0.5), botExitAt: hoursAgo(0.5) }), open("critico", { waitStart: hoursAgo(3), botExitAt: hoursAgo(3) })], { ...NONE, wait });
   assert.deepEqual(p.list.map((i) => [i.conversationId, i.level, i.businessMinutes]), [["critico", "CRITICO", 180], ["tarde", "DEMORADO", 30], ["ok", "EN_PLAZO", 6]]);
   assert.equal(p.waiting.critical, 1);
-  assert.deepEqual(p.schedule, { inPublicHours: true, operatorShiftActive: false, goalMinutes: 15, criticalMinutes: 60 });
+  assert.deepEqual(p.schedule, { inPublicHours: true, operatorShiftActive: false, goalMinutes: 15, criticalMinutes: 60, operatorsToday: "STARTED", operatorsStartAt: "2026-03-10T03:00:00.000Z", businessSince: null });
+  assert.ok(p.list.every((i) => !i.businessPartial), "sin fecha de inicio de la configuración no se marca nada como parcial");
   const sin = payload([open("a")]);
   assert.deepEqual([sin.schedule, sin.list[0].level, sin.list[0].businessMinutes], [null, null, null]);
+});
+
+test("horario de operadores de hoy: no hay, todavía no empezó o ya empezó", () => {
+  // NOW son las 12:00 de Buenos Aires.
+  const base = { pub: () => [{ from: 0, to: 1440 }], goalMinutes: 15, criticalMinutes: 60 };
+  const sch = (ops: () => Array<{ from: number; to: number }>) => payload([open("a")], { ...NONE, wait: { ...base, ops } }).schedule!;
+  assert.deepEqual([sch(() => []).operatorsToday, sch(() => []).operatorsStartAt], ["NONE", null]);
+  assert.deepEqual([sch(() => [{ from: 13 * 60, to: 20 * 60 }]).operatorsToday, sch(() => [{ from: 13 * 60, to: 20 * 60 }]).operatorsStartAt], ["NOT_STARTED", "2026-03-10T16:00:00.000Z"]);
+  assert.equal(sch(() => [{ from: 8 * 60, to: 11 * 60 }]).operatorsToday, "STARTED", "ya empezó, aunque haya terminado");
+});
+
+test("tiempo hábil parcial: si la espera empezó antes del primer día con horarios, cuenta solo desde ese día", () => {
+  const wait = { pub: () => [{ from: 0, to: 1440 }], ops: () => [{ from: 0, to: 1440 }], goalMinutes: 15, criticalMinutes: 60, coveredFrom: "2026-03-09" };
+  const p = payload([
+    open("antes", { waitStart: hoursAgo(24 * 10), botExitAt: hoursAgo(24 * 10), lastCustomerAt: hoursAgo(2) }),
+    open("despues", { waitStart: hoursAgo(5), botExitAt: hoursAgo(5) }),
+  ], { ...NONE, wait });
+  const by = Object.fromEntries([...p.list, ...p.historicalList].map((i) => [i.conversationId, i.businessPartial]));
+  assert.deepEqual(by, { antes: true, despues: false });
+  assert.equal(p.schedule!.businessSince, "2026-03-09");
 });
 
 test("pedidos completos sin atender: abiertas sin respuesta de una persona, también las antiguas pendientes", () => {
