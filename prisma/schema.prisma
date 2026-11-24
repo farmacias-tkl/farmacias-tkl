@@ -1449,6 +1449,10 @@ model Conversation {
   // el del menú). Bots y usuarios tienen numeraciones separadas: el mismo número puede ser
   // uno de cada uno. null = el evento no lo dijo, o el dato es anterior a esta columna.
   externalAssigneeType   String?
+  // Hora, según Emozion (updated_at del evento), del evento que fijó el asignado guardado.
+  // Los eventos llegan desordenados: uno anterior a esta hora no pisa el asignado. null = el
+  // evento no traía hora, o el dato es anterior a esta columna.
+  externalAssigneeAt     DateTime?
   // Tipo de cierre que el operador elige al resolver en Emozion (catálogo: código + nombre).
   // Solo tiene valor mientras la conversación está RESUELTA; al reabrir vuelve a null (cada
   // cierre queda en ConversationStateHistory). El comentario de cierre NUNCA se ingiere.

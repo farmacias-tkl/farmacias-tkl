@@ -6,6 +6,7 @@ import { EVIDENCE_LABELS } from "@/lib/call-center/metrics/indicators";
 import { formatMinutes as formatWait } from "@/lib/call-center/metrics/format";
 import type { ClosedReason, NowListItem, NowOwnerRow, NowPayload, WaitLevel } from "@/lib/call-center/metrics/now-types";
 import { CLAIM_LABELS } from "@/lib/call-center/metrics/detected-patterns";
+import { comparisonNote, comparisonVerdict, sameSchedule } from "@/lib/call-center/metrics/comparison";
 import { useNowData } from "./useNowData";
 
 const TZ = "America/Argentina/Buenos_Aires";
@@ -527,7 +528,10 @@ function ActionButton({ label, value, tone, active, disabled, onClick }: {
   );
 }
 
-/** Flecha de avance: verde si mejora, naranja con la palabra "Peor" si empeora, gris solo si no cambia. */
+/**
+ * Flecha de avance: verde si mejora, naranja con la palabra "Peor" si empeora, gris solo si no
+ * cambia. Solo se usa cuando la comparación se puede interpretar (comparisonVerdict).
+ */
 function Trend({ better, same, text }: { better: boolean; same: boolean; text: string }) {
   if (same) return <span className="text-xs text-gray-700">Igual que la semana pasada</span>;
   return (
@@ -549,6 +553,11 @@ function ProgressCard({ d }: { d: NowPayload }) {
     );
   }
   const { today, previous } = p.firstResponse;
+  // Regla general: sin flecha ni color con muestra chica o con días que no son comparables.
+  const verdict = comparisonVerdict(today, previous);
+  const interpret = verdict.kind === "OK";
+  const note = comparisonNote(verdict);
+  const answeredLabel = `${nf.format(today.answered)} ${today.answered === 1 ? "conversación respondida" : "conversaciones respondidas"}`;
   const pendingNow = d.waiting.total;
   const critical = d.waiting.critical;
   return (
@@ -605,15 +614,16 @@ function ProgressCard({ d }: { d: NowPayload }) {
             </div>
             <div>
               <div className="flex items-baseline justify-between gap-3">
-                <dt>La mitad esperó (tiempo real)</dt>
+                <dt>Mediana de espera real entre las {answeredLabel}</dt>
                 <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{mins(today.medianClockMinutes)} <span className="font-normal text-gray-600">· antes {mins(previous.medianClockMinutes)}</span></dd>
               </div>
-              {today.medianClockMinutes !== null && previous.medianClockMinutes !== null && (
+              {interpret && today.medianClockMinutes !== null && previous.medianClockMinutes !== null && (
                 <Trend better={today.medianClockMinutes < previous.medianClockMinutes} same={mins(today.medianClockMinutes) === mins(previous.medianClockMinutes)}
                   text={formatWait(Math.abs(today.medianClockMinutes - previous.medianClockMinutes))} />
               )}
             </div>
           </dl>
+          {note && <p className="mt-2 rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-800">{note}</p>}
         </>
       ) : (
       <dl className="mt-1 space-y-2 text-sm text-gray-800">
@@ -622,21 +632,26 @@ function ProgressCard({ d }: { d: NowPayload }) {
               <dt>Respondidas dentro de la meta</dt>
               <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{pct(today.compliance)} <span className="font-normal text-gray-600">· antes {pct(previous.compliance)}</span></dd>
             </div>
-            {today.compliance !== null && previous.compliance !== null && (
+            {interpret && today.compliance !== null && previous.compliance !== null && (
               <Trend better={today.compliance > previous.compliance} same={pct(today.compliance) === pct(previous.compliance)}
                 text={`${Math.abs(Math.round((today.compliance - previous.compliance) * 100))} puntos`} />
             )}
           </div>
           <div>
             <div className="flex items-baseline justify-between gap-3">
-              <dt>La mitad esperó (minutos hábiles)</dt>
+              <dt>Mediana en tiempo hábil entre las {answeredLabel}</dt>
               <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{mins(today.medianBusinessMinutes)} <span className="font-normal text-gray-600">· antes {mins(previous.medianBusinessMinutes)}</span></dd>
             </div>
-            {today.medianBusinessMinutes !== null && previous.medianBusinessMinutes !== null && (
+            {interpret && today.medianBusinessMinutes !== null && previous.medianBusinessMinutes !== null && (
               <Trend better={today.medianBusinessMinutes < previous.medianBusinessMinutes} same={mins(today.medianBusinessMinutes) === mins(previous.medianBusinessMinutes)}
                 text={formatWait(Math.abs(today.medianBusinessMinutes - previous.medianBusinessMinutes))} />
             )}
           </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt>Siguen sin primera respuesta</dt>
+            <dd className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(today.pending)} de {nf.format(today.entries)} <span className="font-normal text-gray-600">· antes {nf.format(previous.pending)} de {nf.format(previous.entries)}</span></dd>
+          </div>
+          {note && <p className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-800">{note}</p>}
         </dl>
       )}
       <h3 className="mt-3 border-t border-gray-100 pt-2 text-xs font-semibold text-gray-700">Ventana de WhatsApp</h3>
@@ -646,8 +661,12 @@ function ProgressCard({ d }: { d: NowPayload }) {
             <span>Conversaciones cuya ventana se cerró sin respuesta, hoy</span>
             <span className="shrink-0 font-semibold tabular-nums text-gray-900">{nf.format(p.windowClosed.today)} <span className="font-normal text-gray-600">· antes {nf.format(p.windowClosed.previous)}</span></span>
           </div>
-          <Trend better={p.windowClosed.today < p.windowClosed.previous} same={p.windowClosed.today === p.windowClosed.previous}
-            text={`${nf.format(Math.abs(p.windowClosed.today - p.windowClosed.previous))} ${p.windowClosed.today < p.windowClosed.previous ? "menos" : "más"}`} />
+          {sameSchedule(today, previous) ? (
+            <Trend better={p.windowClosed.today < p.windowClosed.previous} same={p.windowClosed.today === p.windowClosed.previous}
+              text={`${nf.format(Math.abs(p.windowClosed.today - p.windowClosed.previous))} ${p.windowClosed.today < p.windowClosed.previous ? "menos" : "más"}`} />
+          ) : (
+            <span className="text-xs text-gray-700">Los dos días no son comparables: uno tiene horario público y el otro no.</span>
+          )}
         </div>
       ) : (
         <p className="mt-1 text-sm text-gray-600">No disponible</p>
@@ -657,7 +676,8 @@ function ProgressCard({ d }: { d: NowPayload }) {
         ventanas que se cerraron hoy, hayan entrado cuando hayan entrado, contra las del mismo día de la semana pasada hasta esta misma hora.
         {" "}Pendientes al empezar el turno: conversaciones abiertas, con el último mensaje del cliente y hasta {d.windowHours} horas de espera, a la hora en que empieza el
         horario de operadores. La comparación toma lo que había entrado y lo que se había respondido el mismo día de la semana pasada a esta misma hora
-        ({nf.format(today.entries)} entradas hoy, {nf.format(previous.entries)} ese día). &quot;Sin datos&quot; quiere decir que no hay con qué calcularlo, no que sea cero.
+        ({nf.format(today.entries)} entradas hoy, {nf.format(previous.entries)} ese día). Las medianas describen solo las conversaciones ya respondidas. La flecha de mejor o peor
+        aparece solo si cada día tiene al menos 20 respondidas y más de la mitad de sus entradas respondidas, y si los dos días tienen la misma condición de horario público. &quot;Sin datos&quot; quiere decir que no hay con qué calcularlo, no que sea cero.
       </More>
       <Evidence level="MEDIDO" />
     </div>

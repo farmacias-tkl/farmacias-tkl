@@ -62,6 +62,7 @@ export async function upsertConversationFromEmozion(
         externalLabelsSeen: mergeLabelsSeen(n.externalLabels),
         externalAssigneeId: n.externalAssigneeId ?? null,
         externalAssigneeType: n.externalAssigneeType ?? null,
+        externalAssigneeAt: n.assigneeEventAt ?? null,
         ...(n.externalCreatedAt ? { createdAt: n.externalCreatedAt } : {}),
       },
     });
@@ -208,6 +209,15 @@ function assigneeTypeOf(
 }
 
 /**
+ * ¿El evento es anterior al que fijó el asignado guardado? Los eventos de Emozion llegan
+ * desordenados y cada uno trae el asignado del momento en que se armó. Sin alguna de las dos
+ * horas no se puede saber: no es atrasado y se aplica, como antes de tener este dato.
+ */
+export function isStaleAssigneeEvent(eventAt: Date | null | undefined, storedAt: Date | null | undefined): boolean {
+  return !!eventAt && !!storedAt && eventAt.getTime() < storedAt.getTime();
+}
+
+/**
  * Etiquetas vistas hasta ahora. Las conversaciones anteriores a este dato no las tienen: para
  * esas, el punto de partida es la lista actual. Con vistas ya guardadas la lista actual no se
  * suma, porque la pudo dejar un evento atrasado de un ciclo anterior.
@@ -262,7 +272,7 @@ export async function applyStatusChangedFromEmozion(
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true, externalAssigneeId: true, externalAssigneeType: true },
+    select: { id: true, status: true, closedAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true, externalAssigneeId: true, externalAssigneeType: true, externalAssigneeAt: true },
   });
   if (!conv) {
     return {
@@ -289,6 +299,12 @@ export async function applyStatusChangedFromEmozion(
   // `?? null`: los eventos guardados antes de estos campos no los traen.
   const externalAssigneeId = n.externalAssigneeId ?? null;
   const externalAssigneeType = assigneeTypeOf(externalAssigneeId, n.externalAssigneeType, conv);
+  // El asignado de la CONVERSACIÓN respeta el orden de los eventos según Emozion: si este
+  // evento es anterior al que fijó el asignado guardado, no lo pisa (pasa cuando el cambio de
+  // estado llega después del conversation_updated que ya desasignó). La fila del historial
+  // lleva siempre el asignado de su propio evento.
+  const staleAssignee = isStaleAssigneeEvent(n.assigneeEventAt, conv.externalAssigneeAt);
+  if (staleAssignee) warnings.push("cambio de estado anterior al evento que fijó el asignado → el asignado guardado no se pisa");
   const resolved = n.status === "RESUELTA";
   //  - etiqueta de cierre: si el evento trae las etiquetas y agrega una de cierre a las
   //    guardadas (closureLabelOf), ese es el resultado de la resolución y se guarda como
@@ -308,8 +324,7 @@ export async function applyStatusChangedFromEmozion(
     where: { id: conv.id },
     data: {
       status: n.status,
-      externalAssigneeId,
-      externalAssigneeType,
+      ...(staleAssignee ? {} : { externalAssigneeId, externalAssigneeType, ...(n.assigneeEventAt ? { externalAssigneeAt: n.assigneeEventAt } : {}) }),
       closureTypeId,
       closureTypeName,
       // Las etiquetas del evento reemplazan a las guardadas, solo si el evento trae la clave.
@@ -350,7 +365,7 @@ export async function applyStatusChangedFromEmozion(
  *    puede traer una hora unos segundos anterior a la fila de esa misma resolución.
  *  - Asignado: solo si el evento trae la clave meta.assignee; con null queda sin asignado.
  *    Su tipo (bot o usuario) lo acompaña; un evento que no lo dice no borra el que ya hay
- *    para ese mismo asignado.
+ *    para ese mismo asignado. Un evento anterior al que fijó el asignado guardado no lo pisa.
  *  - Etiquetas: si el evento trae la clave `labels`, reemplazan a las guardadas. Si agrega
  *    una de cierre a las guardadas (closureLabelOf), es el resultado de la resolución y se
  *    guarda como nombre del tipo de cierre, con las mismas reglas.
@@ -368,17 +383,20 @@ export async function applyConversationUpdatedFromEmozion(
   const warnings: string[] = [];
   const conv = await tx.conversation.findUnique({
     where: { externalConversationId: n.externalConversationId },
-    select: { id: true, status: true, externalAssigneeId: true, externalAssigneeType: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true },
+    select: { id: true, status: true, externalAssigneeId: true, externalAssigneeType: true, externalAssigneeAt: true, closureTypeId: true, closureTypeName: true, externalLabels: true, externalLabelsSeen: true },
   });
   if (!conv) {
     return { outcome: "ignored", conversationId: null, warnings: ["conversation_updated sobre conversación inexistente → ignorado"] };
   }
 
   const data: Prisma.ConversationUpdateInput = {};
-  if (n.assigneePresent) {
+  if (n.assigneePresent && isStaleAssigneeEvent(n.assigneeEventAt, conv.externalAssigneeAt)) {
+    warnings.push("conversation_updated anterior al evento que fijó el asignado → el asignado guardado no se pisa");
+  } else if (n.assigneePresent) {
     if (n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
     const type = assigneeTypeOf(n.externalAssigneeId, n.externalAssigneeType, conv);
     if (type !== conv.externalAssigneeType) data.externalAssigneeType = type;
+    if (n.assigneeEventAt && n.assigneeEventAt.getTime() !== conv.externalAssigneeAt?.getTime()) data.externalAssigneeAt = n.assigneeEventAt;
   }
   if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
 

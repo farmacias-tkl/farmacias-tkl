@@ -53,6 +53,7 @@ export interface WaitingRow {
   customerChars: number;
   customerSentMedia: boolean;
   customerSentLink: boolean;
+  /** Cierre previo del mismo cliente en las horas anteriores. Solo se busca en las filas que pueden ser un agradecimiento; en el resto es false. */
   previousResolvedRecently: boolean;
   /** Algún mensaje del bloque sin responder pide urgencia o avisa que se va (URGENT_CUSTOMER_REGEX). */
   urgent: boolean;
@@ -201,12 +202,17 @@ export async function loadWaitingRows(closedSince: Date): Promise<WaitingRow[]> 
       a.cust_chars AS "custChars",
       a.cust_media AS "custMedia",
       a.cust_link AS "custLink",
-      EXISTS (
-        SELECT 1 FROM "Conversation" p
-        JOIN "ConversationStateHistory" h ON h."conversationId" = p.id AND h."toStatus" = 'RESUELTA'
-        WHERE p."customerId" = s."customerId" AND p.id <> s.id
-          AND h."changedAt" BETWEEN s."createdAt" - ${prevHours}::interval AND s."createdAt"
-      ) AS "prevResolved"
+      -- Solo sirve para "posible agradecimiento" (isThanksCandidate), que además exige texto
+      -- corto y sin adjunto, link ni pedido completo. Con esas condiciones adelante, la búsqueda
+      -- de un cierre previo (la parte más cara de la consulta) corre solo para esas filas.
+      (a.last_op IS NULL AND a.cust_chars <= ${THANKS_CANDIDATE.maxCustomerChars}
+        AND NOT coalesce(a.cust_media, false) AND NOT coalesce(a.cust_link, false) AND NOT coalesce(a.done, false)
+        AND EXISTS (
+          SELECT 1 FROM "Conversation" p
+          JOIN "ConversationStateHistory" h ON h."conversationId" = p.id AND h."toStatus" = 'RESUELTA'
+          WHERE p."customerId" = s."customerId" AND p.id <> s.id
+            AND h."changedAt" BETWEEN s."createdAt" - ${prevHours}::interval AND s."createdAt"
+        )) AS "prevResolved"
     FROM scope s
     JOIN agg a ON a.cid = s.id
     WHERE a.last_cust IS NOT NULL AND (a.last_op IS NULL OR a.last_cust > a.last_op)

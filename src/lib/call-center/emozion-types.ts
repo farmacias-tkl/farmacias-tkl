@@ -123,6 +123,8 @@ export interface NormalizedConversation {
   externalAssigneeId?: string | null;
   /** Tipo del asignado. null u omitido = sin dato (el evento no lo trae, o no hay asignado). */
   externalAssigneeType?: NormalizedAssigneeType | null;
+  /** updated_at de la conversación en el evento: ordena los eventos que fijan el asignado. */
+  assigneeEventAt?: Date | null;
 }
 
 /**
@@ -160,6 +162,8 @@ export interface NormalizedStatusEvent {
   // (p. ej. los que quedaron en ERROR) no los traen → se leen como null.
   externalAssigneeId?: string | null; // meta.assignee.id crudo; null = sin asignado
   externalAssigneeType?: NormalizedAssigneeType | null; // null u omitido = sin dato
+  /** updated_at de la conversación en el evento: ordena los eventos que fijan el asignado. */
+  assigneeEventAt?: Date | null;
   closureTypeId?: string | null;      // closure_type_id → string
   closureTypeName?: string | null;    // closure_type_name (catálogo); NUNCA closure_comment
   /** Etiquetas de la conversación, si el evento trae la clave `labels`; null u omitido = no la trae, no se tocan. */
@@ -180,6 +184,11 @@ export interface NormalizedUpdateEvent {
   externalAssigneeId: string | null;
   /** Tipo del asignado. null u omitido = sin dato. Opcional: los eventos guardados antes no lo traen. */
   externalAssigneeType?: NormalizedAssigneeType | null;
+  /**
+   * updated_at de la conversación en el evento: ordena los eventos que fijan el asignado. A
+   * diferencia de eventAt, no cae en resolved_at, que es de otro momento.
+   */
+  assigneeEventAt?: Date | null;
   closureTypeId: string | null;
   closureTypeName: string | null;
   /**
