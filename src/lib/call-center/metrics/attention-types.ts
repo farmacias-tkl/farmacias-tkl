@@ -25,7 +25,7 @@ export type Jsonified<T> =
 export type AttentionPayload = Jsonified<AttentionReport & { activity: ActivityReport }>;
 
 /** Indicadores de "Atención y demoras" que tienen detalle de casos. */
-export type AttentionCaseKind = "pending" | "overdue" | "unanswered_same_day";
+export type AttentionCaseKind = "pending" | "overdue" | "unanswered_same_day" | "goal_missed" | "slowest";
 
 /** Una conversación del detalle: id interno (para el enlace), horas y etiquetas. Sin teléfono, nombre ni texto. */
 export interface AttentionCase {

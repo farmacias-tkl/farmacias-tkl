@@ -135,6 +135,8 @@ export interface GoalSummary {
   complianceExcludingThanks: number | null;
   /** Candidatos a agradecimiento entre los pendientes vencidos. */
   thanksCandidatesOverdue: number;
+  /** Denominador del cumplimiento: respondidas dentro y fuera de la meta más pendientes vencidas. */
+  evaluable: number;
 }
 
 export interface PendingSummary {
@@ -164,6 +166,9 @@ export interface AttentionSummary {
     /** null si no había horario configurado. */
     enteredInPublicHours: number | null;
     completedOrders: number;
+    /** De esas, las que recibieron la primera respuesta otro día, y las que siguen sin ella al corte. Suman `total`. */
+    answeredLater: number;
+    stillPending: number;
   };
   /** Pedidos y Meducar creados desde las 17:00: cuántos y cuántos respondidos el mismo día. */
   lateOrders: { total: number; answeredSameDay: number };
@@ -176,6 +181,8 @@ export interface AttentionSummary {
   outsidePublicHours: { answered: number; clock: Distribution };
   /** Conversaciones cuya ventana de WhatsApp se cerró sin la primera respuesta. */
   windowClosed: number;
+  /** De esas, las que después sí recibieron una primera respuesta (se retomaron). El resto sigue sin ella al corte. */
+  windowClosedAnsweredLater: number;
 }
 
 export interface AttentionDay extends AttentionSummary {
@@ -262,13 +269,14 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
   const pending: PendingSummary = { total: 0, thanksCandidates: 0, completedOrders: 0, oldestClockStart: null, medianAgeMinutes: null };
   const g = { answeredWithin: 0, answeredLate: 0, pendingOverdue: 0, pendingWithin: 0, thanksOverdue: 0, withGoal: 0 };
   const goalMinutesSeen = new Set<number>();
-  const unanswered = { total: 0, inHours: 0, inHoursKnown: 0, completedOrders: 0 };
+  const unanswered = { total: 0, inHours: 0, inHoursKnown: 0, completedOrders: 0, answeredLater: 0 };
+  let windowClosedAnsweredLater = 0;
   const late = { total: 0, answeredSameDay: 0 };
   const offHoursClock: number[] = [];
   let windowClosed = 0;
 
   for (const f of facts) {
-    if (f.windowClosed) windowClosed++;
+    if (f.windowClosed) { windowClosed++; if (f.firstHumanAt) windowClosedAnsweredLater++; }
     byManagementType[f.managementType]++;
     byPath[f.botExitPath].conversations++;
     if (f.botMinutes !== null) botTimes[f.botExitPath].push(f.botMinutes);
@@ -302,6 +310,7 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
 
     if (!f.answeredSameDay) {
       unanswered.total++;
+      if (f.firstHumanAt) unanswered.answeredLater++;
       if (f.botOrderCompleteAt) unanswered.completedOrders++;
       if (f.enteredInPublicHours !== null) { unanswered.inHoursKnown++; if (f.enteredInPublicHours) unanswered.inHours++; }
     }
@@ -333,17 +342,21 @@ export function summarize(facts: readonly EntryFact[], now: Date): AttentionSumm
           compliance: ratio(g.answeredWithin, denominator),
           complianceExcludingThanks: ratio(g.answeredWithin, denominator - g.thanksOverdue),
           thanksCandidatesOverdue: g.thanksOverdue,
+          evaluable: denominator,
         }
       : null,
     unansweredSameDay: {
       total: unanswered.total,
       enteredInPublicHours: unanswered.inHoursKnown === unanswered.total ? unanswered.inHours : null,
       completedOrders: unanswered.completedOrders,
+      answeredLater: unanswered.answeredLater,
+      stillPending: unanswered.total - unanswered.answeredLater,
     },
     lateOrders: late,
     withoutConfig,
     outsidePublicHours: { answered: offHoursClock.length, clock: distribution(offHoursClock) },
     windowClosed,
+    windowClosedAnsweredLater,
   };
 }
 
