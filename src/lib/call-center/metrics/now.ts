@@ -22,9 +22,9 @@ import { configForDay, loadConfigVersions, type ConfigVersion } from "./config";
 import { DEFAULT_LAST_RESPONSE_WARNING_MINUTES, DEFAULT_WINDOW_WARNING_HOURS, criticalWaitMinutesOf, lastResponseWarningMinutesOf, windowWarningHoursOf, type ConfigAccount } from "./config-schema";
 import { WHATSAPP_WINDOW_HOURS, windowState } from "./whatsapp-window";
 import { operatorHours, publicHours } from "./schedule";
-import { classifyWait, scheduleState, type WaitContext } from "./wait-level";
+import { classifyWait, scheduleState, waitClockStart, type WaitContext } from "./wait-level";
 import {
-  NOW_CACHE_SECONDS, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress, type QualityChecks,
+  NOW_CACHE_SECONDS, type NowListItem, type ClosedUnansweredReport, type NowGroup, type NowOwner, type NowPayload, type NowProgress, type QualityChecks,
 } from "./now-types";
 import { loadProgress } from "./progress";
 import { loadQualityChecks } from "./quality";
@@ -36,6 +36,9 @@ import { shiftStartOf } from "./progress";
 import { getQueueTrend } from "./queue-trend";
 import type { NowTrend } from "./now-types";
 import { loadClaimMotives } from "./detected";
+import { buildTodayClosures, type TodayClosureRow, type TodayClosures } from "./cover";
+import { closureMapOf } from "./closure-outcome";
+import { SYNC_NOTE_LIKE } from "../sync-note";
 import type { ClaimMotive } from "./detected-patterns";
 
 export { NOW_CACHE_SECONDS } from "./now-types";
@@ -68,6 +71,8 @@ export interface NowExtras {
   trend?: NowTrend | null;
   /** Motivos de reclamo detectados, por conversación pendiente. null u omitido si no se pudieron revisar. */
   claims?: ReadonlyMap<string, ClaimMotive[]> | null;
+  /** Cierres de hoy por resultado. null u omitido si no se pudieron calcular. */
+  todayClosures?: TodayClosures | null;
 }
 
 /** Responsable de un caso. PURO. */
@@ -84,11 +89,37 @@ export function waitContext(versions: readonly ConfigVersion[], now: Date): Wait
   return {
     pub: publicHours(versions),
     ops: operatorHours(versions),
+    coveredFrom: versions.reduce<string | undefined>((min, v) => (min === undefined || v.validFrom < min ? v.validFrom : min), undefined),
     goalMinutes: current.data.firstResponseGoalMinutes,
     criticalMinutes: criticalWaitMinutesOf(current.data),
     windowWarningHours: windowWarningHoursOf(current.data),
     lastResponseWarningMinutes: lastResponseWarningMinutesOf(current.data),
   };
+}
+
+/**
+ * Prioridad de gestión dentro de atención actual. Menor es antes. PURO.
+ *  0 urgente · 1 insistiendo · 2 ventana de WhatsApp por vencer · 3 demora crítica con la
+ *  ventana todavía abierta · 4 pedido completo sin primera respuesta · 5 ventana cerrada · 6 resto.
+ * La ventana cerrada va después: ya no se puede responder libremente, así que un caso que
+ * todavía se puede contestar gana tiempo si se atiende antes.
+ */
+export function attentionRank(it: Pick<NowListItem, "alert" | "window" | "level" | "botOrderComplete" | "hasHumanResponse">): number {
+  if (it.alert === "URGENTE") return 0;
+  if (it.alert === "INSISTIENDO") return 1;
+  if (it.window === "POR_VENCER") return 2;
+  if (it.level === "CRITICO" && it.window !== "CERRADA") return 3;
+  if (it.botOrderComplete && !it.hasHumanResponse) return 4;
+  if (it.window === "CERRADA") return 5;
+  return 6;
+}
+
+/** Orden de la lista operativa: por prioridad; la ventana por vencer, la que vence antes; el resto, el que más espera. */
+export function compareAttention(a: NowListItem, b: NowListItem): number {
+  const ra = attentionRank(a), rb = attentionRank(b);
+  if (ra !== rb) return ra - rb;
+  if (ra === 2) return a.lastCustomerAt < b.lastCustomerAt ? -1 : a.lastCustomerAt > b.lastCustomerAt ? 1 : 0;
+  return b.waitMinutes - a.waitMinutes;
 }
 
 /**
@@ -128,6 +159,11 @@ export function toNowPayload(
   const staleKind = new Map(staleItems.map((s) => [s.conversationId, s.kind]));
   const oldPending = stale.filter((it) => staleKind.get(it.conversationId) !== "PROBABLE_CLOSE");
   const oldPendingIds = new Set(oldPending.map((it) => it.conversationId));
+  // Antes del primer día con horarios cargados el reloj hábil no corre.
+  const coveredFromAt = wait?.coveredFrom ? arDayStartUTC(wait.coveredFrom).getTime() : null;
+  // Horario de operadores de hoy: para decir si no hay turno o si todavía no empezó.
+  const opsToday = wait ? wait.ops(arDayISO(now)) : [];
+  const opsStart = opsToday.length ? new Date(arDayStartUTC(arDayISO(now)).getTime() + opsToday[0].from * 60_000) : null;
   // El semáforo se calcula para todos los que esperan, no solo para los que entran en la lista.
   const items = [...oldPending, ...waiting].map((it) => {
     const window = windowOf(it.lastCustomerAt);
@@ -147,39 +183,58 @@ export function toNowPayload(
     // Con la ventana de WhatsApp cerrada el caso es crítico, sume lo que sume el reloj hábil.
     level: window === "CERRADA" ? ("CRITICO" as const) : byClock.level,
     businessMinutes: byClock.businessMinutes,
+    businessPartial: coveredFromAt !== null && waitClockStart(it).getTime() < coveredFromAt,
     hasHumanResponse: it.hasHumanResponse,
     botOrderComplete: it.botOrderComplete,
+    orderRequest: it.botOrderComplete || it.customerSentPrescriptionLink === true || it.customerAskedOrder === true,
     thanksCandidate: it.thanksCandidate,
     claims: extras.claims ? extras.claims.get(it.conversationId) ?? [] : null,
     oldPending: oldPendingIds.has(it.conversationId),
+    // Histórico por verificar: antiguo y sin un mensaje del cliente dentro de la ventana de la cola.
+    historical: oldPendingIds.has(it.conversationId) && now.getTime() - it.lastCustomerAt.getTime() > windowHours * 3_600_000,
     };
   });
-  // Primero los críticos por ventana cerrada, del que más espera real al que menos; después el resto, como venía.
-  const closedFirst = [
-    ...items.filter((it) => it.window === "CERRADA").sort((a, b) => (a.lastCustomerAt < b.lastCustomerAt ? -1 : a.lastCustomerAt > b.lastCustomerAt ? 1 : 0)),
-    ...items.filter((it) => it.window !== "CERRADA"),
-  ];
+  // Atención actual, por prioridad de gestión; los históricos van aparte y no encabezan la lista.
+  const current = items.filter((it) => !it.historical).sort(compareAttention);
+  const historical = items.filter((it) => it.historical).sort((a, b) => b.waitMinutes - a.waitMinutes);
+  const criticalKnown = wait !== null || items.some((it) => it.level === "CRITICO");
 
   return {
     generatedAt: snapshot.generatedAt.toISOString(),
     windowHours,
-    schedule: wait ? { ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes } : null,
+    schedule: wait
+      ? {
+          ...scheduleState(now, wait), goalMinutes: wait.goalMinutes, criticalMinutes: wait.criticalMinutes,
+          operatorsToday: !opsStart ? ("NONE" as const) : opsStart.getTime() <= now.getTime() ? ("STARTED" as const) : ("NOT_STARTED" as const),
+          operatorsStartAt: opsStart ? opsStart.toISOString() : null,
+          businessSince: wait.coveredFrom ?? null,
+        }
+      : null,
     waiting: {
       total: waiting.length,
       oldPending: oldPending.length,
       neverHuman: neverHuman.length,
       awaitingNext: waiting.length - neverHuman.length,
-      completedOrders: items.filter((it) => !it.hasHumanResponse && it.botOrderComplete).length,
+      current: current.length,
+      historical: historical.length,
+      ordersUntaken: current.filter((it) => !it.hasHumanResponse && it.orderRequest).length,
+      queriesUnanswered: current.filter((it) => !it.hasHumanResponse && !it.orderRequest).length,
+      criticalCurrent: criticalKnown ? current.filter((it) => it.level === "CRITICO").length : null,
+      criticalHistorical: criticalKnown ? historical.filter((it) => it.level === "CRITICO").length : null,
+      // Las alertas de acción cuentan la atención actual: son las que abre la lista operativa.
+      completedOrders: current.filter((it) => !it.hasHumanResponse && it.botOrderComplete).length,
       // Sin configuración solo se pueden contar los críticos por ventana cerrada: si no hay ninguno, queda sin dato.
-      critical: wait || items.some((it) => it.level === "CRITICO") ? items.filter((it) => it.level === "CRITICO").length : null,
+      critical: criticalKnown ? items.filter((it) => it.level === "CRITICO").length : null,
       oldestWaitStart: waiting.length ? waiting[0].waitStart.toISOString() : null,
-      urgent: items.filter((it) => it.alert === "URGENTE").length,
-      insisting: items.filter((it) => it.alert === "INSISTIENDO").length,
-      claims: extras.claims ? items.filter((it) => it.claims !== null && it.claims.length > 0).length : null,
+      urgent: current.filter((it) => it.alert === "URGENTE").length,
+      insisting: current.filter((it) => it.alert === "INSISTIENDO").length,
+      claims: extras.claims ? current.filter((it) => it.claims !== null && it.claims.length > 0).length : null,
     },
     today,
-    list: closedFirst.slice(0, maxRows),
-    listTotal: items.length,
+    list: current.slice(0, maxRows),
+    listTotal: current.length,
+    historicalList: historical.slice(0, maxRows),
+    historicalTotal: historical.length,
     stale: {
       total: stale.length,
       probableClose,
@@ -193,8 +248,9 @@ export function toNowPayload(
     window: {
       hours: WHATSAPP_WINDOW_HOURS,
       warningHours,
-      closed: items.filter((it) => it.window === "CERRADA").length,
-      closing: items.filter((it) => it.window === "POR_VENCER").length,
+      // De atención actual. Los históricos tienen casi todos la ventana cerrada y se cuentan aparte.
+      closed: current.filter((it) => it.window === "CERRADA").length,
+      closing: current.filter((it) => it.window === "POR_VENCER").length,
       staleClosed: staleItems.filter((it) => it.windowClosed).length,
       closedUnansweredClosed: closedItems ? closedItems.filter((it) => it.windowClosed).length : null,
     },
@@ -208,6 +264,7 @@ export function toNowPayload(
         })
       : null,
     trend: extras.trend ?? null,
+    todayClosures: extras.todayClosures ?? null,
     progress,
     quality: {
       freshness: {
@@ -225,6 +282,22 @@ export function toNowPayload(
       checks,
     },
   };
+}
+
+/**
+ * Conversaciones resueltas hoy (día de Buenos Aires): una fila por conversación, con el tipo
+ * de cierre de su última resolución del día. No cuentan las correcciones de estado contra
+ * Emozion, que no son cierres de un operador. Solo lectura; sin texto ni datos del cliente.
+ */
+export async function loadTodayClosureRows(now: Date): Promise<TodayClosureRow[]> {
+  const from = arDayStartUTC(arDayISO(now));
+  return prisma.$queryRaw<TodayClosureRow[]>`
+    SELECT DISTINCT ON (h."conversationId") h."closureTypeName" AS "closureTypeName"
+    FROM "ConversationStateHistory" h
+    WHERE h."toStatus" = 'RESUELTA' AND h."changedAt" >= ${utcTimestampParam(from)}::timestamp
+      AND (h.note IS NULL OR h.note NOT LIKE ${SYNC_NOTE_LIKE})
+    ORDER BY h."conversationId", h."changedAt" DESC, h.id DESC
+  `;
 }
 
 /**
@@ -295,7 +368,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   // Tanda 2: dependen de la cola o de la configuración, pero no entre sí. Van juntas.
   // Si una parte falla, la pantalla la muestra como no disponible en lugar de caerse entera.
   const historyFresh = historyCache && now.getTime() - historyCache.at < HISTORY_CACHE_SECONDS * 1000 ? historyCache.value : undefined;
-  const [checks, progress, observed, claims, trend, closed, history] = await Promise.all([
+  const [checks, progress, observed, claims, trend, closed, todayClosures, history] = await Promise.all([
     timed("calidad", loadQualityChecks(now, current ? accounts : null).catch(() => null)),
     timed("avance", loadProgress(now, versions, wait?.ops ?? null).catch(() => null)),
     timed("actividad", loadObservedRows(observedSince, now)
@@ -306,6 +379,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
     // Evolución de la cola: mismo origen que la actividad observada; tiene su propia caché de 5 minutos.
     timed("evolucion", getQueueTrend(now, observedSince, shiftStart !== null).catch(() => null)),
     timed("cerradas", getClosedUnanswered(now, snapshot.closedSince).catch(() => null)),
+    timed("cierres_hoy", loadTodayClosureRows(now).then((rows) => buildTodayClosures(rows, closureMapOf(current?.data))).catch(() => null)),
     // Histórico: se recalcula como mucho una vez por hora.
     historyFresh !== undefined
       ? Promise.resolve(historyFresh)
@@ -315,7 +389,7 @@ export async function getNowPayload(now: Date = new Date()): Promise<NowPayload>
   ]);
   console.log("[call-center/metrics/now] ms", JSON.stringify({ total: Date.now() - t0, ...ms }));
 
-  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims }, freshness);
+  const payload = toNowPayload(snapshot, { history, today, closed, wait, accounts, openBlocks, progress, checks, openOwners, observed, trend, claims, todayClosures }, freshness);
   nowCache = { at: now.getTime(), payload };
   return payload;
 }

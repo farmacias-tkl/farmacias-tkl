@@ -26,7 +26,7 @@ import type { AttentionCase, AttentionCaseKind, AttentionCasesPayload } from "./
 export const ATTENTION_CASES_MAX_ROWS = 200;
 const MS_MIN = 60_000;
 
-export const ATTENTION_CASE_KINDS: readonly AttentionCaseKind[] = ["pending", "overdue", "unanswered_same_day"];
+export const ATTENTION_CASE_KINDS: readonly AttentionCaseKind[] = ["pending", "overdue", "unanswered_same_day", "goal_missed", "slowest"];
 
 export function isAttentionCaseKind(v: unknown): v is AttentionCaseKind {
   return typeof v === "string" && (ATTENTION_CASE_KINDS as readonly string[]).includes(v);
@@ -36,6 +36,12 @@ export function isAttentionCaseKind(v: unknown): v is AttentionCaseKind {
 export function selectCases(facts: readonly EntryFact[], kind: AttentionCaseKind): EntryFact[] {
   if (kind === "pending") return facts.filter((f) => !f.firstHumanAt);
   if (kind === "overdue") return facts.filter((f) => f.goal?.group === "PENDING_OVERDUE");
+  // Las que no cumplen la meta: respondidas tarde y pendientes con el plazo vencido.
+  if (kind === "goal_missed") return facts.filter((f) => f.goal?.group === "PENDING_OVERDUE" || f.goal?.group === "ANSWERED_LATE");
+  // Las respondidas que más esperaron en tiempo hábil: las que explican la cola de la mediana.
+  if (kind === "slowest") {
+    return facts.filter((f) => f.firstHumanAt && f.goal).sort((a, b) => b.goal!.businessMinutes - a.goal!.businessMinutes).slice(0, ATTENTION_CASES_MAX_ROWS);
+  }
   return facts.filter((f) => !f.answeredSameDay);
 }
 

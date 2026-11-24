@@ -54,6 +54,17 @@ test("cada lista tiene exactamente los casos que cuenta el informe", () => {
   assert.equal(ids("pending").length, s.pending.total);
   assert.equal(ids("overdue").length, s.goal!.pendingOverdue);
   assert.equal(ids("unanswered_same_day").length, s.unansweredSameDay.total);
+  // Las que no cumplieron la meta: respondidas tarde más pendientes vencidas.
+  assert.equal(ids("goal_missed").length, s.goal!.answeredLate + s.goal!.pendingOverdue);
+  // Las que más esperaron: solo respondidas con meta, de la que más tiempo hábil esperó a la que menos.
+  const slow = selectCases(facts, "slowest");
+  assert.ok(slow.every((f) => f.firstHumanAt && f.goal));
+  assert.deepEqual(slow.map((f) => f.goal!.businessMinutes), [...slow.map((f) => f.goal!.businessMinutes)].sort((x, y) => y - x));
+  // Los nuevos conteos de la tarjeta cierran con los que ya había.
+  assert.equal(s.unansweredSameDay.answeredLater + s.unansweredSameDay.stillPending, s.unansweredSameDay.total);
+  assert.equal(s.goal!.evaluable, s.goal!.answeredWithin + s.goal!.answeredLate + s.goal!.pendingOverdue);
+  assert.equal(s.goal!.evaluable + s.goal!.pendingWithin + s.outsidePublicHours.answered + s.withoutConfig, s.entries, "evaluables más fuera del cálculo son las entradas");
+  assert.ok(s.windowClosedAnsweredLater <= s.windowClosed);
 });
 
 test("sin primera respuesta: las pendientes, vencidas o no", () => {

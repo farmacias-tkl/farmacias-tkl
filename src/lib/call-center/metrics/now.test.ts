@@ -4,7 +4,7 @@
  *   npx tsx src/lib/call-center/metrics/now.test.ts
  */
 import assert from "node:assert/strict";
-import { ownerOf, toNowPayload, type NowExtras } from "./now";
+import { ownerOf, toNowPayload, type NowExtras, attentionRank } from "./now";
 import { buildQueueSnapshot, type WaitingRow } from "./queue";
 import { buildClosedUnanswered, type ClosedBlockRow } from "./closed-unanswered";
 
@@ -37,14 +37,66 @@ test("clientes esperando: recientes hasta 72 horas; las más viejas son posibles
     open("mas-vieja", { waitStart: hoursAgo(24 * 90) }),
     row("cerrada", { waitStart: hoursAgo(10) }),
   ]);
-  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0, claims: null });
-  // Las antiguas sin señal de cierre entran en la lista, marcadas, antes que las recientes.
-  assert.deepEqual(p.list.map((i) => [i.conversationId, i.oldPending]), [["mas-vieja", true], ["vieja", true], ["otra", false], ["reciente", false]]);
-  assert.equal(p.listTotal, 4);
+  // En estas filas el cliente volvió a escribir hace 5 horas: las antiguas son de atención actual.
+  assert.deepEqual(p.waiting, { total: 2, oldPending: 2, current: 4, historical: 0, ordersUntaken: 0, queriesUnanswered: 3, criticalCurrent: null, criticalHistorical: null, neverHuman: 1, awaitingNext: 1, completedOrders: 0, critical: null, oldestWaitStart: hoursAgo(50).toISOString(), urgent: 0, insisting: 0, claims: null });
+  assert.deepEqual(p.list.map((i) => [i.conversationId, i.oldPending, i.historical]), [["mas-vieja", true, false], ["vieja", true, false], ["otra", false, false], ["reciente", false, false]]);
+  assert.deepEqual([p.listTotal, p.historicalTotal], [4, 0]);
+  // Sin un mensaje nuevo del cliente, las antiguas son históricos por verificar: aparte, no encabezan la lista.
+  const h = payload([
+    open("reciente", { waitStart: hoursAgo(2), lastCustomerAt: hoursAgo(2) }),
+    open("otra", { waitStart: hoursAgo(50), lastCustomerAt: hoursAgo(50), hasHumanResponse: true }),
+    open("vieja", { waitStart: hoursAgo(24 * 40), lastCustomerAt: hoursAgo(24 * 40) }),
+    open("mas-vieja", { waitStart: hoursAgo(24 * 90), lastCustomerAt: hoursAgo(24 * 90) }),
+    open("vieja-volvio", { waitStart: hoursAgo(24 * 50), lastCustomerAt: hoursAgo(3) }),
+  ]);
+  assert.deepEqual([h.waiting.total, h.waiting.oldPending, h.waiting.current, h.waiting.historical], [2, 3, 3, 2]);
+  assert.deepEqual(h.historicalList.map((i) => [i.conversationId, i.historical]), [["mas-vieja", true], ["vieja", true]]);
+  assert.deepEqual([h.listTotal, h.historicalTotal], [3, 2]);
+  assert.ok(h.list.every((i) => !i.historical) && h.list.some((i) => i.conversationId === "vieja-volvio"), "si el cliente escribe de nuevo, vuelve a atención actual");
+  assert.equal(h.waiting.current + h.waiting.historical, h.waiting.total + h.waiting.oldPending);
   assert.equal(p.stale.total, 2);
   assert.equal(p.stale.oldestWaitStart, hoursAgo(24 * 90).toISOString());
   assert.deepEqual(p.stale.items.map((i) => i.conversationId), ["mas-vieja", "vieja"]);
   assert.equal(p.windowHours, 72);
+});
+
+test("orden de atención actual: urgente, insistiendo, por vencer, demora crítica, pedido completo, ventana cerrada y el resto", () => {
+  const base = { alert: null, window: "ABIERTA", level: null, botOrderComplete: false, hasHumanResponse: false } as const;
+  assert.deepEqual([
+    attentionRank({ ...base, alert: "URGENTE", window: "CERRADA" }),
+    attentionRank({ ...base, alert: "INSISTIENDO" }),
+    attentionRank({ ...base, window: "POR_VENCER", level: "CRITICO" }),
+    attentionRank({ ...base, level: "CRITICO" }),
+    attentionRank({ ...base, botOrderComplete: true }),
+    attentionRank({ ...base, window: "CERRADA", level: "CRITICO" }),
+    attentionRank({ ...base, botOrderComplete: true, hasHumanResponse: true }),
+  ], [0, 1, 2, 3, 4, 5, 6]);
+  // Un caso reciente con la ventana por vencer va antes que uno con la ventana ya cerrada.
+  const p = payload([
+    open("cerrada-ayer", { waitStart: hoursAgo(30), lastCustomerAt: hoursAgo(30) }),
+    open("por-vencer", { waitStart: hoursAgo(22), lastCustomerAt: hoursAgo(22) }),
+    open("vence-antes", { waitStart: hoursAgo(23), lastCustomerAt: hoursAgo(23) }),
+    open("urgente", { waitStart: hoursAgo(1), lastCustomerAt: hoursAgo(1), urgent: true }),
+    open("pedido", { waitStart: hoursAgo(3), lastCustomerAt: hoursAgo(3), botOrderComplete: true }),
+    open("comun", { waitStart: hoursAgo(4), lastCustomerAt: hoursAgo(4) }),
+  ]);
+  assert.deepEqual(p.list.map((i) => i.conversationId), ["urgente", "vence-antes", "por-vencer", "pedido", "cerrada-ayer", "comun"]);
+});
+
+test("portada: pedidos sin tomar son los que parecen un pedido y siguen sin primera respuesta; el resto son consultas", () => {
+  const p = payload([
+    open("bot-completo", { botOrderComplete: true }),
+    open("receta", { customerSentPrescriptionLink: true }),
+    open("frase-pedido", { customerAskedOrder: true }),
+    open("consulta"),
+    open("pedido-ya-respondido", { botOrderComplete: true, hasHumanResponse: true }),
+    // Histórico por verificar: no cuenta en la portada.
+    open("pedido-historico", { botOrderComplete: true, waitStart: hoursAgo(24 * 30), lastCustomerAt: hoursAgo(24 * 30) }),
+    row("cerrada", { botOrderComplete: true }),
+  ]);
+  assert.deepEqual([p.waiting.ordersUntaken, p.waiting.queriesUnanswered], [3, 1]);
+  assert.deepEqual(Object.fromEntries(p.list.map((i) => [i.conversationId, i.orderRequest])), { "bot-completo": true, receta: true, "frase-pedido": true, consulta: false, "pedido-ya-respondido": true });
+  assert.equal(p.todayClosures, null, "sin el dato queda null, no cero");
 });
 
 test("los conteos completos de la cola no cambian: quedan en calidad de datos", () => {
@@ -57,7 +109,7 @@ test("los conteos completos de la cola no cambian: quedan en calidad de datos", 
 
 test("sin nadie esperando: cero y sin espera más larga", () => {
   const p = payload([row("cerrada")]);
-  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0, claims: null });
+  assert.deepEqual(p.waiting, { total: 0, oldPending: 0, current: 0, historical: 0, ordersUntaken: 0, queriesUnanswered: 0, criticalCurrent: null, criticalHistorical: null, neverHuman: 0, awaitingNext: 0, completedOrders: 0, critical: null, oldestWaitStart: null, urgent: 0, insisting: 0, claims: null });
   assert.deepEqual([p.list.length, p.stale.total, p.stale.oldestWaitStart], [0, 0, null]);
 });
 
@@ -110,7 +162,9 @@ test("casos antiguos: probable cierre o pendiente; ninguno desaparece del total"
   assert.deepEqual(p.list.map((i) => i.conversationId).sort(), ["gracias-foto", "pregunta", "reciente", "sin-marcas"]);
   // Con la ventana de WhatsApp cerrada son críticos y cuentan en las alertas.
   const viejos = payload(rows.map((r) => ({ ...r, lastCustomerAt: r.waitStart })), { ...NONE, openBlocks });
-  assert.deepEqual([viejos.waiting.critical, viejos.window.closed, viejos.list[0].conversationId, viejos.list[0].level], [3, 3, "sin-marcas", "CRITICO"]);
+  // Con la ventana de WhatsApp cerrada son críticos, pero históricos: no cuentan en las alertas de atención actual.
+  assert.deepEqual([viejos.waiting.critical, viejos.waiting.criticalCurrent, viejos.waiting.criticalHistorical, viejos.window.closed], [3, 0, 3, 0]);
+  assert.deepEqual([viejos.historicalList[0].conversationId, viejos.historicalList[0].level, viejos.list.map((i) => i.conversationId)], ["sin-marcas", "CRITICO", ["reciente"]]);
   // Sin las marcas no se clasifica: null, no cero.
   const sin = payload(rows);
   assert.deepEqual([sin.stale.total, sin.stale.probableClose, sin.stale.pending, sin.stale.items[0].kind], [4, null, null, null]);
@@ -137,9 +191,30 @@ test("semáforo: sale del horario y los umbrales vigentes; sin configuración qu
   const p = payload([open("ok", { waitStart: hoursAgo(0.1), botExitAt: hoursAgo(0.1) }), open("tarde", { waitStart: hoursAgo(0.5), botExitAt: hoursAgo(0.5) }), open("critico", { waitStart: hoursAgo(3), botExitAt: hoursAgo(3) })], { ...NONE, wait });
   assert.deepEqual(p.list.map((i) => [i.conversationId, i.level, i.businessMinutes]), [["critico", "CRITICO", 180], ["tarde", "DEMORADO", 30], ["ok", "EN_PLAZO", 6]]);
   assert.equal(p.waiting.critical, 1);
-  assert.deepEqual(p.schedule, { inPublicHours: true, operatorShiftActive: false, goalMinutes: 15, criticalMinutes: 60 });
+  assert.deepEqual(p.schedule, { inPublicHours: true, operatorShiftActive: false, goalMinutes: 15, criticalMinutes: 60, operatorsToday: "STARTED", operatorsStartAt: "2026-03-10T03:00:00.000Z", businessSince: null });
+  assert.ok(p.list.every((i) => !i.businessPartial), "sin fecha de inicio de la configuración no se marca nada como parcial");
   const sin = payload([open("a")]);
   assert.deepEqual([sin.schedule, sin.list[0].level, sin.list[0].businessMinutes], [null, null, null]);
+});
+
+test("horario de operadores de hoy: no hay, todavía no empezó o ya empezó", () => {
+  // NOW son las 12:00 de Buenos Aires.
+  const base = { pub: () => [{ from: 0, to: 1440 }], goalMinutes: 15, criticalMinutes: 60 };
+  const sch = (ops: () => Array<{ from: number; to: number }>) => payload([open("a")], { ...NONE, wait: { ...base, ops } }).schedule!;
+  assert.deepEqual([sch(() => []).operatorsToday, sch(() => []).operatorsStartAt], ["NONE", null]);
+  assert.deepEqual([sch(() => [{ from: 13 * 60, to: 20 * 60 }]).operatorsToday, sch(() => [{ from: 13 * 60, to: 20 * 60 }]).operatorsStartAt], ["NOT_STARTED", "2026-03-10T16:00:00.000Z"]);
+  assert.equal(sch(() => [{ from: 8 * 60, to: 11 * 60 }]).operatorsToday, "STARTED", "ya empezó, aunque haya terminado");
+});
+
+test("tiempo hábil parcial: si la espera empezó antes del primer día con horarios, cuenta solo desde ese día", () => {
+  const wait = { pub: () => [{ from: 0, to: 1440 }], ops: () => [{ from: 0, to: 1440 }], goalMinutes: 15, criticalMinutes: 60, coveredFrom: "2026-03-09" };
+  const p = payload([
+    open("antes", { waitStart: hoursAgo(24 * 10), botExitAt: hoursAgo(24 * 10), lastCustomerAt: hoursAgo(2) }),
+    open("despues", { waitStart: hoursAgo(5), botExitAt: hoursAgo(5) }),
+  ], { ...NONE, wait });
+  const by = Object.fromEntries([...p.list, ...p.historicalList].map((i) => [i.conversationId, i.businessPartial]));
+  assert.deepEqual(by, { antes: true, despues: false });
+  assert.equal(p.schedule!.businessSince, "2026-03-09");
 });
 
 test("pedidos completos sin atender: abiertas sin respuesta de una persona, también las antiguas pendientes", () => {

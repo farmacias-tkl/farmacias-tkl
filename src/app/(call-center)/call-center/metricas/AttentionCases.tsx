@@ -12,7 +12,9 @@ const dateTimeFmt = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2
 export const CASE_KIND_LABELS: Record<AttentionCaseKind, string> = {
   pending: "Sin primera respuesta",
   overdue: "Sin primera respuesta y con la meta vencida",
-  unanswered_same_day: "Sin respuesta el mismo día",
+  unanswered_same_day: "No recibieron primera respuesta el día de entrada",
+  goal_missed: "No cumplieron la meta: respondidas tarde o sin respuesta con el plazo vencido",
+  slowest: "Las respondidas que más esperaron, en tiempo hábil",
 };
 
 type State =

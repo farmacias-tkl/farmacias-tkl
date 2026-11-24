@@ -80,6 +80,14 @@ export const QUESTION_REGEX =
 export const ORDER_REQUEST_REGEX = "quiero realizar un pedido";
 
 /**
+ * Link de una receta electrónica: dominios de proveedores de recetas medidos en los mensajes
+ * de clientes. Se mira solo el dominio; el link nunca se abre. Un portal general (el de una
+ * obra social, por ejemplo) no entra: ahí puede haber cualquier cosa.
+ */
+export const PRESCRIPTION_LINK_REGEX =
+  "https?://[^[:space:]/]*(qbitos\\.com|meducar\\.com|misrx\\.com\\.ar|receto\\.com\\.ar|drapp\\.la|rcta\\.me|consultoriodigital[0-9]*\\.osde\\.com\\.ar)";
+
+/**
  * Agradecimiento o cierre: se evalúa sobre el ÚLTIMO mensaje del cliente. Sirve para separar,
  * entre las abiertas antiguas, las que probablemente quedaron resueltas y abiertas por error.
  */

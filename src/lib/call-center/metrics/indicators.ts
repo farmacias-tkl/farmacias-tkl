@@ -412,7 +412,7 @@ export const INDICATORS: readonly IndicatorDefinition[] = [
   {
     key: "unanswered_same_day",
     block: "ATENCION",
-    label: "Sin respuesta el día de entrada",
+    label: "No recibió primera respuesta el día de entrada",
     definition:
       "Conversaciones creadas en el día que terminaron ese día sin respuesta de una persona. Se muestra el " +
       "total, las que entraron dentro del horario público y las que tenían pedido completo en el bot.",

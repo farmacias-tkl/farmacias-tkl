@@ -7,6 +7,7 @@
  * abiertas con hasta `windowHours` de espera. Lo demás (abiertas viejas, cerradas, histórico
  * y calidad de datos) va aparte y no se suma a la cola.
  */
+import type { TodayClosures } from "./cover";
 import type { QueueGroupCounts } from "./queue-types";
 import type { WindowState } from "./whatsapp-window";
 import type { ClaimMotive } from "./detected-patterns";
@@ -141,8 +142,18 @@ export interface NowListItem {
   level: WaitLevel | null;
   /** Minutos hábiles de espera; null sin configuración. */
   businessMinutes: number | null;
+  /**
+   * La espera empezó antes del primer día con horarios cargados (`schedule.businessSince`):
+   * los minutos hábiles cuentan solo desde ese día, no toda la espera.
+   */
+  businessPartial: boolean;
   hasHumanResponse: boolean;
   botOrderComplete: boolean;
+  /**
+   * Parece un pedido (DETECTADO): recorrido del bot completo, link de una receta electrónica o
+   * la frase con la que llega un pedido. No lee nombres de productos: no hay catálogo.
+   */
+  orderRequest: boolean;
   thanksCandidate: boolean;
   /**
    * Motivos de reclamo DETECTADOS por palabras en los mensajes del cliente (las reglas de
@@ -155,6 +166,12 @@ export interface NowListItem {
    * un cierre. Es una detección por palabras, por eso "posible".
    */
   oldPending: boolean;
+  /**
+   * Histórico por verificar: posible pendiente antiguo en el que el cliente no volvió a
+   * escribir dentro de las últimas `windowHours`. No encabeza la lista operativa. Si el
+   * cliente escribe de nuevo deja de ser histórico y vuelve a atención actual.
+   */
+  historical: boolean;
 }
 
 /**
@@ -260,6 +277,12 @@ export interface NowPayload {
     operatorShiftActive: boolean;
     goalMinutes: number;
     criticalMinutes: number;
+    /** Horario de operadores de hoy: no hay, todavía no empezó, o ya empezó. */
+    operatorsToday: "NONE" | "NOT_STARTED" | "STARTED";
+    /** ISO. A qué hora empieza hoy el horario de operadores; null si hoy no hay. */
+    operatorsStartAt: string | null;
+    /** Primer día ("YYYY-MM-DD") con horarios cargados: el tiempo hábil no cuenta antes. null si no se sabe. */
+    businessSince: string | null;
   } | null;
   /**
    * Abiertas esperando. `total`, `neverHuman`, `awaitingNext` y `oldestWaitStart` son de las
@@ -270,6 +293,19 @@ export interface NowPayload {
     total: number;
     /** Posibles pendientes antiguos: más de `windowHours` de espera y sin señal de cierre. Se suman al total de pendientes. */
     oldPending: number;
+    /** Atención actual: los recientes más los antiguos en los que el cliente volvió a escribir hace poco. */
+    current: number;
+    /** Históricos por verificar: los posibles pendientes antiguos sin actividad reciente del cliente. current + historical = total + oldPending. */
+    historical: number;
+    /**
+     * De atención actual y sin primera respuesta: los que parecen un pedido y el resto.
+     * DETECTADO. ordersUntaken + queriesUnanswered = los de atención actual sin primera respuesta.
+     */
+    ordersUntaken: number;
+    queriesUnanswered: number;
+    /** Críticos de atención actual y críticos entre los históricos. null si `critical` es null. */
+    criticalCurrent: number | null;
+    criticalHistorical: number | null;
     /** Esperan la primera respuesta de una persona. */
     neverHuman: number;
     /** Ya les respondieron y volvieron a escribir. */
@@ -296,6 +332,9 @@ export interface NowPayload {
   list: NowListItem[];
   /** Filas de la lista antes del tope. */
   listTotal: number;
+  /** Históricos por verificar, del que más espera al que menos, hasta el tope de filas. Aparte de `list`. */
+  historicalList: NowListItem[];
+  historicalTotal: number;
   /** Abiertas con más de `windowHours` de espera. Las que siguen pendientes están además en `list`. */
   stale: {
     total: number;
@@ -329,6 +368,8 @@ export interface NowPayload {
   observed: NowObserved | null;
   /** Evolución de la cola. null si no se pudo calcular. */
   trend: NowTrend | null;
+  /** Cierres de hoy por resultado, para la portada. null si no se pudieron calcular. */
+  todayClosures: TodayClosures | null;
   /** null si no se pudo calcular. */
   progress: NowProgress | null;
   /** Lo que muestra la pestaña "Calidad de datos". */
