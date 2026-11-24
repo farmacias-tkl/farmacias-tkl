@@ -137,9 +137,10 @@ export async function loadDerivationRows(fromDay: string, toDayInclusive: string
       (SELECT lower(substring(m.body from ${afterBot})) FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND m.author = 'BOT' AND m.body ~ ${afterBot}
         ORDER BY m."sentAt" DESC, m.id DESC LIMIT 1) AS "botBranch",
-      EXISTS (SELECT 1 FROM "ConversationMessage" m
+      -- Con LIMIT 1 y no con EXISTS: el EXISTS lo resolvía recorriendo toda la tabla de mensajes (1,2 s).
+      coalesce((SELECT true FROM "ConversationMessage" m
         WHERE m."conversationId" = s.id AND ((${op} AND (m.body ~* ${ORDER_CONFIRMED_OPERATOR} OR m.body ~* ${ORDER_CLOSING_OPERATOR}))
-          OR (m.author = 'CUSTOMER' AND m.body ~* ${PAYMENT_CUSTOMER}))) AS "sold"
+          OR (m.author = 'CUSTOMER' AND m.body ~* ${PAYMENT_CUSTOMER})) LIMIT 1), false) AS "sold"
     FROM d
     JOIN scope s ON s.id = d.cid
   `);
