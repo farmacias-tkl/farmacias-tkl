@@ -235,6 +235,18 @@ async function main() {
       assert.equal(p.motives!.conversations, 6);
     });
 
+    await check("cada parte de la consulta usa menos expresiones regulares distintas que las que Postgres guarda compiladas", async () => {
+      const { kindRowsQuery, KIND_ROWS_PARTS, MAX_REGEX_PER_QUERY } = await import("./kinds");
+      const { BOUGHT_AT_TKL } = await import("./kinds-patterns");
+      for (const part of KIND_ROWS_PARTS) {
+        const q = kindRowsQuery(at("2026-03-02T00:00"), at("2026-03-03T00:00"), BOUGHT_AT_TKL, part);
+        // Los parámetros que se usan como expresión regular: los que siguen a ~*, !~* o "from".
+        const used = new Set<unknown>();
+        for (const m of q.text.matchAll(/(?:!?~\*|from)\s+\$(\d+)/g)) used.add(q.values[Number(m[1]) - 1]);
+        assert.ok(used.size > 0 && used.size <= MAX_REGEX_PER_QUERY, `${part}: ${used.size} expresiones`);
+      }
+    });
+
     await check("período y hora: lo creado fuera no entra; las 23:59 quedan en su día de Buenos Aires", async () => {
       assert.equal(by.has(ids.fuera), false);
       const p = await getKindsPayload("2026-03-02", "2026-03-04", at("2026-03-05T12:00"));
