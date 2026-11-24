@@ -415,7 +415,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
           <CoverFigure value={nf.format(w.awaitingNextCurrent ?? w.current - w.ordersUntaken - w.queriesUnanswered)} label="esperando otra respuesta" note={crit(cb?.awaitingNext, "crítico", "críticos")} />
         </dl>
         <dl className="mt-2 grid gap-x-4 gap-y-1 border-t border-gray-100 pt-2 sm:grid-cols-2">
-          <CoverFigure value={w.claims === null ? (d.partial ? "…" : "—") : nf.format(w.claims)} label="posibles reclamos abiertos" tag="Detectado por palabras" />
+          <CoverFigure value={w.claims === null ? (d.partial ? "…" : "—") : nf.format(w.claims)} label="posibles reclamos abiertos, incluidos en los anteriores" tag="Detectado por palabras" />
           <CoverFigure value={w.oldestWaitStart ? formatWait(minutesSince(w.oldestWaitStart, nowMs)).replace(/ /g, "\u00a0") : "—"} label="mayor espera entre los recientes" />
         </dl>
         <p className="mt-0.5 text-sm text-gray-800">
@@ -462,6 +462,7 @@ function CoverCard({ d, nowMs, refreshing }: { d: NowPayload; nowMs: number; ref
           tomar o clientes insistiendo; verde si no hay nada de eso. Los antiguos por verificar no cambian el color.
           {" "}Los que esperan se reparten en tres grupos que suman el total: pedidos sin tomar y consultas sin responder (todavía sin primera respuesta) y los que ya
           tuvieron una respuesta y esperan otra. Entre paréntesis, cuántos de cada grupo están en demora crítica.
+          {" "}Los posibles reclamos no son un cuarto grupo: son conversaciones que ya están contadas en alguno de los tres, y no se suman al total.
           {w.ordersUntaken > 0 ? ` De los ${nf.format(w.ordersUntaken)} pedidos sin tomar, ${nf.format(w.completedOrders)} completaron el recorrido de pedido del bot; el resto mandó una receta electrónica o la frase de pedido.` : ""}
           {" "}Pedidos sin tomar: pendientes recientes sin primera respuesta que completaron el recorrido del bot, mandaron el link de una receta electrónica o
           escribieron la frase con la que llega un pedido. Consultas sin responder: el resto de los pendientes recientes sin primera respuesta. Los dos son detectados,
