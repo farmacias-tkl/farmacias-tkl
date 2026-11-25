@@ -210,6 +210,16 @@ function assigneeTypeOf(
 }
 
 /**
+ * Estado de una conversación ABIERTA según su asignado: con una persona, ASIGNADA; sin
+ * asignado o con un bot, SIN_ASIGNAR (al bot nadie la tomó). Sin dato de tipo se asume
+ * persona, igual que al mapear el cambio de estado (hasPersonAssignee).
+ */
+export function openStatusFor(assigneeId: string | null, assigneeType: string | null): "SIN_ASIGNAR" | "ASIGNADA" {
+  return assigneeId !== null && assigneeType !== "AGENT_BOT" ? "ASIGNADA" : "SIN_ASIGNAR";
+}
+const isOpenStatus = (s: string): s is "SIN_ASIGNAR" | "ASIGNADA" => s === "SIN_ASIGNAR" || s === "ASIGNADA";
+
+/**
  * ¿El evento es anterior al que fijó el dato guardado? Los eventos de Emozion llegan
  * desordenados y cada uno trae la conversación como estaba cuando se armó.
  *  - Hora anterior a la guardada: atrasado, no pisa.
@@ -354,6 +364,12 @@ export async function applyStatusChangedFromEmozion(
   // fila del historial lleva siempre el asignado de su propio evento.
   const staleAssignee = isStaleEvent(n.assigneeEventAt, conv.externalAssigneeAt);
   if (staleAssignee) warnings.push("cambio de estado anterior al evento que fijó el asignado y las etiquetas → no se pisan");
+  // Si el asignado guardado es más nuevo que este evento y el evento deja la conversación
+  // abierta, el estado sale del asignado GUARDADO: el evento dice "abierta", pero quién la
+  // tiene lo dice el dato más nuevo. Sin esto, "la tomó una persona" seguido del cambio de
+  // estado atrasado "sale de pendiente con el bot" la dejaba SIN_ASIGNAR con una persona.
+  const status = staleAssignee && isOpenStatus(n.status) ? openStatusFor(conv.externalAssigneeId, conv.externalAssigneeType) : n.status;
+  const byStored = status !== n.status;
   const resolved = n.status === "RESUELTA";
   //  - etiqueta de cierre: si el evento trae las etiquetas y agrega una de cierre a las
   //    guardadas (closureLabelOf), ese es el resultado de la resolución y se guarda como
@@ -372,7 +388,7 @@ export async function applyStatusChangedFromEmozion(
   await tx.conversation.update({
     where: { id: conv.id },
     data: {
-      status: n.status,
+      status,
       ...(staleAssignee ? {} : { externalAssigneeId, externalAssigneeType, ...(n.assigneeEventAt ? { externalAssigneeAt: n.assigneeEventAt } : {}) }),
       closureTypeId,
       closureTypeName,
@@ -388,11 +404,13 @@ export async function applyStatusChangedFromEmozion(
     data: {
       conversationId: conv.id,
       fromStatus: from,
-      toStatus: n.status,
+      toStatus: status,
       changedByUserId: null,
       note: "Cambio de estado de Emozion (webhook)",
-      externalAssigneeId,
-      externalAssigneeType,
+      // La fila lleva el asignado de su propio evento, salvo cuando el estado salió del
+      // asignado guardado: ahí lleva ese, que es el que explica el estado.
+      externalAssigneeId: byStored ? conv.externalAssigneeId : externalAssigneeId,
+      externalAssigneeType: byStored ? conv.externalAssigneeType : externalAssigneeType,
       closureTypeId,
       closureTypeName,
       ...(resolved ? { externalLabelsSeen: labelsSeen } : {}),
@@ -402,9 +420,18 @@ export async function applyStatusChangedFromEmozion(
 }
 
 /**
- * Aplica un conversation_updated: SOLO tipo de cierre, asignado y etiquetas. No crea mensajes, no cambia
- * el estado y no agrega filas al historial, así que varios eventos seguidos son idempotentes.
+ * Aplica un conversation_updated: SOLO tipo de cierre, asignado y etiquetas. No crea mensajes.
+ * El estado cambia en un único caso, el de abajo ("Estado"); fuera de ese caso no agrega filas
+ * al historial, así que varios eventos seguidos son idempotentes.
  *
+ *  - Estado: con la conversación ABIERTA (SIN_ASIGNAR o ASIGNADA), el cambio de asignado la
+ *    mueve entre esos dos estados (openStatusFor): pasa a una persona, ASIGNADA; queda sin
+ *    asignado o con un bot, SIN_ASIGNAR. Es lo que pasa cuando un operador toma una
+ *    conversación que salió del menú con el bot asignado: Emozion lo avisa por acá y no con
+ *    un cambio de estado. Si el estado cambia se agrega UNA fila al historial, con la hora
+ *    del evento y el asignado; si no cambia (reasignación entre personas, evento repetido)
+ *    no se agrega nada. Un evento atrasado no cambia el estado. Una conversación PENDIENTE o
+ *    RESUELTA no cambia de estado por este evento.
  *  - Tipo de cierre: se guarda si la conversación está RESUELTA, o si el propio evento dice
  *    que está resuelta (llegó antes que el cambio de estado; ese cambio lo conserva). Si ya
  *    está RESUELTA se completa también la última fila RESUELTA del historial. Un evento sin
@@ -444,6 +471,8 @@ export async function applyConversationUpdatedFromEmozion(
   }
 
   const data: Prisma.ConversationUpdateInput = {};
+  // Cambio de estado por cambio de asignado (ver "Estado" arriba). null = no cambia.
+  let openStatus: { to: "SIN_ASIGNAR" | "ASIGNADA"; assigneeId: string | null; assigneeType: string | null } | null = null;
   // Atrasado: anterior al evento que fijó el asignado y la lista actual de etiquetas. No los
   // pisa. Las etiquetas VISTAS se suman igual más abajo: no dependen del orden.
   const stale = isStaleEvent(n.assigneeEventAt, conv.externalAssigneeAt);
@@ -454,6 +483,13 @@ export async function applyConversationUpdatedFromEmozion(
       if (n.externalAssigneeId !== conv.externalAssigneeId) data.externalAssigneeId = n.externalAssigneeId;
       const type = assigneeTypeOf(n.externalAssigneeId, n.externalAssigneeType, conv);
       if (type !== conv.externalAssigneeType) data.externalAssigneeType = type;
+      if (isOpenStatus(conv.status)) {
+        const to = openStatusFor(n.externalAssigneeId, type);
+        if (to !== conv.status) {
+          data.status = to;
+          openStatus = { to, assigneeId: n.externalAssigneeId, assigneeType: type };
+        }
+      }
     }
     if (n.labels && !sameList(n.labels, conv.externalLabels)) data.externalLabels = n.labels;
     if ((n.assigneePresent || n.labels) && n.assigneeEventAt && n.assigneeEventAt.getTime() !== conv.externalAssigneeAt?.getTime()) data.externalAssigneeAt = n.assigneeEventAt;
@@ -497,6 +533,32 @@ export async function applyConversationUpdatedFromEmozion(
     }
   }
   if (Object.keys(data).length > 0) await tx.conversation.update({ where: { id: conv.id }, data });
+
+  if (openStatus) {
+    // La hora de la fila es la del evento. Las demás filas llevan la hora en que se procesó
+    // su evento, que es unos instantes posterior: si la de este evento quedara antes de la
+    // última fila, el historial se leería al revés, así que va justo después de esa fila.
+    const prev = await tx.conversationStateHistory.findFirst({
+      where: { conversationId: conv.id },
+      orderBy: [{ changedAt: "desc" }, { id: "desc" }],
+      select: { changedAt: true },
+    });
+    const changedAt = n.assigneeEventAt && prev && n.assigneeEventAt.getTime() <= prev.changedAt.getTime()
+      ? new Date(prev.changedAt.getTime() + 1)
+      : n.assigneeEventAt ?? undefined;
+    await tx.conversationStateHistory.create({
+      data: {
+        conversationId: conv.id,
+        fromStatus: conv.status,
+        toStatus: openStatus.to,
+        changedByUserId: null,
+        ...(changedAt ? { changedAt } : {}),
+        note: "Cambio de asignado de Emozion (webhook)",
+        externalAssigneeId: openStatus.assigneeId,
+        externalAssigneeType: openStatus.assigneeType,
+      },
+    });
+  }
 
   if ((eventHasClosure || labelsSeen) && isResolved) {
     // Completa la fila de ESTA resolución; no agrega una fila nueva.
