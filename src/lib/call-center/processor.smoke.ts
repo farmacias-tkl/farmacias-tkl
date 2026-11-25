@@ -695,6 +695,42 @@ async function main() {
       assert.deepEqual([row.fromStatus, row.toStatus, row.externalAssigneeId, row.externalAssigneeType], ["PENDIENTE", "ASIGNADA", "80", "USER"], "la fila lleva el asignado que explica el estado");
     });
 
+    await check("5y2g. asignado SIN tipo que es una cuenta de sistema de la configuración: SIN_ASIGNAR; sin tipo y sin estar en la configuración: persona", async () => {
+      // La configuración vigente marca la cuenta 9037 (inventada) como de sistema.
+      const cfg = await prisma.callCenterMetricsConfig.findFirst({ orderBy: { validFrom: "desc" } });
+      const SYS = { externalId: "9037", alias: "Cuenta de sistema inventada", active: true, borrowed: false, historical: false, system: true };
+      await prisma.callCenterMetricsConfig.update({ where: { id: cfg!.id }, data: { data: { ...(cfg!.data as object), accounts: [SYS] } } });
+      resetClosureLabelsCache();
+      const S = OPN + 2;
+      await run(rawOpn(S, "conversation_created", "pending", null, O(0)));
+      // Sale de pendiente con la cuenta de sistema como asignado y el evento no dice el tipo.
+      await run(rawOpn(S, "conversation_status_changed", "open", { id: 9037 }, O(10)));
+      let c = await convOpn(S);
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.externalAssigneeType], ["SIN_ASIGNAR", "9037", null]);
+      // La toma una cuenta sin tipo que no es de sistema: persona.
+      await run(rawOpn(S, "conversation_updated", "open", { id: 80 }, O(20)));
+      c = await convOpn(S);
+      const filas = c!.stateHistory.length;
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory[filas - 1].toStatus], ["ASIGNADA", "80", "ASIGNADA"]);
+      // Vuelve a la cuenta de sistema, sin tipo: SIN_ASIGNAR, con su fila.
+      await run(rawOpn(S, "conversation_updated", "open", { id: 9037 }, O(30)));
+      c = await convOpn(S);
+      let row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.stateHistory.length, row.toStatus, row.externalAssigneeId, row.externalAssigneeType], ["SIN_ASIGNAR", filas + 1, "SIN_ASIGNAR", "9037", null]);
+      // El mismo número con tipo USER es una persona: el evento manda.
+      await run(rawOpn(S, "conversation_updated", "open", { id: 9037, type: "User" }, O(40)));
+      c = await convOpn(S);
+      row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.stateHistory.length, row.externalAssigneeType], ["ASIGNADA", filas + 2, "USER"]);
+      // Sin la marca de sistema en la configuración, la misma cuenta sin tipo cuenta como persona.
+      await prisma.callCenterMetricsConfig.update({ where: { id: cfg!.id }, data: { data: cfg!.data as object } });
+      resetClosureLabelsCache();
+      const N = OPN + 3;
+      await run(rawOpn(N, "conversation_created", "pending", null, O(0)));
+      await run(rawOpn(N, "conversation_status_changed", "open", { id: 9037 }, O(10)));
+      assert.equal((await convOpn(N))!.status, "ASIGNADA");
+    });
+
     // 5z. Confiabilidad: un evento solo queda PROCESSED si su efecto quedó aplicado.
     const { retryPendingEvents } = await import("./processor");
     const U = (sec: number) => ({ updated_at: new Date(Date.UTC(2026, 5, 21, 12, 0, sec)).toISOString() });

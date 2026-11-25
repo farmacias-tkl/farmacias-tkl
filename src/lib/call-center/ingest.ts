@@ -192,6 +192,7 @@ export async function upsertMessageFromEmozion(
 }
 
 const NO_CLOSURE_LABELS: ReadonlySet<string> = new Set();
+const NO_SYSTEM_ACCOUNTS: ReadonlySet<string> = new Set();
 /** Un conversation_updated tan anterior a la última reapertura no suma etiquetas vistas. */
 const LABELS_STALE_MARGIN_MS = 60_000;
 /**
@@ -211,11 +212,21 @@ function assigneeTypeOf(
 
 /**
  * Estado de una conversación ABIERTA según su asignado: con una persona, ASIGNADA; sin
- * asignado o con un bot, SIN_ASIGNAR (al bot nadie la tomó). Sin dato de tipo se asume
- * persona, igual que al mapear el cambio de estado (hasPersonAssignee).
+ * asignado o con un bot, SIN_ASIGNAR (al bot nadie la tomó).
+ *
+ * Asignado SIN dato de tipo: antes de tomarlo como persona se mira la configuración. Si el id
+ * es una cuenta de sistema (`systemAccounts`), no es una persona y queda SIN_ASIGNAR. Si no
+ * lo es, se asume persona. Con tipo USER el evento manda: bots y usuarios tienen numeraciones
+ * separadas, y un usuario puede tener el mismo número que una cuenta de sistema.
  */
-export function openStatusFor(assigneeId: string | null, assigneeType: string | null): "SIN_ASIGNAR" | "ASIGNADA" {
-  return assigneeId !== null && assigneeType !== "AGENT_BOT" ? "ASIGNADA" : "SIN_ASIGNAR";
+export function openStatusFor(
+  assigneeId: string | null,
+  assigneeType: string | null,
+  systemAccounts: ReadonlySet<string> = NO_SYSTEM_ACCOUNTS,
+): "SIN_ASIGNAR" | "ASIGNADA" {
+  if (assigneeId === null || assigneeType === "AGENT_BOT") return "SIN_ASIGNAR";
+  if (assigneeType === null && systemAccounts.has(assigneeId)) return "SIN_ASIGNAR";
+  return "ASIGNADA";
 }
 const isOpenStatus = (s: string): s is "SIN_ASIGNAR" | "ASIGNADA" => s === "SIN_ASIGNAR" || s === "ASIGNADA";
 
@@ -292,6 +303,8 @@ export async function applyStatusChangedFromEmozion(
   n: NormalizedStatusEvent,
   // Etiquetas que la configuración vigente define como de cierre. Vacío = ninguna.
   closureLabels: ReadonlySet<string> = NO_CLOSURE_LABELS,
+  // Cuentas de sistema de la configuración vigente (ver openStatusFor). Vacío = ninguna.
+  systemAccounts: ReadonlySet<string> = NO_SYSTEM_ACCOUNTS,
 ): Promise<ApplyStatusResult> {
   const warnings: string[] = [];
   await lockConversation(tx, n.externalConversationId);
@@ -364,12 +377,17 @@ export async function applyStatusChangedFromEmozion(
   // fila del historial lleva siempre el asignado de su propio evento.
   const staleAssignee = isStaleEvent(n.assigneeEventAt, conv.externalAssigneeAt);
   if (staleAssignee) warnings.push("cambio de estado anterior al evento que fijó el asignado y las etiquetas → no se pisan");
-  // Si el asignado guardado es más nuevo que este evento y el evento deja la conversación
-  // abierta, el estado sale del asignado GUARDADO: el evento dice "abierta", pero quién la
-  // tiene lo dice el dato más nuevo. Sin esto, "la tomó una persona" seguido del cambio de
-  // estado atrasado "sale de pendiente con el bot" la dejaba SIN_ASIGNAR con una persona.
-  const status = staleAssignee && isOpenStatus(n.status) ? openStatusFor(conv.externalAssigneeId, conv.externalAssigneeType) : n.status;
-  const byStored = status !== n.status;
+  // Si el evento deja la conversación abierta, cuál de los dos estados abiertos le toca sale
+  // del asignado vigente (openStatusFor), que mira también las cuentas de sistema:
+  //  - el del evento, normalmente;
+  //  - el GUARDADO, si es más nuevo que este evento: el evento dice "abierta", pero quién la
+  //    tiene lo dice el dato más nuevo. Sin esto, "la tomó una persona" seguido del cambio de
+  //    estado atrasado "sale de pendiente con el bot" la dejaba SIN_ASIGNAR con una persona.
+  const open = isOpenStatus(n.status);
+  const eventStatus = open ? openStatusFor(externalAssigneeId, externalAssigneeType, systemAccounts) : n.status;
+  const status = open && staleAssignee ? openStatusFor(conv.externalAssigneeId, conv.externalAssigneeType, systemAccounts) : eventStatus;
+  // El asignado guardado cambió el estado que daba el evento: la fila lo lleva (ver abajo).
+  const byStored = status !== eventStatus;
   const resolved = n.status === "RESUELTA";
   //  - etiqueta de cierre: si el evento trae las etiquetas y agrega una de cierre a las
   //    guardadas (closureLabelOf), ese es el resultado de la resolución y se guarda como
@@ -426,7 +444,8 @@ export async function applyStatusChangedFromEmozion(
  *
  *  - Estado: con la conversación ABIERTA (SIN_ASIGNAR o ASIGNADA), el cambio de asignado la
  *    mueve entre esos dos estados (openStatusFor): pasa a una persona, ASIGNADA; queda sin
- *    asignado o con un bot, SIN_ASIGNAR. Es lo que pasa cuando un operador toma una
+ *    asignado, con un bot o, si el evento no dice el tipo, con una cuenta de sistema de la
+ *    configuración, SIN_ASIGNAR. Es lo que pasa cuando un operador toma una
  *    conversación que salió del menú con el bot asignado: Emozion lo avisa por acá y no con
  *    un cambio de estado. Si el estado cambia se agrega UNA fila al historial, con la hora
  *    del evento y el asignado; si no cambia (reasignación entre personas, evento repetido)
@@ -459,6 +478,8 @@ export async function applyConversationUpdatedFromEmozion(
   tx: Prisma.TransactionClient,
   n: NormalizedUpdateEvent,
   closureLabels: ReadonlySet<string> = NO_CLOSURE_LABELS,
+  // Cuentas de sistema de la configuración vigente (ver openStatusFor). Vacío = ninguna.
+  systemAccounts: ReadonlySet<string> = NO_SYSTEM_ACCOUNTS,
 ): Promise<ApplyStatusResult> {
   const warnings: string[] = [];
   await lockConversation(tx, n.externalConversationId);
@@ -484,7 +505,7 @@ export async function applyConversationUpdatedFromEmozion(
       const type = assigneeTypeOf(n.externalAssigneeId, n.externalAssigneeType, conv);
       if (type !== conv.externalAssigneeType) data.externalAssigneeType = type;
       if (isOpenStatus(conv.status)) {
-        const to = openStatusFor(n.externalAssigneeId, type);
+        const to = openStatusFor(n.externalAssigneeId, type, systemAccounts);
         if (to !== conv.status) {
           data.status = to;
           openStatus = { to, assigneeId: n.externalAssigneeId, assigneeType: type };
