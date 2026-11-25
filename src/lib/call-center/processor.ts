@@ -8,7 +8,7 @@ import {
 } from "./ingest";
 import { parseTransientSourceUrls } from "./attachment-source";
 import { safeErrorCode } from "./safe-error";
-import { loadClosureLabels } from "./closure-labels";
+import { loadClosureLabels, loadSystemAccounts } from "./closure-labels";
 import type { NormalizedConversation, NormalizedMessage, NormalizedStatusEvent, NormalizedUpdateEvent } from "./emozion-types";
 
 /**
@@ -179,10 +179,11 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
   if (!ev) return { status: "ERROR", outcome: "error", warnings: [], error: "WebhookEvent no encontrado" };
 
   const warnings: string[] = [];
-  // Etiquetas de cierre de la configuración vigente: solo hacen falta para estos dos eventos.
-  const closureLabels = ev.eventType === "conversation_status_changed" || ev.eventType === "conversation_updated"
-    ? await loadClosureLabels()
-    : new Set<string>();
+  // Etiquetas de cierre y cuentas de sistema de la configuración vigente: solo hacen falta
+  // para estos dos eventos.
+  const usesConfig = ev.eventType === "conversation_status_changed" || ev.eventType === "conversation_updated";
+  const closureLabels = usesConfig ? await loadClosureLabels() : new Set<string>();
+  const systemAccounts = usesConfig ? await loadSystemAccounts() : new Set<string>();
   let domainOk = false;
   let outcome: DomainOutcome = "processed";
   let errorMsg: string | null = null;
@@ -234,7 +235,7 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
           break;
         }
         case "conversation_status_changed": {
-          const r = await applyStatusChangedFromEmozion(tx, hydrateStatusEvent(payload.statusEvent), closureLabels);
+          const r = await applyStatusChangedFromEmozion(tx, hydrateStatusEvent(payload.statusEvent), closureLabels, systemAccounts);
           warnings.push(...r.warnings);
           // status change sobre conversación inexistente (fuera de orden).
           if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", "STATUS_OUT_OF_ORDER");
@@ -242,7 +243,7 @@ export async function processWebhookEvent(webhookEventId: string): Promise<Proce
         }
         case "conversation_updated": {
           // Solo tipo de cierre, asignado y etiquetas: sin mensajes, sin cambio de estado, sin filas nuevas.
-          const r = await applyConversationUpdatedFromEmozion(tx, hydrateUpdateEvent(payload.updateEvent), closureLabels);
+          const r = await applyConversationUpdatedFromEmozion(tx, hydrateUpdateEvent(payload.updateEvent), closureLabels, systemAccounts);
           warnings.push(...r.warnings);
           // Llegó antes que el alta de la conversación: queda pendiente, no se da por procesado.
           if (r.outcome === "needsRetry") throw new ProcessError("needsRetry", "UPDATE_OUT_OF_ORDER");

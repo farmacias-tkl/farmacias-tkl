@@ -612,6 +612,125 @@ async function main() {
       assert.deepEqual([c!.externalAssigneeId, c!.externalAssigneeAt?.toISOString()], ["81", T(30).updated_at]);
     });
 
+    // 5y2. Estado según el asignado, en una conversación abierta (datos inventados).
+    const OPN = 39865;
+    const O = (sec: number) => ({ updated_at: new Date(Date.UTC(2026, 5, 22, 12, 0, sec)).toISOString() });
+    const rawOpn = (id: number, event: string, status: string, assignee: { id: number; type?: string } | null, extra: Record<string, unknown> = {}) => {
+      const base = rawConvCreated(id, "+5491100000013", "Cliente Ficticio Estado", status, [], null, event);
+      return { ...base, meta: { ...base.meta, assignee: assignee ? { id: assignee.id } : null, ...(assignee?.type ? { assignee_type: assignee.type } : {}) }, ...extra };
+    };
+    const convOpn = (id = OPN) => prisma.conversation.findUnique({ where: { externalConversationId: String(id) }, include: { stateHistory: { orderBy: [{ changedAt: "asc" }, { id: "asc" }] } } });
+    const BOT = { id: 37, type: "AgentBot" };
+    await check("5y2a. sale de pendiente con el bot (SIN_ASIGNAR) y la toma una persona: ASIGNADA, con una fila a la hora del evento", async () => {
+      await run(rawOpn(OPN, "conversation_created", "pending", BOT, O(0)));
+      await run(rawOpn(OPN, "conversation_status_changed", "open", BOT, O(10)));
+      let c = await convOpn();
+      assert.deepEqual([c!.status, c!.externalAssigneeType], ["SIN_ASIGNAR", "AGENT_BOT"]);
+      const filas = c!.stateHistory.length;
+      // El evento tiene una hora anterior a la fila previa (que lleva la hora de procesamiento):
+      // la fila nueva queda igual al final del historial.
+      await run(rawOpn(OPN, "conversation_updated", "open", { id: 80, type: "User" }, O(30)));
+      c = await convOpn();
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.externalAssigneeType, c!.stateHistory.length], ["ASIGNADA", "80", "USER", filas + 1]);
+      const row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([row.fromStatus, row.toStatus, row.externalAssigneeId, row.externalAssigneeType, row.changedByUserId], ["SIN_ASIGNAR", "ASIGNADA", "80", "USER", null]);
+      assert.deepEqual(c!.stateHistory.map((h) => h.toStatus), ["PENDIENTE", "SIN_ASIGNAR", "ASIGNADA"], "el orden del historial se conserva");
+    });
+    await check("5y2b. reasignación entre personas y evento repetido: sin fila nueva", async () => {
+      const filas = (await convOpn())!.stateHistory.length;
+      await run(rawOpn(OPN, "conversation_updated", "open", { id: 81, type: "User" }, O(40)));
+      await run(rawOpn(OPN, "conversation_updated", "open", { id: 81, type: "User" }, O(40)));
+      const c = await convOpn();
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory.length], ["ASIGNADA", "81", filas]);
+    });
+    await check("5y2c. evento atrasado: no cambia el estado ni agrega fila", async () => {
+      const filas = (await convOpn())!.stateHistory.length;
+      await run(rawOpn(OPN, "conversation_updated", "open", null, O(35)));
+      await run(rawOpn(OPN, "conversation_updated", "open", BOT, O(20)));
+      const c = await convOpn();
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory.length], ["ASIGNADA", "81", filas]);
+    });
+    await check("5y2d. desasignación: SIN_ASIGNAR con su fila; vuelve al bot: sigue SIN_ASIGNAR sin fila; otra persona: ASIGNADA", async () => {
+      const filas = (await convOpn())!.stateHistory.length;
+      await run(rawOpn(OPN, "conversation_updated", "open", null, O(50)));
+      let c = await convOpn();
+      let row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory.length], ["SIN_ASIGNAR", null, filas + 1]);
+      assert.deepEqual([row.fromStatus, row.toStatus, row.externalAssigneeId, row.externalAssigneeType], ["ASIGNADA", "SIN_ASIGNAR", null, null]);
+      await run(rawOpn(OPN, "conversation_updated", "open", BOT, O(55)));
+      c = await convOpn();
+      assert.deepEqual([c!.status, c!.externalAssigneeType, c!.stateHistory.length], ["SIN_ASIGNAR", "AGENT_BOT", filas + 1]);
+      // Mismo bot y el evento no dice el tipo: sigue siendo el bot.
+      await run(rawOpn(OPN, "conversation_updated", "open", { id: 37 }, O(56)));
+      assert.deepEqual([(await convOpn())!.status, (await convOpn())!.stateHistory.length], ["SIN_ASIGNAR", filas + 1]);
+      await run(rawOpn(OPN, "conversation_updated", "open", { id: 80, type: "User" }, O(60)));
+      c = await convOpn();
+      row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.stateHistory.length, row.toStatus], ["ASIGNADA", filas + 2, "ASIGNADA"]);
+      // De una persona al bot: SIN_ASIGNAR.
+      await run(rawOpn(OPN, "conversation_updated", "open", BOT, O(65)));
+      c = await convOpn();
+      row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.stateHistory.length, row.toStatus, row.externalAssigneeType], ["SIN_ASIGNAR", filas + 3, "SIN_ASIGNAR", "AGENT_BOT"]);
+    });
+    await check("5y2e. conversación RESUELTA o PENDIENTE: el cambio de asignado se guarda pero no cambia el estado", async () => {
+      await run(rawOpn(OPN, "conversation_status_changed", "resolved", { id: 80, type: "User" }, O(70)));
+      const filas = (await convOpn())!.stateHistory.length;
+      await run(rawOpn(OPN, "conversation_updated", "resolved", { id: 81, type: "User" }, O(80)));
+      await run(rawOpn(OPN, "conversation_updated", "resolved", null, O(81)));
+      let c = await convOpn();
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory.length], ["RESUELTA", null, filas]);
+      const P = OPN + 1;
+      await run(rawOpn(P, "conversation_created", "pending", BOT, O(0)));
+      await run(rawOpn(P, "conversation_updated", "pending", { id: 80, type: "User" }, O(5)));
+      c = await convOpn(P);
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory.length], ["PENDIENTE", "80", 1]);
+    });
+    await check("5y2f. la toma una persona y DESPUÉS llega el cambio de estado anterior (sale de pendiente con el bot): queda ASIGNADA", async () => {
+      const P = OPN + 1; // PENDIENTE, con la persona 80 asignada en el segundo 5.
+      await run(rawOpn(P, "conversation_status_changed", "open", BOT, O(3)));
+      const c = await convOpn(P);
+      const row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.externalAssigneeType], ["ASIGNADA", "80", "USER"]);
+      assert.deepEqual([row.fromStatus, row.toStatus, row.externalAssigneeId, row.externalAssigneeType], ["PENDIENTE", "ASIGNADA", "80", "USER"], "la fila lleva el asignado que explica el estado");
+    });
+
+    await check("5y2g. asignado SIN tipo que es una cuenta de sistema de la configuración: SIN_ASIGNAR; sin tipo y sin estar en la configuración: persona", async () => {
+      // La configuración vigente marca la cuenta 9037 (inventada) como de sistema.
+      const cfg = await prisma.callCenterMetricsConfig.findFirst({ orderBy: { validFrom: "desc" } });
+      const SYS = { externalId: "9037", alias: "Cuenta de sistema inventada", active: true, borrowed: false, historical: false, system: true };
+      await prisma.callCenterMetricsConfig.update({ where: { id: cfg!.id }, data: { data: { ...(cfg!.data as object), accounts: [SYS] } } });
+      resetClosureLabelsCache();
+      const S = OPN + 2;
+      await run(rawOpn(S, "conversation_created", "pending", null, O(0)));
+      // Sale de pendiente con la cuenta de sistema como asignado y el evento no dice el tipo.
+      await run(rawOpn(S, "conversation_status_changed", "open", { id: 9037 }, O(10)));
+      let c = await convOpn(S);
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.externalAssigneeType], ["SIN_ASIGNAR", "9037", null]);
+      // La toma una cuenta sin tipo que no es de sistema: persona.
+      await run(rawOpn(S, "conversation_updated", "open", { id: 80 }, O(20)));
+      c = await convOpn(S);
+      const filas = c!.stateHistory.length;
+      assert.deepEqual([c!.status, c!.externalAssigneeId, c!.stateHistory[filas - 1].toStatus], ["ASIGNADA", "80", "ASIGNADA"]);
+      // Vuelve a la cuenta de sistema, sin tipo: SIN_ASIGNAR, con su fila.
+      await run(rawOpn(S, "conversation_updated", "open", { id: 9037 }, O(30)));
+      c = await convOpn(S);
+      let row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.stateHistory.length, row.toStatus, row.externalAssigneeId, row.externalAssigneeType], ["SIN_ASIGNAR", filas + 1, "SIN_ASIGNAR", "9037", null]);
+      // El mismo número con tipo USER es una persona: el evento manda.
+      await run(rawOpn(S, "conversation_updated", "open", { id: 9037, type: "User" }, O(40)));
+      c = await convOpn(S);
+      row = c!.stateHistory[c!.stateHistory.length - 1];
+      assert.deepEqual([c!.status, c!.stateHistory.length, row.externalAssigneeType], ["ASIGNADA", filas + 2, "USER"]);
+      // Sin la marca de sistema en la configuración, la misma cuenta sin tipo cuenta como persona.
+      await prisma.callCenterMetricsConfig.update({ where: { id: cfg!.id }, data: { data: cfg!.data as object } });
+      resetClosureLabelsCache();
+      const N = OPN + 3;
+      await run(rawOpn(N, "conversation_created", "pending", null, O(0)));
+      await run(rawOpn(N, "conversation_status_changed", "open", { id: 9037 }, O(10)));
+      assert.equal((await convOpn(N))!.status, "ASIGNADA");
+    });
+
     // 5z. Confiabilidad: un evento solo queda PROCESSED si su efecto quedó aplicado.
     const { retryPendingEvents } = await import("./processor");
     const U = (sec: number) => ({ updated_at: new Date(Date.UTC(2026, 5, 21, 12, 0, sec)).toISOString() });
